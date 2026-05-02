@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="MW-GC.EventManager.API/MW-GC.EventManager.API.csproj">
+    <BuildDependency Project="MW-GC.EventManager.Shared/MW-GC.EventManager.Shared.csproj" />
+  </Project>
+  <Project Path="MW-GC.EventManager.Shared/MW-GC.EventManager.Shared.csproj" />
+  <Project Path="MW-GC.EventManager.Web/MW-GC.EventManager.Web.csproj" />
+</Solution>
