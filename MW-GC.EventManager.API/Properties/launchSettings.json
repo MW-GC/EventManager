@@ -1,9 +1,0 @@
-{
-  "profiles": {
-    "MW_GC.EventManager.API": {
-      "commandName": "Project",
-      "commandLineArgs": "--port 7112",
-      "launchBrowser": false
-    }
-  }
-}

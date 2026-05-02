@@ -1,0 +1,351 @@
+@page "/activities"
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@inject ActivityService ActivitySvc
+@inject GameService GameSvc
+@inject ThemeService ThemeSvc
+@inject HolidayService HolidaySvc
+
+<PageHeader Title="Activities" Subtitle="Manage game activities, rules, and descriptions" />
+
+<FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
+    @if (_activities is null)
+    {
+        <FluentCard>
+            <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
+                <FluentProgressRing />
+                <FluentLabel>Loading activities...</FluentLabel>
+            </div>
+        </FluentCard>
+    }
+    else
+    {
+        <FluentCard Style="overflow: visible;">
+            <FluentStack Orientation="Orientation.Horizontal"
+                         HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+                         VerticalAlignment="VerticalAlignment.Center"
+                         Style="margin-bottom: 16px;"
+                         Wrap="true">
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                    <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search activities..." />
+                    <FluentSelect TOption="GameEntity"
+                                  Items="@_games"
+                                  OptionValue="@(g => g.Id.ToString())"
+                                  OptionText="@(g => g.Name)"
+                                  @bind-SelectedOption="_filterGame"
+                                  @bind-SelectedOption:after="HandleSearch"
+                                  Placeholder="All games"
+                                  Style="min-width: 180px;" />
+                </FluentStack>
+                <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())">
+                    Add Activity
+                </FluentButton>
+            </FluentStack>
+
+            <FluentDataGrid Items="@Filtered" TGridItem="ActivityEntity" Virtualize="true" ItemSize="44">
+                <PropertyColumn Property="@(a => a.Name)" Title="Name" Sortable="true" />
+                <TemplateColumn Title="Game" Sortable="true">
+                    @{ var game = _games?.FirstOrDefault(g => g.Id == context.GameId); }
+                    @(game?.Name ?? "—")
+                </TemplateColumn>
+                <TemplateColumn Title="Tags">
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Wrap="true">
+                        @foreach (var tid in context.ThemeIds)
+                        {
+                            <FluentBadge Appearance="Appearance.Neutral" Style="font-size: 0.7rem;">@ResolveName(_themes, tid)</FluentBadge>
+                        }
+                        @foreach (var hid in context.HolidayIds)
+                        {
+                            <FluentBadge Appearance="Appearance.Accent" Style="font-size: 0.7rem;">@ResolveName(_holidays, hid)</FluentBadge>
+                        }
+                    </FluentStack>
+                </TemplateColumn>
+                <TemplateColumn Title="Actions">
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" OnClick="@(() => ShowDetails(context))">
+                            <FluentIcon Value="@(new Size16.Eye())" />
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" OnClick="@(() => ShowEdit(context))">
+                            <FluentIcon Value="@(new Size16.Edit())" />
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Duplicate" OnClick="@(() => Duplicate(context.Id))">
+                            <FluentIcon Value="@(new Size16.Copy())" />
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" OnClick="@(() => Delete(context.Id))">
+                            <FluentIcon Value="@(new Size16.Delete())" />
+                        </FluentButton>
+                    </FluentStack>
+                </TemplateColumn>
+            </FluentDataGrid>
+        </FluentCard>
+    }
+</FluentStack>
+
+@* Details dialog — sectioned like the original with editable comments *@
+@if (_detailActivity is not null)
+{
+    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 680px;" OnDismiss="@((DialogEventArgs _) => _detailActivity = null)">
+        <FluentDialogBody>
+            <FluentLabel Typo="Typography.H3" Style="margin-bottom: 4px;">@_detailActivity.Name</FluentLabel>
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="6" Style="margin-bottom: 16px;">
+                <FluentIcon Value="@(new Size16.XboxController())" Color="Color.Neutral" />
+                <FluentLabel Style="color: var(--neutral-foreground-hint);">@(_games?.FirstOrDefault(g => g.Id == _detailActivity.GameId)?.Name ?? "—")</FluentLabel>
+            </FluentStack>
+
+            @if (_detailActivity.ThemeIds.Count > 0 || _detailActivity.HolidayIds.Count > 0)
+            {
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="6" Wrap="true" Style="margin-bottom: 16px;">
+                    @foreach (var tid in _detailActivity.ThemeIds)
+                    {
+                        <FluentBadge Appearance="Appearance.Neutral">@ResolveName(_themes, tid)</FluentBadge>
+                    }
+                    @foreach (var hid in _detailActivity.HolidayIds)
+                    {
+                        <FluentBadge Appearance="Appearance.Accent">@ResolveName(_holidays, hid)</FluentBadge>
+                    }
+                </FluentStack>
+            }
+
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+                @if (!string.IsNullOrWhiteSpace(_detailActivity.Description))
+                {
+                    <div>
+                        <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Description</FluentLabel>
+                        <FluentLabel Style="color: var(--neutral-foreground-rest); line-height: 1.6; white-space: pre-wrap;">@_detailActivity.Description</FluentLabel>
+                    </div>
+                }
+
+                <FluentDivider />
+
+                @if (!string.IsNullOrWhiteSpace(_detailActivity.Rules))
+                {
+                    <div>
+                        <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Rules</FluentLabel>
+                        <FluentLabel Style="color: var(--neutral-foreground-rest); line-height: 1.6; white-space: pre-wrap;">@_detailActivity.Rules</FluentLabel>
+                    </div>
+                }
+
+                <FluentDivider />
+
+                @if (!string.IsNullOrWhiteSpace(_detailActivity.SetupRequirements))
+                {
+                    <div>
+                        <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Setup Requirements</FluentLabel>
+                        <FluentLabel Style="color: var(--neutral-foreground-rest); line-height: 1.6; white-space: pre-wrap;">@_detailActivity.SetupRequirements</FluentLabel>
+                    </div>
+                }
+
+                <FluentDivider />
+
+                <div>
+                    <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments</FluentLabel>
+                    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px;">Track notes about this activity's performance in events</FluentLabel>
+                    <FluentTextArea @bind-Value="_detailComments" @bind-Value:after="OnDetailCommentsChanged" Style="width: 100%;" Rows="4"
+                                    Placeholder="Add notes about success, challenges, or improvements..." />
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.Start" Style="margin-top: 8px;">
+                        <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Disabled="@(!_detailCommentsDirty)" Loading="@_savingComments" OnClick="SaveDetailComments">
+                            Save Comments
+                        </FluentButton>
+                    </FluentStack>
+                </div>
+            </FluentStack>
+        </FluentDialogBody>
+    </FluentDialog>
+}
+
+@* Create / Edit dialog — matching original layout *@
+@if (_showCreate || _editingId != Guid.Empty)
+{
+    var isEdit = _editingId != Guid.Empty;
+    var model = isEdit ? _edit : _create;
+
+    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 680px;"
+                  OnDismiss="@((DialogEventArgs _) => { if (isEdit) CancelEdit(); else _showCreate = false; })">
+        <FluentDialogBody>
+            <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">@(isEdit ? "Edit Activity" : "Add Activity")</FluentLabel>
+            <EditForm Model="@model" OnValidSubmit="@(isEdit ? SaveEdit : CreateActivity)">
+                <DataAnnotationsValidator />
+                <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                    <FluentSelect TOption="GameEntity"
+                                  Items="@_games"
+                                  OptionValue="@(g => g.Id.ToString())"
+                                  OptionText="@(g => g.Name)"
+                                  SelectedOption="@(_games?.FirstOrDefault(g => g.Id == model.GameId))"
+                                  SelectedOptionChanged="@(g => { if (g is not null) model.GameId = g.Id; })"
+                                  Label="Game"
+                                  Disabled="@isEdit"
+                                  Style="width: 100%;" />
+
+                    <FluentTextField @bind-Value="model.Name" Label="Activity Name" Required Style="width: 100%;" Placeholder="Enter activity name..." />
+
+                    <FluentTextArea @bind-Value="model.Description" Label="Description" Style="width: 100%;" Rows="3" Placeholder="Brief description of the activity..." />
+
+                    <FluentTextArea @bind-Value="model.Rules" Label="Rules" Style="width: 100%;" Rows="4" Placeholder="Rules for this activity..." />
+
+                    <FluentTextArea @bind-Value="model.SetupRequirements" Label="Setup Requirements" Style="width: 100%;" Rows="3" Placeholder="What's needed to set up this activity..." />
+
+                    @* Side-by-side theme/holiday multi-select *@
+                    <FluentGrid Spacing="3">
+                        <FluentGridItem xs="12" sm="6">
+                            <FluentCard Style="padding: 12px;">
+                                <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Themes</FluentLabel>
+                                <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select applicable themes</FluentLabel>
+                                @if (_themes is not null)
+                                {
+                                    @foreach (var theme in _themes)
+                                    {
+                                        <FluentCheckbox Label="@theme.Name"
+                                                        Value="@model.ThemeIds.Contains(theme.Id)"
+                                                        ValueChanged="@(v => ToggleId(model.ThemeIds, theme.Id, v))" />
+                                    }
+                                }
+                            </FluentCard>
+                        </FluentGridItem>
+                        <FluentGridItem xs="12" sm="6">
+                            <FluentCard Style="padding: 12px;">
+                                <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Holidays</FluentLabel>
+                                <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select applicable holidays</FluentLabel>
+                                @if (_holidays is not null)
+                                {
+                                    @foreach (var holiday in _holidays)
+                                    {
+                                        <FluentCheckbox Label="@holiday.Name"
+                                                        Value="@model.HolidayIds.Contains(holiday.Id)"
+                                                        ValueChanged="@(v => ToggleId(model.HolidayIds, holiday.Id, v))" />
+                                    }
+                                }
+                            </FluentCard>
+                        </FluentGridItem>
+                    </FluentGrid>
+
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
+                        <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => { if (isEdit) CancelEdit(); else _showCreate = false; })">Cancel</FluentButton>
+                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving"
+                                      IconStart="@(isEdit ? new Size16.Save() : (Icon)new Size16.Add())">
+                            @(isEdit ? "Save Changes" : "Add Activity")
+                        </FluentButton>
+                    </FluentStack>
+                </FluentStack>
+            </EditForm>
+        </FluentDialogBody>
+    </FluentDialog>
+}
+
+@code {
+    private List<ActivityEntity>? _activities;
+    private List<GameEntity>? _games;
+    private List<ThemeEntity>? _themes;
+    private List<HolidayEntity>? _holidays;
+    private ActivityEntity _create = NewActivity();
+    private ActivityEntity _edit = NewActivity();
+    private Guid _editingId;
+    private bool _showCreate;
+    private bool _saving;
+    private bool _savingComments;
+    private string _search = string.Empty;
+    private GameEntity? _filterGame;
+    private ActivityEntity? _detailActivity;
+    private string _detailComments = string.Empty;
+    private bool _detailCommentsDirty;
+
+    private IQueryable<ActivityEntity> Filtered
+    {
+        get
+        {
+            IEnumerable<ActivityEntity> q = _activities!;
+            if (_filterGame is not null)
+                q = q.Where(a => a.GameId == _filterGame.Id);
+            if (!string.IsNullOrWhiteSpace(_search))
+                q = q.Where(a => a.Name.Contains(_search, StringComparison.OrdinalIgnoreCase));
+            return q.AsQueryable();
+        }
+    }
+
+    private static string ResolveName<T>(List<T>? list, Guid id) where T : EntityBase =>
+        list?.FirstOrDefault(x => x.Id == id) is { } match
+            ? ((dynamic)match).Name
+            : id.ToString()[..8];
+
+    private static void ToggleId(List<Guid> list, Guid id, bool add)
+    {
+        if (add && !list.Contains(id)) list.Add(id);
+        else if (!add) list.Remove(id);
+    }
+
+    private void HandleSearch() { }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var t1 = ActivitySvc.GetAllAsync();
+        var t2 = GameSvc.GetAllAsync();
+        var t3 = ThemeSvc.GetAllAsync();
+        var t4 = HolidaySvc.GetAllAsync();
+        await Task.WhenAll(t1, t2, t3, t4);
+        _activities = await t1 ?? [];
+        _games = await t2 ?? [];
+        _themes = await t3 ?? [];
+        _holidays = await t4 ?? [];
+    }
+
+    private async Task Reload() => _activities = await ActivitySvc.GetAllAsync() ?? [];
+
+    private static ActivityEntity NewActivity() => new() { Name = string.Empty };
+
+    private void ShowCreate() { _create = NewActivity(); _showCreate = true; }
+
+    private async Task CreateActivity()
+    {
+        if (_saving) return;
+        _saving = true;
+        try { await ActivitySvc.CreateAsync(_create); _showCreate = false; await Reload(); }
+        finally { _saving = false; }
+    }
+
+    private void ShowEdit(ActivityEntity a)
+    {
+        _editingId = a.Id;
+        _edit = new ActivityEntity
+        {
+            Id = a.Id, GameId = a.GameId, Name = a.Name, Description = a.Description,
+            Rules = a.Rules, ThemeIds = [.. a.ThemeIds], HolidayIds = [.. a.HolidayIds],
+            SetupRequirements = a.SetupRequirements, Comments = a.Comments
+        };
+    }
+
+    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; }
+
+    private async Task SaveEdit()
+    {
+        if (_saving) return;
+        _saving = true;
+        try { await ActivitySvc.UpdateAsync(_edit); CancelEdit(); await Reload(); }
+        finally { _saving = false; }
+    }
+
+    private void ShowDetails(ActivityEntity a)
+    {
+        _detailActivity = a;
+        _detailComments = a.Comments ?? string.Empty;
+        _detailCommentsDirty = false;
+    }
+
+    private void OnDetailCommentsChanged() =>
+        _detailCommentsDirty = _detailComments != (_detailActivity?.Comments ?? string.Empty);
+
+    private async Task SaveDetailComments()
+    {
+        if (_detailActivity is null || _savingComments) return;
+        _savingComments = true;
+        try
+        {
+            await ActivitySvc.UpdateCommentsAsync(_detailActivity.Id, _detailComments);
+            _detailActivity.Comments = _detailComments;
+            _detailCommentsDirty = false;
+            await Reload();
+        }
+        finally { _savingComments = false; }
+    }
+
+    private async Task Duplicate(Guid id) { await ActivitySvc.DuplicateAsync(id); await Reload(); }
+    private async Task Delete(Guid id) { await ActivitySvc.DeleteAsync(id); await Reload(); }
+}
+

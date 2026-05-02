@@ -1,0 +1,28 @@
+@inherits ComponentBase
+
+<FluentStack Orientation="Orientation.Horizontal"
+             HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+             VerticalAlignment="VerticalAlignment.Top"
+             Style="margin-bottom: 24px;"
+             Wrap="true">
+    <FluentStack Orientation="Orientation.Vertical" VerticalGap="4">
+        <FluentLabel Typo="Typography.H3" Style="margin: 0;">@Title</FluentLabel>
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); max-width: 72ch;">@Subtitle</FluentLabel>
+        }
+    </FluentStack>
+
+    @if (ActionContent is not null)
+    {
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="8">
+            @ActionContent
+        </FluentStack>
+    }
+</FluentStack>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Page";
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public RenderFragment? ActionContent { get; set; }
+}

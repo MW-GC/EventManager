@@ -1,16 +1,60 @@
-﻿@inherits LayoutComponentBase
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+﻿@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@inherits LayoutComponentBase
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
+<FluentDesignTheme @bind-Mode="@_themeMode" StorageName="theme" />
 
-        <article class="content px-4">
+<FluentStack Orientation="Orientation.Vertical" Style="height: 100vh;">
+    <FluentStack Orientation="Orientation.Horizontal"
+                 VerticalAlignment="VerticalAlignment.Center"
+                 HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+                 Style="padding: 12px 24px; border-bottom: 1px solid var(--neutral-stroke-divider-rest); background-color: var(--neutral-layer-2); min-height: 60px;">
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center">
+            <FluentIcon Value="@(new Size24.XboxController())" Color="Color.Accent" />
+            <FluentLabel Typo="Typography.Body" Weight="FontWeight.Bold" Style="font-size: 1.1rem;">Event Manager</FluentLabel>
+        </FluentStack>
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="8">
+            <FluentButton Appearance="Appearance.Stealth"
+                          IconStart="@(_themeMode == DesignThemeModes.Dark ? new Size20.WeatherSunny() : (Icon)new Size20.WeatherMoon())"
+                          OnClick="@ToggleTheme"
+                          Title="Toggle theme" />
+        </FluentStack>
+    </FluentStack>
+
+    <FluentStack Orientation="Orientation.Horizontal" Style="flex: 1; min-height: 0; overflow: hidden;">
+        <FluentNavMenu Width="200" Collapsible="true">
+            <FluentNavLink Href="/events" Match="NavLinkMatch.All"
+                           Icon="@(new Size20.CalendarLtr())"
+                           IconColor="Color.Accent">Events</FluentNavLink>
+            <FluentNavLink Href="/games"
+                           Icon="@(new Size20.XboxController())">Games</FluentNavLink>
+            <FluentNavLink Href="/activities"
+                           Icon="@(new Size20.PuzzlePiece())">Activities</FluentNavLink>
+            <FluentDivider Style="margin: 4px 0;" />
+            <FluentNavLink Href="/themes"
+                           Icon="@(new Size20.Color())">Themes</FluentNavLink>
+            <FluentNavLink Href="/holidays"
+                           Icon="@(new Size20.CalendarStar())">Holidays</FluentNavLink>
+        </FluentNavMenu>
+
+        <FluentBodyContent Style="padding: 24px; overflow-y: auto;">
             @Body
-        </article>
-    </main>
-</div>
+        </FluentBodyContent>
+    </FluentStack>
+</FluentStack>
+
+<FluentDialogProvider />
+<FluentToastProvider />
+<FluentMessageBarProvider />
+<FluentTooltipProvider />
+<FluentMenuProvider />
+
+@code {
+    private DesignThemeModes _themeMode = DesignThemeModes.System;
+
+    private void ToggleTheme()
+    {
+        _themeMode = _themeMode == DesignThemeModes.Dark
+            ? DesignThemeModes.Light
+            : DesignThemeModes.Dark;
+    }
+}

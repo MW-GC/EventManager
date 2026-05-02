@@ -1,0 +1,151 @@
+@page "/holidays"
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@inject HolidayService HolidaySvc
+
+<PageHeader Title="Holidays" Subtitle="Manage holiday tags for activity categorization" />
+
+<FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
+    @if (_holidays is null)
+    {
+        <FluentCard>
+            <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
+                <FluentProgressRing />
+                <FluentLabel>Loading holidays...</FluentLabel>
+            </div>
+        </FluentCard>
+    }
+    else
+    {
+        <FluentCard Style="overflow: visible;">
+            <FluentStack Orientation="Orientation.Horizontal"
+                         HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+                         VerticalAlignment="VerticalAlignment.Center"
+                         Style="margin-bottom: 16px;"
+                         Wrap="true">
+                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search holidays..." />
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
+                    <FluentButton Appearance="@(_viewMode == ViewMode.Table ? Appearance.Accent : Appearance.Outline)"
+                                  Size="ButtonSize.Small" OnClick="@(() => _viewMode = ViewMode.Table)"
+                                  IconStart="@(new Size16.TextBulletListSquare())" Title="Table view" />
+                    <FluentButton Appearance="@(_viewMode == ViewMode.Cards ? Appearance.Accent : Appearance.Outline)"
+                                  Size="ButtonSize.Small" OnClick="@(() => _viewMode = ViewMode.Cards)"
+                                  IconStart="@(new Size16.Grid())" Title="Card view" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())">Add Holiday</FluentButton>
+                </FluentStack>
+            </FluentStack>
+
+            @if (_viewMode == ViewMode.Table)
+            {
+                <FluentDataGrid Items="@Filtered" TGridItem="HolidayEntity" Virtualize="true" ItemSize="44">
+                    <PropertyColumn Property="@(h => h.Name)" Title="Name" Sortable="true" />
+                    <TemplateColumn Title="Actions">
+                        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" OnClick="@(() => ShowEdit(context))">
+                                <FluentIcon Value="@(new Size16.Edit())" />
+                            </FluentButton>
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" OnClick="@(() => Delete(context.Id))">
+                                <FluentIcon Value="@(new Size16.Delete())" />
+                            </FluentButton>
+                        </FluentStack>
+                    </TemplateColumn>
+                </FluentDataGrid>
+            }
+            else
+            {
+                <FluentGrid Spacing="3" Justify="JustifyContent.FlexStart">
+                    @foreach (var holiday in Filtered)
+                    {
+                        <FluentGridItem xs="6" sm="4" md="3" lg="2">
+                            <FluentCard Style="text-align: center; padding: 16px;">
+                                <FluentIcon Value="@(new Size24.CalendarStar())" Color="Color.Accent" Style="margin-bottom: 8px;" />
+                                <FluentLabel Weight="FontWeight.Bold">@holiday.Name</FluentLabel>
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.Center" HorizontalGap="4" Style="margin-top: 8px;">
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => ShowEdit(holiday))" IconStart="@(new Size16.Edit())" />
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => Delete(holiday.Id))" IconStart="@(new Size16.Delete())" />
+                                </FluentStack>
+                            </FluentCard>
+                        </FluentGridItem>
+                    }
+                </FluentGrid>
+            }
+        </FluentCard>
+    }
+</FluentStack>
+
+@if (_showCreate)
+{
+    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 400px;" OnDismiss="@((DialogEventArgs _) => _showCreate = false)">
+        <FluentDialogBody>
+            <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Add Holiday</FluentLabel>
+            <EditForm Model="@_create" OnValidSubmit="Create">
+                <DataAnnotationsValidator />
+                <FluentTextField @bind-Value="_create.Name" Label="Name" Required Style="width: 100%;" Placeholder="Enter holiday name..." />
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
+                    <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => _showCreate = false)">Cancel</FluentButton>
+                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Add())">Add Holiday</FluentButton>
+                </FluentStack>
+            </EditForm>
+        </FluentDialogBody>
+    </FluentDialog>
+}
+
+@if (_editingId != Guid.Empty)
+{
+    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 400px;" OnDismiss="@((DialogEventArgs _) => CancelEdit())">
+        <FluentDialogBody>
+            <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Holiday</FluentLabel>
+            <EditForm Model="@_edit" OnValidSubmit="SaveEdit">
+                <DataAnnotationsValidator />
+                <FluentTextField @bind-Value="_edit.Name" Label="Name" Required Style="width: 100%;" />
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
+                    <FluentButton Appearance="Appearance.Neutral" OnClick="CancelEdit">Cancel</FluentButton>
+                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Save())">Save</FluentButton>
+                </FluentStack>
+            </EditForm>
+        </FluentDialogBody>
+    </FluentDialog>
+}
+
+@code {
+    private List<HolidayEntity>? _holidays;
+    private HolidayEntity _create = new() { Name = string.Empty };
+    private HolidayEntity _edit = new() { Name = string.Empty };
+    private Guid _editingId;
+    private bool _showCreate;
+    private bool _saving;
+    private string _search = string.Empty;
+    private ViewMode _viewMode = ViewMode.Table;
+
+    private enum ViewMode { Table, Cards }
+
+    private IQueryable<HolidayEntity> Filtered => string.IsNullOrWhiteSpace(_search)
+        ? _holidays!.AsQueryable()
+        : _holidays!.Where(h => h.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)).AsQueryable();
+
+    private void HandleSearch() { }
+    protected override async Task OnInitializedAsync() => await Reload();
+    private async Task Reload() => _holidays = await HolidaySvc.GetAllAsync() ?? [];
+
+    private void ShowCreate() { _create = new HolidayEntity { Name = string.Empty }; _showCreate = true; }
+
+    private async Task Create()
+    {
+        if (_saving) return;
+        _saving = true;
+        try { await HolidaySvc.CreateAsync(_create); _showCreate = false; await Reload(); }
+        finally { _saving = false; }
+    }
+
+    private void ShowEdit(HolidayEntity h) { _editingId = h.Id; _edit = new HolidayEntity { Id = h.Id, Name = h.Name }; }
+    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; }
+
+    private async Task SaveEdit()
+    {
+        if (_saving) return;
+        _saving = true;
+        try { await HolidaySvc.UpdateAsync(_edit); CancelEdit(); await Reload(); }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(Guid id) { await HolidaySvc.DeleteAsync(id); await Reload(); }
+}

@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "Launch Everything",
+    "Projects": [
+      {
+        "Path": "MW-GC.EventManager.API\\MW-GC.EventManager.API.csproj",
+        "Action": "Start"
+      },
+      {
+        "Path": "MW-GC.EventManager.Web\\MW-GC.EventManager.Web.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]
