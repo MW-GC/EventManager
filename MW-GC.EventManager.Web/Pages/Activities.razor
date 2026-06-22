@@ -83,9 +83,14 @@
 @* Details dialog — sectioned like the original with editable comments *@
 @if (_detailActivity is not null)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 680px;" OnDismiss="@((DialogEventArgs _) => _detailActivity = null)">
+    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 680px;" OnDismiss="@((DialogEventArgs _) => CloseDetails())">
         <FluentDialogBody>
-            <FluentLabel Typo="Typography.H3" Style="margin-bottom: 4px;">@_detailActivity.Name</FluentLabel>
+            <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween" VerticalAlignment="VerticalAlignment.Top" Style="margin-bottom: 4px;">
+                <FluentLabel Typo="Typography.H3">@_detailActivity.Name</FluentLabel>
+                <FluentButton Appearance="Appearance.Stealth" Title="Close" OnClick="CloseDetails">
+                    <FluentIcon Value="@(new Size20.Dismiss())" />
+                </FluentButton>
+            </FluentStack>
             <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="6" Style="margin-bottom: 16px;">
                 <FluentIcon Value="@(new Size16.XboxController())" Color="Color.Neutral" />
                 <FluentLabel Style="color: var(--neutral-foreground-hint);">@(_games?.FirstOrDefault(g => g.Id == _detailActivity.GameId)?.Name ?? "—")</FluentLabel>
@@ -147,6 +152,10 @@
                         </FluentButton>
                     </FluentStack>
                 </div>
+            </FluentStack>
+
+            <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" Style="margin-top: 24px;">
+                <FluentButton Appearance="Appearance.Neutral" OnClick="CloseDetails">Close</FluentButton>
             </FluentStack>
         </FluentDialogBody>
     </FluentDialog>
@@ -325,6 +334,13 @@
     {
         _detailActivity = a;
         _detailComments = a.Comments ?? string.Empty;
+        _detailCommentsDirty = false;
+    }
+
+    private void CloseDetails()
+    {
+        _detailActivity = null;
+        _detailComments = string.Empty;
         _detailCommentsDirty = false;
     }
 

@@ -40,12 +40,21 @@
                     <FluentBadge Appearance="Appearance.Neutral">@context.Selections.Count</FluentBadge>
                 </TemplateColumn>
                 <TemplateColumn Title="Winner">
-                    @if (context.WinnerGameId.HasValue)
+                    @if (context.WinnerActivityId.HasValue)
                     {
-                        var winner = _games?.FirstOrDefault(g => g.Id == context.WinnerGameId.Value);
-                        <FluentBadge Appearance="Appearance.Accent">
-                            <FluentIcon Value="@(new Size16.Trophy())" Style="margin-right: 4px;" /> @(winner?.Name ?? "Selected")
-                        </FluentBadge>
+                        var winner = context.Selections.FirstOrDefault(s => s.Activity.Id == context.WinnerActivityId.Value);
+                        @if (winner is not null)
+                        {
+                            <FluentBadge Appearance="Appearance.Accent">
+                                <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> @winner.Game.Name — @winner.Activity.Name
+                            </FluentBadge>
+                        }
+                        else
+                        {
+                            <FluentBadge Appearance="Appearance.Accent">
+                                <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> Selected
+                            </FluentBadge>
+                        }
                     }
                     else
                     {
@@ -243,7 +252,7 @@
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding-right: 8px;">
                 @foreach (var selection in _detailEvent.Selections)
                 {
-                    var isWinner = _detailEvent.WinnerGameId.HasValue && _detailEvent.WinnerGameId.Value == selection.Game.Id;
+                    var isWinner = _detailEvent.WinnerActivityId.HasValue && _detailEvent.WinnerActivityId.Value == selection.Activity.Id;
                     <FluentCard Style="@(isWinner ? "border: 2px solid var(--accent-fill-rest); background: color-mix(in srgb, var(--accent-fill-rest) 5%, transparent);" : "")">
                         <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="padding: 8px;">
                             @* Header: game + activity + winner *@
@@ -277,12 +286,12 @@
                                 @if (isWinner)
                                 {
                                     <FluentBadge Appearance="Appearance.Accent">
-                                        <FluentIcon Value="@(new Size16.Trophy())" Style="margin-right: 4px;" /> Winner
+                                        <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> Winner
                                     </FluentBadge>
                                 }
                                 else
                                 {
-                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => SelectWinner(selection.Game.Id))"
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => SelectWinner(selection.Activity.Id))"
                                                   IconStart="@(new Size16.Trophy())">
                                         Select Winner
                                     </FluentButton>
@@ -568,7 +577,7 @@
                 Date = _custDate.HasValue ? new DateTimeOffset(_custDate.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow,
                 Selections = selections,
                 UniqueGamesOnly = _custUniqueGames,
-                WinnerGameId = _editingEvent?.WinnerGameId
+                WinnerActivityId = _editingEvent?.WinnerActivityId
             };
 
             if (_editingEvent is not null)
@@ -592,10 +601,10 @@
         _detailComments = [];
     }
 
-    private async Task SelectWinner(Guid gameId)
+    private async Task SelectWinner(Guid activityId)
     {
         if (_detailEvent is null) return;
-        _detailEvent.WinnerGameId = gameId;
+        _detailEvent.WinnerActivityId = activityId;
         await EventSvc.UpdateAsync(_detailEvent);
         await Reload();
         _detailEvent = _events?.FirstOrDefault(ev => ev.Id == _detailEvent.Id);

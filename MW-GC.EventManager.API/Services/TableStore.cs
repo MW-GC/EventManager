@@ -14,7 +14,13 @@ namespace MW_GC.EventManager.API.Services;
 /// </summary>
 internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
 {
-    private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // Tolerate differently-cased property names so data written by earlier
+        // versions of the app still deserializes on read/import. Writes stay camelCase.
+        PropertyNameCaseInsensitive = true
+    };
 
     private static readonly HashSet<Type> NativeTypes =
     [
@@ -111,7 +117,14 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        await _table.DeleteEntityAsync(_partitionKey, id.ToString("D"), cancellationToken: ct);
+        try
+        {
+            await _table.DeleteEntityAsync(_partitionKey, id.ToString("D"), cancellationToken: ct);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            // Already gone — DELETE is idempotent, so a missing row is a success.
+        }
     }
 
     /// <summary>Reads a raw <see cref="TableEntity"/> back into a typed <typeparamref name="TEntity"/>.</summary>

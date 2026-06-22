@@ -102,7 +102,9 @@ internal sealed class ActivityFunctions
         if (existing is null) return new NotFoundResult();
 
         var body = await req.ReadFromJsonAsync<CommentsPayload>(ct);
-        existing.Comments = body?.Comments;
+        if (body is null) return new BadRequestResult();
+
+        existing.Comments = body.Comments;
         await _store.UpsertAsync(existing, ct);
         return new OkObjectResult(existing);
     }

@@ -52,6 +52,9 @@ internal sealed class EventFunctions
     {
         var request = await req.ReadFromJsonAsync<GenerateEventRequest>(ct) ?? new();
 
+        if (request.Count < 1)
+            return new BadRequestObjectResult("Count must be at least 1.");
+
         var gameEntities = await _games.GetAllAsync(ct);
         var activityEntities = await _activities.GetAllAsync(ct);
 
@@ -134,7 +137,7 @@ internal sealed class EventFunctions
             return new BadRequestObjectResult("Event has no selections.");
 
         var winner = entity.Selections[Random.Shared.Next(entity.Selections.Count)];
-        entity.WinnerGameId = winner.Game.Id;
+        entity.WinnerActivityId = winner.Activity.Id;
         await _store.UpsertAsync(entity, ct);
         return new OkObjectResult(entity);
     }

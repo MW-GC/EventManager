@@ -1,0 +1,155 @@
+@page "/import"
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@inject ImportService ImportSvc
+
+<PageHeader Title="Import" Subtitle="Paste legacy JSON below to import it. Each box is optional — fill in only what you have." />
+
+<FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+    @if (_status is not null)
+    {
+        <FluentMessageBar Intent="@_statusIntent" AllowDismiss="true" OnDismiss="@(() => _status = null)">
+            @_status
+        </FluentMessageBar>
+    }
+
+    <FluentCard>
+        <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+            @foreach (var box in _boxes)
+            {
+                <div>
+                    <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">@box.Label</FluentLabel>
+                    <FluentLabel Typo="Typography.Body" Style="font-size: 0.75rem; color: var(--neutral-foreground-hint); margin-bottom: 6px;">
+                        Paste a JSON array (the contents of the <code>@box.Key.ToLowerInvariant()</code> list).
+                    </FluentLabel>
+                    <FluentTextArea Value="@box.Json" ValueChanged="@(v => box.Json = v)"
+                                    Style="width: 100%; font-family: var(--monospace-font-family, monospace);" Rows="5"
+                                    Placeholder="@($"[ ... {box.Key.ToLowerInvariant()} ... ]")" />
+                </div>
+            }
+
+            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
+                <FluentButton Appearance="Appearance.Accent" OnClick="RunImport" Disabled="@_importing"
+                              IconStart="@(new Size16.ArrowImport())">
+                    @(_importing ? "Importing..." : "Import")
+                </FluentButton>
+                <FluentButton Appearance="Appearance.Stealth" OnClick="ClearAll" Disabled="@_importing">Clear</FluentButton>
+                @if (_importing)
+                {
+                    <FluentProgressRing Style="width: 20px; height: 20px;" />
+                }
+            </FluentStack>
+        </FluentStack>
+    </FluentCard>
+
+    @if (_lastSummary is not null)
+    {
+        <FluentCard>
+            <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 8px;">Last import</FluentLabel>
+            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" Wrap="true">
+                <FluentBadge Appearance="Appearance.Neutral">Games: @_lastSummary.Games</FluentBadge>
+                <FluentBadge Appearance="Appearance.Neutral">Activities: @_lastSummary.Activities</FluentBadge>
+                <FluentBadge Appearance="Appearance.Neutral">Events: @_lastSummary.Events</FluentBadge>
+                <FluentBadge Appearance="Appearance.Neutral">Themes: @_lastSummary.Themes</FluentBadge>
+                <FluentBadge Appearance="Appearance.Neutral">Holidays: @_lastSummary.Holidays</FluentBadge>
+            </FluentStack>
+        </FluentCard>
+    }
+</FluentStack>
+
+@code {
+    private sealed class ImportBox
+    {
+        public required string Key { get; init; }
+        public required string Label { get; init; }
+        public string Json { get; set; } = string.Empty;
+    }
+
+    private readonly List<ImportBox> _boxes =
+    [
+        new() { Key = "Games", Label = "Games" },
+        new() { Key = "Activities", Label = "Activities" },
+        new() { Key = "Events", Label = "Events" },
+        new() { Key = "Themes", Label = "Themes" },
+        new() { Key = "Holidays", Label = "Holidays" },
+    ];
+
+    private bool _importing;
+    private string? _status;
+    private MessageIntent _statusIntent = MessageIntent.Info;
+    private ImportSummary? _lastSummary;
+
+    private async Task RunImport()
+    {
+        if (_importing) return;
+
+        var payload = new JsonObject();
+        var filled = 0;
+
+        foreach (var box in _boxes)
+        {
+            if (string.IsNullOrWhiteSpace(box.Json)) continue;
+
+            JsonNode? node;
+            try
+            {
+                node = JsonNode.Parse(box.Json);
+            }
+            catch (JsonException ex)
+            {
+                SetStatus($"{box.Label}: invalid JSON — {ex.Message}", MessageIntent.Error);
+                return;
+            }
+
+            if (node is not JsonArray array)
+            {
+                SetStatus($"{box.Label}: expected a JSON array (starting with '[').", MessageIntent.Error);
+                return;
+            }
+
+            payload[box.Key] = array;
+            filled++;
+        }
+
+        if (filled == 0)
+        {
+            SetStatus("Paste JSON into at least one box before importing.", MessageIntent.Warning);
+            return;
+        }
+
+        _importing = true;
+        _status = null;
+        try
+        {
+            var outcome = await ImportSvc.ImportAsync(payload);
+            if (outcome.Success)
+            {
+                _lastSummary = outcome.Summary;
+                var s = outcome.Summary;
+                var total = s is null ? 0 : s.Games + s.Activities + s.Events + s.Themes + s.Holidays;
+                SetStatus($"Import succeeded — {total} record(s) processed.", MessageIntent.Success);
+            }
+            else
+            {
+                SetStatus(outcome.Error ?? "Import failed.", MessageIntent.Error);
+            }
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
+
+    private void ClearAll()
+    {
+        foreach (var box in _boxes) box.Json = string.Empty;
+        _status = null;
+    }
+
+    private void SetStatus(string message, MessageIntent intent)
+    {
+        _status = message;
+        _statusIntent = intent;
+    }
+}

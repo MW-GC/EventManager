@@ -12,7 +12,7 @@
             <FluentIcon Value="@(new Size24.XboxController())" Color="Color.Accent" />
             <FluentLabel Typo="Typography.Body" Weight="FontWeight.Bold" Style="font-size: 1.1rem;">Event Manager</FluentLabel>
         </FluentStack>
-        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="8">
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalAlignment="HorizontalAlignment.Right" HorizontalGap="8">
             <FluentButton Appearance="Appearance.Stealth"
                           IconStart="@(_themeMode == DesignThemeModes.Dark ? new Size20.WeatherSunny() : (Icon)new Size20.WeatherMoon())"
                           OnClick="@ToggleTheme"
@@ -34,6 +34,9 @@
                            Icon="@(new Size20.Color())">Themes</FluentNavLink>
             <FluentNavLink Href="/holidays"
                            Icon="@(new Size20.CalendarStar())">Holidays</FluentNavLink>
+            <FluentDivider Style="margin: 4px 0;" />
+            <FluentNavLink Href="/import"
+                           Icon="@(new Size20.ArrowImport())">Import</FluentNavLink>
         </FluentNavMenu>
 
         <FluentBodyContent Style="padding: 24px; overflow-y: auto;">
