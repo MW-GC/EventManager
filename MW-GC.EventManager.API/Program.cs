@@ -1,4 +1,5 @@
 using Azure.Data.Tables;
+using Azure.Identity;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,9 +15,7 @@ builder.ConfigureFunctionsWebApplication();
 //    .AddApplicationInsightsTelemetryWorkerService()
 //    .ConfigureFunctionsApplicationInsights();
 
-var connectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage") ?? "UseDevelopmentStorage=true";
-
-builder.Services.AddSingleton(new TableServiceClient(connectionString));
+builder.Services.AddSingleton(CreateTableServiceClient());
 
 builder.Services.AddSingleton(sp =>
     new TableStore<GameEntity>(sp.GetRequiredService<TableServiceClient>(), "Games", "Game"));
@@ -32,3 +31,19 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<EventGenerator>();
 
 builder.Build().Run();
+
+// Builds the Table Storage client from the AzureWebJobsStorage configuration. Prefers the
+// identity-based scheme (AzureWebJobsStorage__accountName + managed identity) used in Azure;
+// falls back to a connection string (e.g. Azurite "UseDevelopmentStorage=true") for local dev.
+static TableServiceClient CreateTableServiceClient()
+{
+    var accountName = Environment.GetEnvironmentVariable("AzureWebJobsStorage__accountName");
+    if (!string.IsNullOrWhiteSpace(accountName))
+    {
+        var endpoint = new Uri($"https://{accountName}.table.core.windows.net");
+        return new TableServiceClient(endpoint, new DefaultAzureCredential());
+    }
+
+    var connectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage") ?? "UseDevelopmentStorage=true";
+    return new TableServiceClient(connectionString);
+}
