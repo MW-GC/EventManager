@@ -1,5 +1,49 @@
 {
   "routes": [
+    {
+      "route": "/login",
+      "rewrite": "/.auth/login/aad"
+    },
+    {
+      "route": "/logout",
+      "redirect": "/.auth/logout"
+    },
+    {
+      "route": "/.auth/login/github",
+      "statusCode": 404
+    },
+    {
+      "route": "/manifest.webmanifest",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/service-worker.js",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/service-worker.published.js",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/service-worker-assets.js",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/favicon.ico",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/icon-*.png",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": [ "admin" ]
+    },
+    {
+      "route": "/*",
+      "allowedRoles": [ "admin" ]
+    }
   ],
   "navigationFallback": {
     "rewrite": "index.html",
