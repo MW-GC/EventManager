@@ -1,0 +1,52 @@
+name: Static Web App - PROD - Build and Deploy (Token)
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - MW-GC.EventManager.Web/**
+      - MW-GC.EventManager.Shared/**
+
+jobs:
+  build_and_deploy_job:
+    runs-on: ubuntu-latest
+    environment:
+      name: swa-prod
+      url: https://polite-ocean-0555a8a0f.7.azurestaticapps.net
+    name: Build and Deploy Job
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Setup .NET 10.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Workloads
+        run: dotnet workload restore
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: .NET Publish
+        run: dotnet publish ${{ vars.SWA_PROJECT_NAME }} -c Release -o ${{ vars.SWA_PROJECT_NAME }}/publish -p:VersionSuffix=prod
+
+      - name: Copy staticwebapp.config.json to Publish Folder
+        run: cp ${{ vars.SWA_PROJECT_NAME }}/staticwebapp.config.json ${{ vars.SWA_PROJECT_NAME }}/publish/wwwroot/staticwebapp.config.json
+
+      - name: Build And Deploy (Prod)
+        id: builddeploy_prod
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)
+          action: "upload"
+          app_location: "${{ vars.SWA_PROJECT_NAME }}/publish/wwwroot"
+          skip_api_build: true
+          skip_app_build: true
