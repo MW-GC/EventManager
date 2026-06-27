@@ -35,7 +35,9 @@
 
             <FluentDataGrid Items="@Filtered" TGridItem="EventEntity" Virtualize="true" ItemSize="44">
                 <PropertyColumn Property="@(e => e.Name)" Title="Name" Sortable="true" />
-                <PropertyColumn Property="@(e => e.Date)" Title="Date" Format="g" Sortable="true" />
+                <TemplateColumn Title="Date" Sortable="true" SortBy="@_dateSort">
+                    @context.Date.ToLocalTime().ToString("g")
+                </TemplateColumn>
                 <TemplateColumn Title="Selections">
                     <FluentBadge Appearance="Appearance.Neutral">@context.Selections.Count</FluentBadge>
                 </TemplateColumn>
@@ -95,8 +97,11 @@
                     <FluentGridItem xs="12" sm="6">
                         <FluentTextField @bind-Value="_custName" Label="Event Name" Style="width: 100%;" Placeholder="Enter event name..." />
                     </FluentGridItem>
-                    <FluentGridItem xs="12" sm="6">
+                    <FluentGridItem xs="12" sm="3">
                         <FluentDatePicker @bind-Value="_custDate" Label="Event Date" Style="width: 100%;" />
+                    </FluentGridItem>
+                    <FluentGridItem xs="12" sm="3">
+                        <FluentTimePicker @bind-Value="_custTime" Label="Event Time" Style="width: 100%;" />
                     </FluentGridItem>
                 </FluentGrid>
 
@@ -246,7 +251,7 @@
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H3" Style="margin-bottom: 4px;">@_detailEvent.Name</FluentLabel>
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 16px;">
-                @_detailEvent.Date.ToString("f")
+                @_detailEvent.Date.ToLocalTime().ToString("f")
             </FluentLabel>
 
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding-right: 8px;">
@@ -361,12 +366,16 @@
     private string _search = string.Empty;
     private EventEntity? _detailEvent;
 
+    // Sorts the grid by the underlying instant while the column renders local time.
+    private static readonly GridSort<EventEntity> _dateSort = GridSort<EventEntity>.ByAscending(e => e.Date);
+
     // Customize dialog state
     private bool _showCustomize;
     private bool _generating;
     private EventEntity? _editingEvent;
     private string _custName = string.Empty;
     private DateTime? _custDate = DateTime.Today;
+    private DateTime? _custTime = DateTime.Today.AddHours(19);
     private bool _custThemedOnly;
     private List<Guid> _custThemeIds = [];
     private List<Guid> _custHolidayIds = [];
@@ -423,6 +432,7 @@
         _editingEvent = null;
         _custName = string.Empty;
         _custDate = DateTime.Today;
+        _custTime = DateTime.Today.AddHours(19);
         _custThemedOnly = false;
         _custThemeIds = [];
         _custHolidayIds = [];
@@ -436,7 +446,9 @@
     {
         _editingEvent = e;
         _custName = e.Name;
-        _custDate = e.Date.Date;
+        var localStart = e.Date.ToLocalTime().DateTime;
+        _custDate = localStart.Date;
+        _custTime = localStart;
         _custUniqueGames = e.UniqueGamesOnly;
         _custThemedOnly = false;
         _custThemeIds = [];
@@ -547,6 +559,16 @@
         _custSelections.RemoveAt(index);
     }
 
+    // Combines the selected date and time, then resolves the user's local UTC offset so the
+    // stored DateTimeOffset represents the correct instant for downstream consumers such as
+    // the planned Discord scheduled-event integration.
+    private DateTimeOffset BuildEventDate()
+    {
+        if (!_custDate.HasValue) return DateTimeOffset.Now;
+        var wallClock = _custDate.Value.Date + (_custTime?.TimeOfDay ?? TimeSpan.Zero);
+        return new DateTimeOffset(DateTime.SpecifyKind(wallClock, DateTimeKind.Local));
+    }
+
     private async Task SaveCustomizedEvent()
     {
         if (_generating || string.IsNullOrWhiteSpace(_custName)) return;
@@ -574,7 +596,7 @@
             {
                 Id = _editingEvent?.Id ?? Guid.Empty,
                 Name = _custName,
-                Date = _custDate.HasValue ? new DateTimeOffset(_custDate.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow,
+                Date = BuildEventDate(),
                 Selections = selections,
                 UniqueGamesOnly = _custUniqueGames,
                 WinnerActivityId = _editingEvent?.WinnerActivityId
