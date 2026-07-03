@@ -17,31 +17,11 @@
       "allowedRoles": [ "anonymous" ]
     },
     {
-      "route": "/service-worker.js",
-      "allowedRoles": [ "anonymous" ]
-    },
-    {
-      "route": "/service-worker.published.js",
-      "allowedRoles": [ "anonymous" ]
-    },
-    {
-      "route": "/service-worker-assets.js",
-      "allowedRoles": [ "anonymous" ]
-    },
-    {
-      "route": "/favicon.ico",
-      "allowedRoles": [ "anonymous" ]
-    },
-    {
-      "route": "/icon-*.png",
-      "allowedRoles": [ "anonymous" ]
-    },
-    {
       "route": "/api/*",
       "allowedRoles": [ "admin" ]
     },
     {
-      "route": "/*",
+      "route": "*",
       "allowedRoles": [ "admin" ]
     }
   ],
