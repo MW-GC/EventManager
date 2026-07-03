@@ -1,6 +1,6 @@
 {
-  "name": "MW-GC.EventManager.Web",
-  "short_name": "MW-GC.EventManager.Web",
+  "name": "MWG - Event Manager",
+  "short_name": "Event Manager",
   "id": "./",
   "start_url": "./",
   "display": "standalone",

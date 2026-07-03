@@ -14,7 +14,7 @@
         </FluentMessageBar>
     }
 
-    <FluentCard>
+    <FluentCard AreaRestricted="false">
         <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
             @foreach (var box in _boxes)
             {
@@ -45,7 +45,7 @@
 
     @if (_lastSummary is not null)
     {
-        <FluentCard>
+        <FluentCard AreaRestricted="false">
             <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 8px;">Last import</FluentLabel>
             <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" Wrap="true">
                 <FluentBadge Appearance="Appearance.Neutral">Games: @_lastSummary.Games</FluentBadge>
