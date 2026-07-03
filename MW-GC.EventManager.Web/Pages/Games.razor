@@ -10,7 +10,7 @@
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
     @if (_games is null)
     {
-        <FluentCard>
+        <FluentCard AreaRestricted="false">
             <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
                 <FluentProgressRing />
                 <FluentLabel>Loading games...</FluentLabel>
@@ -19,7 +19,7 @@
     }
     else
     {
-        <FluentCard Style="overflow: visible;">
+        <FluentCard Style="overflow: visible;" AreaRestricted="false">
             <FluentStack Orientation="Orientation.Horizontal"
                          HorizontalAlignment="HorizontalAlignment.SpaceBetween"
                          VerticalAlignment="VerticalAlignment.Center"
@@ -88,7 +88,7 @@
                     @foreach (var game in Filtered)
                     {
                         <FluentGridItem xs="12" sm="6" md="4" lg="3">
-                            <FluentCard Style="height: 100%;">
+                            <FluentCard Style="height: 100%;" AreaRestricted="false">
                                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="height: 100%;">
                                     <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="10">
                                         @if (!string.IsNullOrWhiteSpace(game.IconUrl))

@@ -12,7 +12,7 @@
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
     @if (_events is null)
     {
-        <FluentCard>
+        <FluentCard AreaRestricted="false">
             <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
                 <FluentProgressRing />
                 <FluentLabel>Loading events...</FluentLabel>
@@ -21,7 +21,7 @@
     }
     else
     {
-        <FluentCard Style="overflow: visible;">
+        <FluentCard Style="overflow: visible;" AreaRestricted="false">
             <FluentStack Orientation="Orientation.Horizontal"
                          HorizontalAlignment="HorizontalAlignment.SpaceBetween"
                          VerticalAlignment="VerticalAlignment.Center"
@@ -106,14 +106,14 @@
                 </FluentGrid>
 
                 @* Themed-only toggle *@
-                <FluentCard Style="padding: 12px;">
+                <FluentCard Style="padding: 12px;" AreaRestricted="false">
                     <FluentSwitch @bind-Value="_custThemedOnly" Label="Themed Activities Only" />
                 </FluentCard>
 
                 @* Theme / Holiday filters *@
                 <FluentGrid Spacing="3">
                     <FluentGridItem xs="12" sm="6">
-                        <FluentCard Style="padding: 12px;">
+                        <FluentCard Style="padding: 12px;" AreaRestricted="false">
                             <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Themes</FluentLabel>
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific themes</FluentLabel>
                             @if (_themes is not null)
@@ -128,7 +128,7 @@
                         </FluentCard>
                     </FluentGridItem>
                     <FluentGridItem xs="12" sm="6">
-                        <FluentCard Style="padding: 12px;">
+                        <FluentCard Style="padding: 12px;" AreaRestricted="false">
                             <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Holidays</FluentLabel>
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific holidays</FluentLabel>
                             @if (_holidays is not null)
@@ -170,7 +170,7 @@
                     {
                         var idx = i;
                         var sel = _custSelections[idx];
-                        <FluentCard Style="padding: 12px;">
+                        <FluentCard Style="padding: 12px;" AreaRestricted="false">
                             <FluentGrid Spacing="3">
                                 <FluentGridItem xs="12" sm="5">
                                     <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-bottom: 4px;">
@@ -258,7 +258,7 @@
                 @foreach (var selection in _detailEvent.Selections)
                 {
                     var isWinner = _detailEvent.WinnerActivityId.HasValue && _detailEvent.WinnerActivityId.Value == selection.Activity.Id;
-                    <FluentCard Style="@(isWinner ? "border: 2px solid var(--accent-fill-rest); background: color-mix(in srgb, var(--accent-fill-rest) 5%, transparent);" : "")">
+                    <FluentCard Style="@(isWinner ? "border: 2px solid var(--accent-fill-rest); background: color-mix(in srgb, var(--accent-fill-rest) 5%, transparent);" : "")" AreaRestricted="false">
                         <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="padding: 8px;">
                             @* Header: game + activity + winner *@
                             <FluentStack Orientation="Orientation.Horizontal"
