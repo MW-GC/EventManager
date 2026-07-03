@@ -43,9 +43,10 @@
 
             <FluentDataGrid Items="@Filtered" TGridItem="ActivityEntity" Virtualize="true" ItemSize="44">
                 <PropertyColumn Property="@(a => a.Name)" Title="Name" Sortable="true" />
-                <TemplateColumn Title="Game" Sortable="true">
-                    @{ var game = _games?.FirstOrDefault(g => g.Id == context.GameId); }
-                    @(game?.Name ?? "—")
+                <TemplateColumn Title="Game"
+                                Sortable="true"
+                                SortBy="@(GridSort<ActivityEntity>.ByAscending(a => GameName(a.GameId)).ThenAscending(a => a.Name))">
+                    @GameName(context.GameId)
                 </TemplateColumn>
                 <TemplateColumn Title="Tags">
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Wrap="true">
@@ -93,7 +94,7 @@
             </FluentStack>
             <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="6" Style="margin-bottom: 16px;">
                 <FluentIcon Value="@(new Size16.XboxController())" Color="Color.Neutral" />
-                <FluentLabel Style="color: var(--neutral-foreground-hint);">@(_games?.FirstOrDefault(g => g.Id == _detailActivity.GameId)?.Name ?? "—")</FluentLabel>
+                <FluentLabel Style="color: var(--neutral-foreground-hint);">@GameName(_detailActivity.GameId)</FluentLabel>
             </FluentStack>
 
             @if (_detailActivity.ThemeIds.Count > 0 || _detailActivity.HolidayIds.Count > 0)
@@ -273,6 +274,9 @@
         list?.FirstOrDefault(x => x.Id == id) is { } match
             ? ((dynamic)match).Name
             : id.ToString()[..8];
+
+    private string GameName(Guid gameId) =>
+        _games?.FirstOrDefault(g => g.Id == gameId)?.Name ?? "—";
 
     private static void ToggleId(List<Guid> list, Guid id, bool add)
     {
