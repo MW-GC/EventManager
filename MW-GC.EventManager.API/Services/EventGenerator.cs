@@ -35,15 +35,16 @@ internal sealed class EventGenerator
 
     private static List<Activity> FilterActivities(IReadOnlyList<Activity> activities, GenerateEventRequest req)
     {
-        if (!req.ThemedOnly && req.SelectedThemeIds.Count == 0 && req.SelectedHolidayIds.Count == 0)
+        if (!req.ThemedOnly && req.SelectedGameIds.Count == 0 && req.SelectedThemeIds.Count == 0 && req.SelectedHolidayIds.Count == 0)
             return activities.ToList();
 
         return activities.Where(a =>
         {
+            var isSelectedGame = req.SelectedGameIds.Count == 0 || req.SelectedGameIds.Contains(a.GameId);
             var hasThemes = req.SelectedThemeIds.Count == 0 || a.ThemeIds.Intersect(req.SelectedThemeIds).Any();
             var hasHolidays = req.SelectedHolidayIds.Count == 0 || a.HolidayIds.Intersect(req.SelectedHolidayIds).Any();
             var isThemed = !req.ThemedOnly || a.ThemeIds.Count > 0 || a.HolidayIds.Count > 0;
-            return hasThemes && hasHolidays && isThemed;
+            return isSelectedGame && hasThemes && hasHolidays && isThemed;
         }).ToList();
     }
 
