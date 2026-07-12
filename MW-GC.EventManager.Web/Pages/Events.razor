@@ -110,9 +110,26 @@
                     <FluentSwitch @bind-Value="_custThemedOnly" Label="Themed Activities Only" />
                 </FluentCard>
 
-                @* Theme / Holiday filters *@
+                @* Game / Theme / Holiday filters *@
                 <FluentGrid Spacing="3">
-                    <FluentGridItem xs="12" sm="6">
+                    <FluentGridItem xs="12" sm="4">
+                        <FluentCard Style="padding: 12px;" AreaRestricted="false">
+                            <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Games</FluentLabel>
+                            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Only randomize from specific games</FluentLabel>
+                            @if (_games is not null)
+                            {
+                                <FluentStack Orientation="Orientation.Vertical" VerticalGap="4" Style="max-height: 160px; overflow-y: auto;">
+                                    @foreach (var game in _games.OrderBy(g => g.Name))
+                                    {
+                                        <FluentCheckbox Label="@game.Name"
+                                                        Value="@_custGameIds.Contains(game.Id)"
+                                                        ValueChanged="@(v => ToggleId(_custGameIds, game.Id, v))" />
+                                    }
+                                </FluentStack>
+                            }
+                        </FluentCard>
+                    </FluentGridItem>
+                    <FluentGridItem xs="12" sm="4">
                         <FluentCard Style="padding: 12px;" AreaRestricted="false">
                             <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Themes</FluentLabel>
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific themes</FluentLabel>
@@ -127,7 +144,7 @@
                             }
                         </FluentCard>
                     </FluentGridItem>
-                    <FluentGridItem xs="12" sm="6">
+                    <FluentGridItem xs="12" sm="4">
                         <FluentCard Style="padding: 12px;" AreaRestricted="false">
                             <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Holidays</FluentLabel>
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific holidays</FluentLabel>
@@ -151,7 +168,7 @@
                              Wrap="true">
                     <div>
                         <FluentLabel Weight="FontWeight.Bold">Game & Activity Selections (@_custSelections.Count)</FluentLabel>
-                        @if (_custThemedOnly || _custThemeIds.Count > 0 || _custHolidayIds.Count > 0)
+                        @if (_custThemedOnly || _custGameIds.Count > 0 || _custThemeIds.Count > 0 || _custHolidayIds.Count > 0)
                         {
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Click "Randomize All" to apply filters</FluentLabel>
                         }
@@ -377,6 +394,7 @@
     private DateTime? _custDate = DateTime.Today;
     private DateTime? _custTime = DateTime.Today.AddHours(19);
     private bool _custThemedOnly;
+    private List<Guid> _custGameIds = [];
     private List<Guid> _custThemeIds = [];
     private List<Guid> _custHolidayIds = [];
     private bool _custUniqueGames = true;
@@ -434,6 +452,7 @@
         _custDate = DateTime.Today;
         _custTime = DateTime.Today.AddHours(19);
         _custThemedOnly = false;
+        _custGameIds = [];
         _custThemeIds = [];
         _custHolidayIds = [];
         _custUniqueGames = true;
@@ -451,6 +470,7 @@
         _custTime = localStart;
         _custUniqueGames = e.UniqueGamesOnly;
         _custThemedOnly = false;
+        _custGameIds = [];
         _custThemeIds = [];
         _custHolidayIds = [];
         _custSelections = e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id }).ToList();
@@ -488,6 +508,8 @@
     {
         if (_activities is null) return [];
         IEnumerable<ActivityEntity> q = _activities;
+        if (_custGameIds.Count > 0)
+            q = q.Where(a => _custGameIds.Contains(a.GameId));
         if (_custThemedOnly)
             q = q.Where(a => a.ThemeIds.Count > 0 || a.HolidayIds.Count > 0);
         if (_custThemeIds.Count > 0)
