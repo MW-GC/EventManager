@@ -170,7 +170,7 @@
                         <FluentLabel Weight="FontWeight.Bold">Game & Activity Selections (@_custSelections.Count)</FluentLabel>
                         @if (_custThemedOnly || _custGameIds.Count > 0 || _custThemeIds.Count > 0 || _custHolidayIds.Count > 0)
                         {
-                            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Click "Randomize All" to apply filters</FluentLabel>
+                            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Filters apply when randomizing all selections or re-rolling a slot</FluentLabel>
                         }
                     </div>
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
@@ -231,6 +231,13 @@
                                                   Style="width: 100%;" />
                                 </FluentGridItem>
                                 <FluentGridItem xs="12" sm="2" Style="display: flex; align-items: flex-end; justify-content: flex-end;">
+                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                                  Title="@(GetRerollCandidates(idx).Count > 0 ? "Re-roll this slot" : "No alternative matches the current filters")"
+                                                  aria-label="@($"Re-roll slot {idx + 1}")"
+                                                  Disabled="@(GetRerollCandidates(idx).Count == 0)"
+                                                  OnClick="@(() => RerollSlot(idx))">
+                                        <FluentIcon Value="@(new Size16.ArrowShuffle())" />
+                                    </FluentButton>
                                     <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" Title="Remove slot"
                                                   Disabled="@(_custSelections.Count <= 2)"
                                                   OnClick="@(() => RemoveSlot(idx))">
@@ -502,6 +509,34 @@
         }
 
         _custSelections = newSelections;
+    }
+
+    private List<ActivityEntity> GetRerollCandidates(int index)
+    {
+        if (index < 0 || index >= _custSelections.Count || _games is null) return [];
+
+        var current = _custSelections[index];
+        var others = _custSelections.Where((_, i) => i != index).ToList();
+        var usedActivities = others.Select(s => s.ActivityId).ToHashSet();
+        var usedGames = others.Select(s => s.GameId).ToHashSet();
+        var knownGames = _games.Select(g => g.Id).ToHashSet();
+
+        return GetFilteredActivities().Where(a =>
+            knownGames.Contains(a.GameId) &&
+            a.Id != current.ActivityId &&
+            !usedActivities.Contains(a.Id) &&
+            (!_custUniqueGames || !usedGames.Contains(a.GameId))).ToList();
+    }
+
+    private void RerollSlot(int index)
+    {
+        // Pick a game first, as Randomize All does, so games with larger
+        // activity catalogs do not dominate the roll. Never touch other slots.
+        var groups = GetRerollCandidates(index).GroupBy(a => a.GameId).ToList();
+        if (groups.Count == 0) return;
+        var activities = groups[Random.Shared.Next(groups.Count)].ToList();
+        var activity = activities[Random.Shared.Next(activities.Count)];
+        _custSelections[index] = new SlotSelection { GameId = activity.GameId, ActivityId = activity.Id };
     }
 
     private List<ActivityEntity> GetFilteredActivities()
