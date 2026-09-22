@@ -50,10 +50,13 @@ internal sealed class EventFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events/generate")] HttpRequest req,
         CancellationToken ct)
     {
-        var request = await req.ReadFromJsonAsync<GenerateEventRequest>(ct) ?? new();
+        var request = await ReadBody<GenerateEventRequest>(req, ct);
+        if (request is null) return new BadRequestResult();
 
-        if (request.Count < 1)
-            return new BadRequestObjectResult("Count must be at least 1.");
+        if (request.Count is < 1 or > EventEntity.MaximumSelections)
+            return new BadRequestObjectResult($"Count must be between 1 and {EventEntity.MaximumSelections}.");
+        if (request.SelectedGameIds is null || request.SelectedThemeIds is null || request.SelectedHolidayIds is null)
+            return new BadRequestObjectResult("Filter lists must not be null.");
 
         var gameEntities = await _games.GetAllAsync(ct);
         var activityEntities = await _activities.GetAllAsync(ct);
@@ -93,8 +96,9 @@ internal sealed class EventFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events")] HttpRequest req,
         CancellationToken ct)
     {
-        var entity = await req.ReadFromJsonAsync<EventEntity>(ct);
+        var entity = await ReadBody<EventEntity>(req, ct);
         if (entity is null) return new BadRequestResult();
+        if (entity.ValidateSelections() is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = Guid.NewGuid();
         entity.NormalizeWinner();
@@ -110,13 +114,26 @@ internal sealed class EventFunctions
         var existing = await _store.GetAsync(id, ct);
         if (existing is null) return new NotFoundResult();
 
-        var entity = await req.ReadFromJsonAsync<EventEntity>(ct);
+        var entity = await ReadBody<EventEntity>(req, ct);
         if (entity is null) return new BadRequestResult();
+        if (entity.ValidateSelections() is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = id;
         entity.NormalizeWinner();
         await _store.UpsertAsync(entity, ct);
         return new OkObjectResult(entity);
+    }
+
+    private static async Task<T?> ReadBody<T>(HttpRequest request, CancellationToken ct) where T : class
+    {
+        try
+        {
+            return await request.ReadFromJsonAsync<T>(ct);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     [Function("DeleteEvent")]

@@ -8,6 +8,10 @@
 @inject HolidayService HolidaySvc
 
 <PageHeader Title="Events" Subtitle="Generate, view, and manage gaming events" />
+@if (_pageError is not null)
+{
+    <div role="alert">@_pageError</div>
+}
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
     @if (_events is null)
@@ -169,6 +173,10 @@
                     <div>
                         <FluentLabel Weight="FontWeight.Bold">Game & Activity Selections (@_custSelections.Count)</FluentLabel>
                         <FluentLabel Typo="Typography.Body">Select 1–5 activities. If only one activity is selected when saved, it automatically becomes the winner.</FluentLabel>
+                        @if (_custSelections.Count == 1)
+                        {
+                            <FluentLabel role="status">Single activity: this activity will automatically win when you save.</FluentLabel>
+                        }
                         @if (_custThemedOnly || _custGameIds.Count > 0 || _custThemeIds.Count > 0 || _custHolidayIds.Count > 0)
                         {
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Filters apply when randomizing all selections or re-rolling a slot</FluentLabel>
@@ -258,6 +266,10 @@
                 </FluentStack>
             </FluentStack>
 
+            @if (_customizeError is not null)
+            {
+                <div role="alert" style="color: var(--error); margin-top: 12px;">@_customizeError</div>
+            }
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
                 <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => _showCustomize = false)">Cancel</FluentButton>
                 <FluentButton Appearance="Appearance.Accent" Loading="@_generating" OnClick="SaveCustomizedEvent"
@@ -280,6 +292,10 @@
             </FluentLabel>
 
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding-right: 8px;">
+                @if (_detailEvent.Selections.Count == 1 && _detailEvent.WinnerActivityId == _detailEvent.Selections[0].Activity.Id)
+                {
+                    <FluentLabel>With one activity, the winner is selected automatically.</FluentLabel>
+                }
                 @foreach (var selection in _detailEvent.Selections)
                 {
                     var isWinner = _detailEvent.WinnerActivityId.HasValue && _detailEvent.WinnerActivityId.Value == selection.Activity.Id;
@@ -397,6 +413,8 @@
     // Customize dialog state
     private bool _showCustomize;
     private bool _generating;
+    private string? _customizeError;
+    private string? _pageError;
     private EventEntity? _editingEvent;
     private string _custName = string.Empty;
     private DateTime? _custDate = DateTime.Today;
@@ -455,6 +473,7 @@
 
     private void ShowCustomize()
     {
+        _customizeError = null;
         _editingEvent = null;
         _custName = string.Empty;
         _custDate = DateTime.Today;
@@ -471,6 +490,7 @@
 
     private void ShowEditEvent(EventEntity e)
     {
+        _customizeError = null;
         _editingEvent = e;
         _custName = e.Name;
         var localStart = e.Date.ToLocalTime().DateTime;
@@ -630,11 +650,31 @@
     private async Task SaveCustomizedEvent()
     {
         if (_generating || string.IsNullOrWhiteSpace(_custName)) return;
+        _customizeError = null;
+        if (_custSelections.Count is < 1 or > 5)
+        {
+            _customizeError = "Select 1–5 activities before saving. Adjust the filters or add an activity slot.";
+            return;
+        }
+        if (_custSelections.Any(s => s.GameId == Guid.Empty || s.ActivityId == Guid.Empty ||
+            _games?.Any(g => g.Id == s.GameId) != true ||
+            _activities?.Any(a => a.Id == s.ActivityId && a.GameId == s.GameId) != true))
+        {
+            _customizeError = "Choose a valid game and activity for every slot before saving.";
+            return;
+        }
+        if (_custSelections.Select(s => s.ActivityId).Distinct().Count() != _custSelections.Count ||
+            (_custUniqueGames && _custSelections.Select(s => s.GameId).Distinct().Count() != _custSelections.Count))
+        {
+            _customizeError = "Activities must be distinct, and games must be distinct when Unique games only is enabled.";
+            return;
+        }
         _generating = true;
+        var saved = false;
+        _pageError = null;
         try
         {
             var selections = _custSelections
-                .Where(s => s.GameId != Guid.Empty && s.ActivityId != Guid.Empty)
                 .Select(s =>
                 {
                     var game = _games!.First(g => g.Id == s.GameId);
@@ -662,13 +702,28 @@
 
             entity.NormalizeWinner();
 
-            if (_editingEvent is not null)
-                await EventSvc.UpdateAsync(entity);
-            else
-                await EventSvc.SaveAsync(entity);
+            using var response = _editingEvent is not null
+                ? await EventSvc.UpdateAsync(entity)
+                : await EventSvc.SaveAsync(entity);
+            if (!response.IsSuccessStatusCode)
+            {
+                var message = await response.Content.ReadAsStringAsync();
+                _customizeError = string.IsNullOrWhiteSpace(message)
+                    ? $"Unable to save the event ({(int)response.StatusCode}). Please try again."
+                    : $"Unable to save the event: {message}";
+                return;
+            }
 
+            saved = true;
             _showCustomize = false;
             await Reload();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            if (saved)
+                _pageError = "The event was saved, but the list could not be refreshed. Reload the page to see the saved event.";
+            else
+                _customizeError = "Unable to contact the server. Please try again.";
         }
         finally { _generating = false; }
     }
