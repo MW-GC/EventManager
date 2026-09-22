@@ -100,27 +100,30 @@ internal sealed class EventFunctions
         if (entity is null) return new BadRequestResult();
         if (entity.ValidateSelections() is { } error) return new BadRequestObjectResult(error);
 
-        // Optional for older clients. The key identifies one create, never an update.
-        var id = Guid.NewGuid();
-        if (req.Headers.TryGetValue("Idempotency-Key", out var key) &&
-            (key.Count != 1 || !Guid.TryParseExact(key[0], "D", out id) || id == Guid.Empty))
+        var hasKey = req.Headers.TryGetValue("Idempotency-Key", out var keys);
+        var createId = Guid.NewGuid();
+        if (hasKey && (keys.Count != 1 || !Guid.TryParseExact(keys[0], "D", out createId) || createId == Guid.Empty))
             return new BadRequestObjectResult("Idempotency-Key must be a non-empty GUID in D format.");
 
-        entity.Id = id;
+        entity.Id = createId;
         entity.NormalizeWinner();
+        // Older clients still get a fresh ID; all creates use atomic inserts.
         if (!await _store.TryAddAsync(entity, ct))
         {
-            var existing = await _store.GetAsync(id, ct);
-            // Do not silently discard edits made after an ambiguous response, or overwrite
-            // a subsequently edited event. Storage metadata is not part of the request.
-            if (existing is null || existing.Name != entity.Name || existing.Date != entity.Date ||
-                existing.UniqueGamesOnly != entity.UniqueGamesOnly || existing.WinnerActivityId != entity.WinnerActivityId ||
-                System.Text.Json.JsonSerializer.Serialize(existing.Selections) != System.Text.Json.JsonSerializer.Serialize(entity.Selections))
-                return new ConflictObjectResult("This create was already saved with different details. Reload the page and edit the saved event.");
-            return new OkObjectResult(existing);
+            var existing = await _store.GetAsync(createId, ct);
+            if (existing is not null && CreateDetails(existing) == CreateDetails(entity))
+                return new OkObjectResult(existing);
+            return new ConflictObjectResult("This create key already exists with different details. Reload the event list and edit the saved event; do not start another create to retry this save.");
         }
         return new CreatedResult($"/api/events/{entity.Id}", entity);
     }
+
+    // Compare normalized domain data, not row keys, timestamps or ETags. Never overwrite
+    // a later edit when reconciling an ambiguous create response.
+    private static string CreateDetails(EventEntity entity) => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        entity.Name, Date = entity.Date.ToUniversalTime(), entity.Selections, entity.UniqueGamesOnly, entity.WinnerActivityId
+    });
 
     [Function("UpdateEvent")]
     public async Task<IActionResult> Update(

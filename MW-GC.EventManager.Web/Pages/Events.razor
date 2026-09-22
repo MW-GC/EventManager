@@ -416,7 +416,7 @@
     private string? _customizeError;
     private string? _pageError;
     private EventEntity? _editingEvent;
-    // Retain across failed saves; only a new create dialog starts a new operation.
+    // Retain across ambiguous failures and edits in this dialog; only a new create resets it.
     private Guid _createKey = Guid.NewGuid();
     private string _custName = string.Empty;
     private DateTime? _custDate = DateTime.Today;
@@ -726,7 +726,7 @@
             if (saved)
                 _pageError = "The event was saved, but the list could not be refreshed. Reload the page to see the saved event.";
             else
-                _customizeError = "Unable to contact the server. Please try again.";
+                _customizeError = "The save could not be confirmed. Retry in this dialog to avoid creating a duplicate. If you changed the details, reload the event list and check for the saved event first.";
         }
         finally { _generating = false; }
     }
