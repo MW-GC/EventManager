@@ -145,13 +145,108 @@ public class SlotRerollTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RandomizeAllFillsSlotsAndRerollsKeepIdsUnique(bool unique)
+    {
+        Set("_custUniqueGames", unique);
+        for (var i = 0; i < 100; i++)
+        {
+            Call("RandomizeAll");
+            Assert.Equal(2, Slots.Count);
+            Assert.Equal(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+            var otherSlot = Slots[1];
+            Call("RerollSlot", 0);
+            Assert.Same(otherSlot, Slots[1]);
+            Assert.Equal(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+            Assert.Null(Get("_generationError"));
+        }
+    }
+
+    [Fact]
+    public void SameGameCanFillAllSlotsWithoutDuplicateIds()
+    {
+        Set("_custUniqueGames", false);
+        Set("_custGameIds", new List<Guid> { gameA });
+        Activities.Add(current); // Duplicate source records are not extra capacity.
+        for (var i = 0; i < 100; i++)
+        {
+            Call("RandomizeAll");
+            Assert.Equal(2, Slots.Count);
+            Assert.All(Slots.Cast<object>(), s => Assert.Equal(gameA, Id(s, "GameId")));
+            Assert.Equal(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+        }
+        Call("AddSlot");
+        Assert.Equal(2, Slots.Count);
+    }
+
+    [Theory]
+    [InlineData("_custGameIds")]
+    [InlineData("_custThemeIds")]
+    [InlineData("_custHolidayIds")]
+    public void ImpossibleRandomizePreservesSlotsAndReportsError(string filter)
+    {
+        var original = Slots;
+        Set(filter, new List<Guid> { Guid.NewGuid() });
+        Call("RandomizeAll");
+        Assert.Same(original, Slots);
+        Assert.Equal(2, Slots.Count);
+        Assert.False(string.IsNullOrWhiteSpace((string?)Get("_generationError")));
+        Set(filter, new List<Guid>());
+        Call("RandomizeAll");
+        Assert.Null(Get("_generationError"));
+    }
+
+    [Fact]
+    public void InitialImpossibleGenerationShowsErrorRatherThanSilentlyBlank()
+    {
+        Slots.Clear();
+        Activities.Clear();
+        Activities.Add(Activity(Guid.NewGuid()));
+        Call("RandomizeAll");
+        Assert.Empty(Slots);
+        Assert.False(string.IsNullOrWhiteSpace((string?)Get("_generationError")));
+    }
+
+    [Fact]
+    public void RandomizeAppliesAllFiltersTogether()
+    {
+        Set("_custUniqueGames", false);
+        current.ThemeIds = [theme];
+        current.HolidayIds = [holiday];
+        Activities.Add(Activity(gameA));
+        Set("_custGameIds", new List<Guid> { gameA });
+        Set("_custThemeIds", new List<Guid> { theme });
+        Set("_custHolidayIds", new List<Guid> { holiday });
+        Set("_custThemedOnly", true);
+        Call("RandomizeAll");
+        Assert.Equal(2, Slots.Count);
+        Assert.All(Slots.Cast<object>(), s => Assert.Contains(Id(s, "ActivityId"), new[] { current.Id, replacement.Id }));
+        Assert.Equal(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+        Assert.Null(Get("_generationError"));
+    }
+
+    [Fact]
+    public void AddSlotSkipsExhaustedGames()
+    {
+        Set("_custUniqueGames", false);
+        for (var i = 0; i < 100; i++)
+        {
+            Call("AddSlot");
+            Assert.Equal(3, Slots.Count);
+            Assert.Equal(replacement.Id, Id(Slots[2]!, "ActivityId"));
+            Slots.RemoveAt(2);
+        }
+    }
+
     private static ActivityEntity Activity(Guid game) => new() { Id = Guid.NewGuid(), GameId = game };
     private IList Slots => (IList)Get("_custSelections")!;
     private List<ActivityEntity> Activities => (List<ActivityEntity>)Get("_activities")!;
     private List<ActivityEntity> Candidates() => (List<ActivityEntity>)Call("GetRerollCandidates", 0)!;
     private object? Get(string name) => typeof(Events).GetField(name, Private)!.GetValue(page);
     private void Set(string name, object value) => typeof(Events).GetField(name, Private)!.SetValue(page, value);
-    private object? Call(string name, int index) => typeof(Events).GetMethod(name, Private)!.Invoke(page, [index]);
+    private object? Call(string name, params object[] args) => typeof(Events).GetMethod(name, Private)!.Invoke(page, args);
     private static Guid Id(object slot, string name) => (Guid)slot.GetType().GetProperty(name)!.GetValue(slot)!;
     private void AddSlot(ActivityEntity activity)
     {

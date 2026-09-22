@@ -24,7 +24,7 @@ internal sealed class EventGenerator
 
         return request.UniqueGamesOnly
             ? GenerateUnique(gamesWithActivities, filtered, request.Count)
-            : GenerateAllowDuplicates(gamesWithActivities, filtered, request.Count);
+            : GenerateAllowRepeatedGames(gamesWithActivities, filtered, request.Count);
     }
 
     public static string GenerateName()
@@ -69,25 +69,25 @@ internal sealed class EventGenerator
         return selections;
     }
 
-    private static List<Selection>? GenerateAllowDuplicates(List<Game> games, List<Activity> activities, int count)
+    private static List<Selection>? GenerateAllowRepeatedGames(List<Game> games, List<Activity> activities, int count)
     {
-        if (games.Count == 0) return null;
+        var knownGames = games.Select(g => g.Id).ToHashSet();
+        var remaining = activities.Where(a => knownGames.Contains(a.GameId)).ToList();
+        if (remaining.Select(a => a.Id).Distinct().Count() < count) return null;
 
-        var usedActivityIds = new HashSet<Guid>();
         var selections = new List<Selection>(count);
-        var maxAttempts = count * 50;
-
-        for (var attempt = 0; attempt < maxAttempts && selections.Count < count; attempt++)
+        while (selections.Count < count)
         {
-            var game = games[Rng.Next(games.Count)];
-            var candidates = activities.Where(a => a.GameId == game.Id && !usedActivityIds.Contains(a.Id)).ToList();
-            if (candidates.Count == 0) continue;
-
+            // Choose only games with unused activities. Exhausted games must not
+            // consume attempts or cause a valid request to fail randomly.
+            var groups = remaining.GroupBy(a => a.GameId).ToList();
+            var candidates = groups[Rng.Next(groups.Count)].ToList();
             var activity = candidates[Rng.Next(candidates.Count)];
-            usedActivityIds.Add(activity.Id);
+            var game = games.First(g => g.Id == activity.GameId);
             selections.Add(new Selection { Game = game, Activity = activity });
+            remaining.RemoveAll(a => a.Id == activity.Id);
         }
 
-        return selections.Count == count ? selections : null;
+        return selections;
     }
 }
