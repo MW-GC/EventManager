@@ -240,6 +240,109 @@ public class SlotRerollTests
         }
     }
 
+    [Fact]
+    public void UniqueRandomizeReassignsEarlierActivityInsteadOfFailing()
+    {
+        Set("_random", new FirstChoiceRandom());
+        Set("_custUniqueGames", true);
+        other.Id = current.Id;
+        Set("_activities", new List<ActivityEntity> { current, replacement, other });
+        var source = Activities.ToArray();
+        Set("_generationError", "Previous failure");
+
+        for (var run = 0; run < 2; run++)
+        {
+            Call("RandomizeAll");
+            Assert.Null(Get("_generationError"));
+            Assert.Equal(2, Slots.Count);
+            var selections = Slots.Cast<object>().ToArray();
+            Assert.Equal(replacement.Id, Id(selections.Single(s => Id(s, "GameId") == gameA), "ActivityId"));
+            Assert.Equal(current.Id, Id(selections.Single(s => Id(s, "GameId") == gameB), "ActivityId"));
+            Assert.Equal(source, Activities.ToArray());
+        }
+    }
+
+    [Fact]
+    public void UniqueRandomizeMatchesSmallGraphFeasibility()
+    {
+        var games = Enumerable.Range(1, 3).Select(_ => new GameEntity { Id = Guid.NewGuid() }).ToList();
+        var ids = Enumerable.Range(1, 3).Select(_ => Guid.NewGuid()).ToArray();
+        Set("_games", games);
+        Set("_custUniqueGames", true);
+        for (var mask = 0; mask < 512; mask++)
+        {
+            var activities = new List<ActivityEntity>();
+            for (var g = 0; g < 3; g++)
+                for (var a = 0; a < 3; a++)
+                    if ((mask & (1 << (g * 3 + a))) != 0)
+                        activities.Add(new ActivityEntity { GameId = games[g].Id, Id = ids[a] });
+            Set("_activities", activities);
+            for (var count = 1; count <= 3; count++)
+            {
+                Slots.Clear();
+                for (var i = 0; i < count; i++) AddSlot(current);
+                var original = Slots;
+                Set("_random", new Random(mask));
+                Call("RandomizeAll");
+                var feasible = count <= Capacity(0, 0);
+                Assert.True(feasible == (Get("_generationError") is null), $"Graph {mask}, count {count}");
+                if (!feasible)
+                {
+                    Assert.Same(original, Slots);
+                    continue;
+                }
+                var selections = Slots.Cast<object>().ToArray();
+                Assert.Equal(count, selections.Length);
+                Assert.Equal(count, selections.Select(s => Id(s, "GameId")).Distinct().Count());
+                Assert.Equal(count, selections.Select(s => Id(s, "ActivityId")).Distinct().Count());
+                foreach (var slot in selections)
+                    Assert.True(activities.Any(a => a.GameId == Id(slot, "GameId") && a.Id == Id(slot, "ActivityId")));
+            }
+
+            // Independent exhaustive oracle: skip a game or use an unclaimed ID.
+            int Capacity(int game, int used)
+            {
+                if (game == 3) return 0;
+                var best = Capacity(game + 1, used);
+                for (var activity = 0; activity < 3; activity++)
+                    if ((used & (1 << activity)) == 0 && (mask & (1 << (game * 3 + activity))) != 0)
+                        best = Math.Max(best, 1 + Capacity(game + 1, used | (1 << activity)));
+                return best;
+            }
+        }
+    }
+
+    [Fact]
+    public void UniqueRandomizeRepairsMultiHopChain()
+    {
+        var games = Enumerable.Range(1, 4).Select(_ => new GameEntity { Id = Guid.NewGuid() }).ToList();
+        var ids = Enumerable.Range(1, 4).Select(_ => Guid.NewGuid()).ToArray();
+        var activities = new List<ActivityEntity>();
+        for (var i = 0; i < 3; i++)
+        {
+            activities.Add(new ActivityEntity { GameId = games[i].Id, Id = ids[i] });
+            activities.Add(new ActivityEntity { GameId = games[i].Id, Id = ids[i + 1] });
+        }
+        activities.Add(new ActivityEntity { GameId = games[3].Id, Id = ids[0] });
+        Set("_games", games);
+        Set("_activities", activities);
+        Set("_random", new FirstChoiceRandom());
+        Slots.Clear();
+        foreach (var game in games) AddSlot(Activity(game.Id));
+        Call("RandomizeAll");
+        Assert.Null(Get("_generationError"));
+        Assert.Equal(4, Slots.Count);
+        for (var i = 0; i < 4; i++)
+            Assert.Equal(ids[(i + 1) % 4], Id(Slots.Cast<object>().Single(s => Id(s, "GameId") == games[i].Id), "ActivityId"));
+    }
+
+    // Stable sort keys and first-choice draws force the greedy dead end.
+    private sealed class FirstChoiceRandom : Random
+    {
+        public override int Next() => 0;
+        public override int Next(int maxValue) => 0;
+    }
+
     private static ActivityEntity Activity(Guid game) => new() { Id = Guid.NewGuid(), GameId = game };
     private IList Slots => (IList)Get("_custSelections")!;
     private List<ActivityEntity> Activities => (List<ActivityEntity>)Get("_activities")!;

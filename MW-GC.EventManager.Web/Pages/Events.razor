@@ -491,12 +491,27 @@
         _showCustomize = true;
     }
 
+    private Random _random = Random.Shared;
+
     private void RandomizeAll()
     {
         var count = _custSelections.Count > 0 ? _custSelections.Count : 3;
-        var rng = Random.Shared;
+        var rng = _random;
         var available = GetFilteredActivities();
         var grouped = available.GroupBy(a => a.GameId).ToDictionary(g => g.Key, g => g.ToList());
+        if (_custUniqueGames)
+        {
+            var matched = MatchUniqueGames(grouped, count, rng);
+            if (matched is null)
+            {
+                _generationError = "Not enough distinct activities or games match the current filters. Existing selections were kept.";
+                return;
+            }
+            _custSelections = matched;
+            _generationError = null;
+            return;
+        }
+
         var gameIds = grouped.Keys.ToList();
         var newSelections = new List<SlotSelection>();
         var usedGames = new HashSet<Guid>();
@@ -522,6 +537,57 @@
 
         _custSelections = newSelections;
         _generationError = null;
+    }
+
+    private static List<SlotSelection>? MatchUniqueGames(Dictionary<Guid, List<ActivityEntity>> grouped, int count, Random rng)
+    {
+        if (grouped.Count < count) return null;
+
+        // Randomize preferences, not feasibility. Repair earlier assignments via
+        // augmenting paths and consider every game before declaring exhaustion.
+        var games = grouped.Keys.OrderBy(_ => rng.Next()).ToArray();
+        var choices = games.ToDictionary(g => g,
+            g => grouped[g].Select(a => a.Id).Distinct().OrderBy(_ => rng.Next()).ToArray());
+        var byActivity = new Dictionary<Guid, Guid>();
+        var byGame = new Dictionary<Guid, Guid>();
+        foreach (var game in games)
+        {
+            TryAugment(game);
+            if (byGame.Count == count)
+                return byGame.Select(pair => new SlotSelection { GameId = pair.Key, ActivityId = pair.Value }).ToList();
+        }
+        return null;
+
+        void TryAugment(Guid start)
+        {
+            // Iterative traversal avoids call-stack growth on long repair chains.
+            var paths = new Dictionary<Guid, Guid>();
+            var pending = new Queue<Guid>();
+            pending.Enqueue(start);
+            while (pending.TryDequeue(out var game))
+            {
+                foreach (var activity in choices[game])
+                {
+                    if (!paths.TryAdd(activity, game)) continue;
+                    if (byActivity.TryGetValue(activity, out var owner))
+                    {
+                        pending.Enqueue(owner);
+                        continue;
+                    }
+
+                    var next = activity;
+                    while (true)
+                    {
+                        var reachedGame = paths[next];
+                        var hadPrevious = byGame.TryGetValue(reachedGame, out var previous);
+                        byGame[reachedGame] = next;
+                        byActivity[next] = reachedGame;
+                        if (!hadPrevious) return;
+                        next = previous;
+                    }
+                }
+            }
+        }
     }
 
     private List<ActivityEntity> GetRerollCandidates(int index)
