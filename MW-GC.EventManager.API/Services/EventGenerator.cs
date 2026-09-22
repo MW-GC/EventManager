@@ -5,7 +5,11 @@ namespace MW_GC.EventManager.API.Services;
 
 internal sealed class EventGenerator
 {
-    private static readonly Random Rng = Random.Shared;
+    private readonly Random Rng;
+
+    public EventGenerator() : this(Random.Shared) { }
+
+    internal EventGenerator(Random random) => Rng = random;
 
     /// <summary>
     /// Port of the reference app's <c>generateEventSelections</c>.
@@ -48,28 +52,70 @@ internal sealed class EventGenerator
         }).ToList();
     }
 
-    private static List<Selection>? GenerateUnique(List<Game> games, List<Activity> activities, int count)
+    private List<Selection>? GenerateUnique(List<Game> games, List<Activity> activities, int count)
     {
+        if (count == 0) return [];
         if (games.Count < count) return null;
 
-        var shuffled = games.OrderBy(_ => Rng.Next()).Take(count).ToList();
-        var usedActivityIds = new HashSet<Guid>();
-        var selections = new List<Selection>(count);
+        // Match game IDs to activity IDs. Randomize preference, not feasibility:
+        // an augmenting path can repair earlier choices, and a failed game does
+        // not prevent considering the remaining games. Each successful search
+        // adds one match; exhausting all games proves no requested matching exists.
+        var orderedGames = games.OrderBy(_ => Rng.Next()).ToArray();
+        var choices = orderedGames.ToDictionary(
+            g => g.Id,
+            g => activities
+                .Where(a => a.GameId == g.Id)
+                .DistinctBy(a => a.Id)
+                .OrderBy(_ => Rng.Next())
+                .ToArray());
+        var byActivity = new Dictionary<Guid, Activity>();   // activity id -> chosen activity
+        var byGame = new Dictionary<Guid, Activity>();        // game id -> chosen activity
+        var gameById = orderedGames.ToDictionary(g => g.Id);
 
-        foreach (var game in shuffled)
+        foreach (var game in orderedGames)
         {
-            var candidates = activities.Where(a => a.GameId == game.Id && !usedActivityIds.Contains(a.Id)).ToList();
-            if (candidates.Count == 0) return null;
-
-            var activity = candidates[Rng.Next(candidates.Count)];
-            usedActivityIds.Add(activity.Id);
-            selections.Add(new Selection { Game = game, Activity = activity });
+            TryAugment(game);
+            if (byGame.Count == count)
+                return byGame.Select(kvp => new Selection { Game = gameById[kvp.Key], Activity = kvp.Value }).ToList();
         }
+        return null;
 
-        return selections;
+        void TryAugment(Game start)
+        {
+            // Iterative search avoids call-stack growth on long reassignment chains.
+            var paths = new Dictionary<Guid, (Guid GameId, Activity Activity)>(); // activity id -> how it was reached
+            var pending = new Queue<Guid>();
+            pending.Enqueue(start.Id);
+            while (pending.TryDequeue(out var currentGameId))
+            {
+                foreach (var candidate in choices[currentGameId])
+                {
+                    var id = candidate.Id;
+                    if (!paths.TryAdd(id, (currentGameId, candidate))) continue;
+                    if (byActivity.TryGetValue(id, out var owner))
+                    {
+                        pending.Enqueue(owner.GameId);
+                        continue;
+                    }
+
+                    // Flip the path from this unused ID back to the unmatched game.
+                    var nextId = id;
+                    while (true)
+                    {
+                        var (gameId, activity) = paths[nextId];
+                        byGame.TryGetValue(gameId, out var previous);
+                        byGame[gameId] = activity;
+                        byActivity[activity.Id] = new Activity { Id = activity.Id, Name = activity.Name, GameId = gameId };
+                        if (previous is null) return;
+                        nextId = previous.Id;
+                    }
+                }
+            }
+        }
     }
 
-    private static List<Selection>? GenerateAllowRepeatedGames(List<Game> games, List<Activity> activities, int count)
+    private List<Selection>? GenerateAllowRepeatedGames(List<Game> games, List<Activity> activities, int count)
     {
         var knownGames = games.Select(g => g.Id).ToHashSet();
         var remaining = activities.Where(a => knownGames.Contains(a.GameId)).ToList();
