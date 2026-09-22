@@ -263,6 +263,89 @@ public class SlotRerollTests
     }
 
     [Fact]
+    public void UniqueRandomizeConsidersGamesBeyondAnUnmatchableInitialSubset()
+    {
+        var third = new GameEntity { Id = Guid.NewGuid() };
+        ((List<GameEntity>)Get("_games")!).Add(third);
+        other.Id = current.Id;
+        var thirdActivity = Activity(third.Id);
+        Set("_activities", new List<ActivityEntity> { current, other, thirdActivity });
+        Set("_random", new FirstChoiceRandom());
+        Set("_generationError", "Previous failure");
+
+        Call("RandomizeAll");
+
+        Assert.Null(Get("_generationError"));
+        Assert.Equal(2, Slots.Count);
+        var selections = Slots.Cast<object>().ToArray();
+        Assert.Equal(current.Id, Id(selections.Single(s => Id(s, "GameId") == gameA), "ActivityId"));
+        Assert.Equal(thirdActivity.Id, Id(selections.Single(s => Id(s, "GameId") == third.Id), "ActivityId"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ExhaustedGameIsUnavailableAndChoosingItPreservesSlotsAndError(bool unique)
+    {
+        Set("_custUniqueGames", unique);
+        var exhausted = new GameEntity { Id = Guid.NewGuid() };
+        ((List<GameEntity>)Get("_games")!).Add(exhausted);
+        Activities.Add(new ActivityEntity { GameId = exhausted.Id, Id = other.Id });
+        const string error = "Previous generation failure";
+        Set("_generationError", error);
+        var original = Slots;
+        var originalSlots = Slots.Cast<object>().ToArray();
+
+        var available = (List<GameEntity>)Call("GetAvailableGames", 0)!;
+        Assert.DoesNotContain(available, g => g.Id == exhausted.Id);
+        Assert.Contains(available, g => g.Id == gameA);
+        Assert.DoesNotContain(Candidates(), a => a.GameId == exhausted.Id);
+
+        // Defend against a stale dropdown callback as well as filtering options.
+        Call("ChangeSlotGame", 0, exhausted);
+        Assert.Same(original, Slots);
+        Assert.Same(originalSlots[0], Slots[0]);
+        Assert.Same(originalSlots[1], Slots[1]);
+        Assert.Equal(error, Get("_generationError"));
+
+        // Once a real assignment is available, change only this slot and clear the error.
+        var unused = Activity(exhausted.Id);
+        Activities.Add(unused);
+        Assert.Contains((List<GameEntity>)Call("GetAvailableGames", 0)!, g => g.Id == exhausted.Id);
+        Call("ChangeSlotGame", 0, exhausted);
+        Assert.Equal(exhausted.Id, Id(Slots[0]!, "GameId"));
+        Assert.Equal(unused.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.Same(originalSlots[1], Slots[1]);
+        Assert.Equal(2, Slots.Count);
+        Assert.Null(Get("_generationError"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RerollWithOnlyExhaustedGamesPreservesSlotsAndError(bool unique)
+    {
+        Set("_custUniqueGames", unique);
+        Activities.Remove(replacement);
+        var exhausted = new GameEntity { Id = Guid.NewGuid() };
+        ((List<GameEntity>)Get("_games")!).Add(exhausted);
+        Activities.Add(new ActivityEntity { GameId = exhausted.Id, Id = other.Id });
+        const string error = "Previous generation failure";
+        Set("_generationError", error);
+        var original = Slots;
+        var originalSlots = Slots.Cast<object>().ToArray();
+
+        Assert.Empty(Candidates());
+        Call("RerollSlot", 0);
+
+        Assert.Same(original, Slots);
+        Assert.Same(originalSlots[0], Slots[0]);
+        Assert.Same(originalSlots[1], Slots[1]);
+        Assert.Equal(2, Slots.Count);
+        Assert.Equal(error, Get("_generationError"));
+    }
+
+    [Fact]
     public void UniqueRandomizeMatchesSmallGraphFeasibility()
     {
         var games = Enumerable.Range(1, 3).Select(_ => new GameEntity { Id = Guid.NewGuid() }).ToList();
