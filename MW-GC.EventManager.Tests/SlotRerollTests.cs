@@ -287,12 +287,16 @@ public class SlotRerollTests
         Assert.Equal(1, handler.Reads);
     }
 
-    [Fact]
-    public async Task SuccessfulSaveWithFailedReadBackDoesNotOfferCreateRetry()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{")]
+    [InlineData("[{\"id\":\"not-a-guid\"}]")]
+    public async Task SuccessfulSaveWithFailedReadBackDoesNotOfferCreateRetry(string? readJson)
     {
         Call("RemoveSlot", 1);
         var handler = ConfigureSave();
-        handler.FailRead = true;
+        handler.FailRead = readJson is null;
+        handler.ReadJson = readJson;
         await Save();
         Assert.Equal(current.Id, handler.Saved!.WinnerActivityId);
         Assert.Equal(false, Get("_showCustomize"));
@@ -381,6 +385,7 @@ public class SlotRerollTests
         public bool Fail { get; set; }
         public bool NetworkFailure { get; set; }
         public bool FailRead { get; set; }
+        public string? ReadJson { get; set; }
         public int Reads { get; private set; }
         public EventEntity? Saved { get; private set; }
         public HttpMethod? LastWrite { get; private set; }
@@ -390,6 +395,8 @@ public class SlotRerollTests
             {
                 Reads++;
                 if (FailRead) throw new HttpRequestException("Read unavailable");
+                if (ReadJson is not null)
+                    return new(System.Net.HttpStatusCode.OK) { Content = new StringContent(ReadJson, System.Text.Encoding.UTF8, "application/json") };
                 return new(System.Net.HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(new[] { Saved! }) };
             }
             if (NetworkFailure) throw new HttpRequestException("Offline");

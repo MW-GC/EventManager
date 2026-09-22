@@ -718,7 +718,7 @@
             _showCustomize = false;
             await Reload();
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
         {
             if (saved)
                 _pageError = "The event was saved, but the list could not be refreshed. Reload the page to see the saved event.";
