@@ -168,6 +168,7 @@
                              Wrap="true">
                     <div>
                         <FluentLabel Weight="FontWeight.Bold">Game & Activity Selections (@_custSelections.Count)</FluentLabel>
+                        <FluentLabel Typo="Typography.Body">Select 1–5 activities. If only one activity is selected when saved, it automatically becomes the winner.</FluentLabel>
                         @if (_custThemedOnly || _custGameIds.Count > 0 || _custThemeIds.Count > 0 || _custHolidayIds.Count > 0)
                         {
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Filters apply when randomizing all selections or re-rolling a slot</FluentLabel>
@@ -239,7 +240,7 @@
                                         <FluentIcon Value="@(new Size16.ArrowShuffle())" />
                                     </FluentButton>
                                     <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" Title="Remove slot"
-                                                  Disabled="@(_custSelections.Count <= 2)"
+                                                  Disabled="@(_custSelections.Count <= 1)"
                                                   OnClick="@(() => RemoveSlot(idx))">
                                         <FluentIcon Value="@(new Size16.Delete())" Color="Color.Error" />
                                     </FluentButton>
@@ -612,7 +613,7 @@
 
     private void RemoveSlot(int index)
     {
-        if (_custSelections.Count <= 2) return;
+        if (_custSelections.Count <= 1) return;
         _custSelections.RemoveAt(index);
     }
 
@@ -658,6 +659,8 @@
                 UniqueGamesOnly = _custUniqueGames,
                 WinnerActivityId = _editingEvent?.WinnerActivityId
             };
+
+            entity.NormalizeWinner();
 
             if (_editingEvent is not null)
                 await EventSvc.UpdateAsync(entity);

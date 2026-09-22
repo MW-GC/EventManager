@@ -15,4 +15,13 @@ public class EventEntity : EntityBase
     /// </summary>
     public Guid? WinnerActivityId { get; set; }
     public bool UniqueGamesOnly { get; set; } = true;
+
+    /// <summary>Apply winner rules to the final selections before saving.</summary>
+    public void NormalizeWinner()
+    {
+        if (Selections.Count == 1)
+            WinnerActivityId = Selections[0].Activity.Id;
+        else if (WinnerActivityId.HasValue && !Selections.Any(s => s.Activity.Id == WinnerActivityId.Value))
+            WinnerActivityId = null;
+    }
 }

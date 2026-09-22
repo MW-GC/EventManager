@@ -146,6 +146,70 @@ public class SlotRerollTests
     }
 
     private static ActivityEntity Activity(Guid game) => new() { Id = Guid.NewGuid(), GameId = game };
+
+    [Fact]
+    public void RemoveAllowsOneSlotButNeverRemovesLastSlot()
+    {
+        Call("RemoveSlot", 1);
+        Assert.Single(Slots.Cast<object>());
+        Call("RemoveSlot", 0);
+        Assert.Single(Slots.Cast<object>());
+        Assert.Equal(current.Id, Id(Slots[0]!, "ActivityId"));
+    }
+
+    [Fact]
+    public async Task OneSlotCreateAndEditSendAutomaticWinnerAndReload()
+    {
+        Call("RemoveSlot", 1);
+        Set("_custName", "One activity");
+        var handler = new EventHttpHandler();
+        var service = new MW_GC.EventManager.Web.Services.EventService(new HttpClient(handler) { BaseAddress = new Uri("https://example.test") });
+        typeof(Events).GetProperty("EventSvc", Private)!.SetValue(page, service);
+        await (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
+        Assert.Equal(HttpMethod.Post, handler.LastWrite);
+        Assert.Equal(current.Id, handler.Saved!.WinnerActivityId);
+        Assert.Equal(current.Id, Assert.Single((List<EventEntity>)Get("_events")!).WinnerActivityId);
+
+        typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
+        Assert.Single(Slots.Cast<object>());
+        Call("RerollSlot", 0);
+        var replacementId = Id(Slots[0]!, "ActivityId");
+        await (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
+        Assert.Equal(HttpMethod.Put, handler.LastWrite);
+        Assert.Equal(replacementId, handler.Saved!.WinnerActivityId);
+        Assert.Equal("One activity", handler.Saved.Name);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OneSlotRandomizationAndRerollRespectFilters(bool unique)
+    {
+        Call("RemoveSlot", 1);
+        Set("_custUniqueGames", unique);
+        Set("_custGameIds", new List<Guid> { gameA });
+        Set("_custThemeIds", new List<Guid> { theme });
+        Set("_custHolidayIds", new List<Guid> { holiday });
+        Set("_custThemedOnly", true);
+        typeof(Events).GetMethod("RandomizeAll", Private)!.Invoke(page, null);
+        Assert.Single(Slots.Cast<object>());
+        Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.Empty(Candidates());
+    }
+
+    private sealed class EventHttpHandler : HttpMessageHandler
+    {
+        public EventEntity? Saved { get; private set; }
+        public HttpMethod? LastWrite { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Get)
+                return new(System.Net.HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(new[] { Saved! }) };
+            LastWrite = request.Method;
+            Saved = System.Text.Json.JsonSerializer.Deserialize<EventEntity>(await request.Content!.ReadAsStringAsync(cancellationToken), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            return new(System.Net.HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(Saved) };
+        }
+    }
     private IList Slots => (IList)Get("_custSelections")!;
     private List<ActivityEntity> Activities => (List<ActivityEntity>)Get("_activities")!;
     private List<ActivityEntity> Candidates() => (List<ActivityEntity>)Call("GetRerollCandidates", 0)!;

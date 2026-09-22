@@ -83,6 +83,7 @@ internal sealed class EventFunctions
             UniqueGamesOnly = request.UniqueGamesOnly
         };
 
+        entity.NormalizeWinner();
         await _store.UpsertAsync(entity, ct);
         return new CreatedResult($"/api/events/{entity.Id}", entity);
     }
@@ -96,6 +97,7 @@ internal sealed class EventFunctions
         if (entity is null) return new BadRequestResult();
 
         entity.Id = Guid.NewGuid();
+        entity.NormalizeWinner();
         await _store.UpsertAsync(entity, ct);
         return new CreatedResult($"/api/events/{entity.Id}", entity);
     }
@@ -112,6 +114,7 @@ internal sealed class EventFunctions
         if (entity is null) return new BadRequestResult();
 
         entity.Id = id;
+        entity.NormalizeWinner();
         await _store.UpsertAsync(entity, ct);
         return new OkObjectResult(entity);
     }
