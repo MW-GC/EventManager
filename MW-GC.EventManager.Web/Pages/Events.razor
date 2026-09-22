@@ -416,6 +416,8 @@
     private string? _customizeError;
     private string? _pageError;
     private EventEntity? _editingEvent;
+    // Retain across failed saves; only a new create dialog starts a new operation.
+    private Guid _createKey = Guid.NewGuid();
     private string _custName = string.Empty;
     private DateTime? _custDate = DateTime.Today;
     private DateTime? _custTime = DateTime.Today.AddHours(19);
@@ -475,6 +477,7 @@
     {
         _customizeError = null;
         _editingEvent = null;
+        _createKey = Guid.NewGuid();
         _custName = string.Empty;
         _custDate = DateTime.Today;
         _custTime = DateTime.Today.AddHours(19);
@@ -704,7 +707,7 @@
 
             using var response = _editingEvent is not null
                 ? await EventSvc.UpdateAsync(entity)
-                : await EventSvc.SaveAsync(entity);
+                : await EventSvc.SaveAsync(entity, _createKey);
             if (!response.IsSuccessStatusCode)
             {
                 var message = await response.Content.ReadAsStringAsync();

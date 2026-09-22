@@ -368,6 +368,39 @@ public class SlotRerollTests
         Assert.Equal(current.Id, ((EventEntity)Get("_detailEvent")!).WinnerActivityId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AmbiguousCreateRetryReusesKeyAndNewDialogGetsNewKey(bool timeout)
+    {
+        Call("RemoveSlot", 1);
+        var handler = ConfigureSave();
+        handler.LoseWriteResponse = true;
+        handler.Timeout = timeout;
+        await Save();
+        Assert.Equal(true, Get("_showCustomize"));
+        Assert.NotNull(Get("_customizeError"));
+        var key = Assert.Single(handler.CreateKeys);
+        Assert.True(Guid.TryParse(key, out var id));
+        Assert.NotEqual(Guid.Empty, id);
+        var committedId = handler.Saved!.Id;
+
+        handler.LoseWriteResponse = false;
+        await Save();
+        Assert.Equal(new[] { key, key }, handler.CreateKeys);
+        Assert.Equal(committedId, handler.Saved.Id);
+        Assert.Single(handler.Created);
+        Assert.Equal(false, Get("_showCustomize"));
+        Assert.Null(Get("_customizeError"));
+        Assert.Equal(committedId, Assert.Single((List<EventEntity>)Get("_events")!).Id);
+
+        typeof(Events).GetMethod("ShowCustomize", Private)!.Invoke(page, null);
+        Set("_custName", "Another event");
+        await Save();
+        Assert.NotEqual(key, handler.CreateKeys[2]);
+        Assert.Equal(2, handler.Created.Count);
+    }
+
     private EventHttpHandler ConfigureSave()
     {
         Set("_custName", "Test event");
@@ -383,6 +416,10 @@ public class SlotRerollTests
     private sealed class EventHttpHandler : HttpMessageHandler
     {
         public bool Fail { get; set; }
+        public bool LoseWriteResponse { get; set; }
+        public bool Timeout { get; set; }
+        public List<string?> CreateKeys { get; } = [];
+        public Dictionary<Guid, EventEntity> Created { get; } = [];
         public bool NetworkFailure { get; set; }
         public bool FailRead { get; set; }
         public string? ReadJson { get; set; }
@@ -403,6 +440,21 @@ public class SlotRerollTests
             LastWrite = request.Method;
             if (Fail) return new(System.Net.HttpStatusCode.BadRequest) { Content = new StringContent("Invalid activity") };
             Saved = System.Text.Json.JsonSerializer.Deserialize<EventEntity>(await request.Content!.ReadAsStringAsync(cancellationToken), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            if (request.Method == HttpMethod.Post)
+            {
+                var key = request.Headers.TryGetValues("Idempotency-Key", out var keys) ? keys.Single() : null;
+                CreateKeys.Add(key);
+                Saved!.Id = key is null ? Guid.NewGuid() : Guid.Parse(key);
+                Created.TryAdd(Saved.Id, Saved);
+                Saved = Created[Saved.Id];
+            }
+            else
+                Assert.False(request.Headers.Contains("Idempotency-Key"));
+            if (LoseWriteResponse)
+            {
+                if (Timeout) throw new TaskCanceledException("Response timed out after commit");
+                throw new HttpRequestException("Response lost after commit");
+            }
             return new(System.Net.HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(Saved) };
         }
     }

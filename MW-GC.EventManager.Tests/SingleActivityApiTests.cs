@@ -17,7 +17,10 @@ namespace MW_GC.EventManager.Tests;
 
 public class SingleActivityApiTests
 {
-    private readonly Dictionary<string, TableEntity> rows = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TableEntity> rows = new();
+    private bool failBeforeInsert;
+    private bool failAfterInsert;
+    private Func<Task>? beforeInsert;
     private readonly List<GameEntity> gameRows = [];
     private readonly List<TableEntity> activityRows = [];
     private readonly EventFunctions functions;
@@ -31,6 +34,16 @@ public class SingleActivityApiTests
         table.Setup(t => t.UpsertEntityAsync(It.IsAny<TableEntity>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
             .Callback<TableEntity, TableUpdateMode, CancellationToken>((row, _, _) => rows[row.RowKey] = new TableEntity(row))
             .ReturnsAsync(Mock.Of<Response>());
+        table.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
+            .Returns(async (TableEntity row, CancellationToken _) =>
+            {
+                if (beforeInsert is not null) await beforeInsert();
+                if (failBeforeInsert) throw new RequestFailedException(503, "Storage unavailable");
+                if (!rows.TryAdd(row.RowKey, new TableEntity(row)))
+                    throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
+                if (failAfterInsert) throw new RequestFailedException(503, "Insert response lost");
+                return Mock.Of<Response>();
+            });
         table.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, string id, IEnumerable<string> _, CancellationToken _) => Response.FromValue(rows[id], Mock.Of<Response>()));
         table.Setup(t => t.QueryAsync(It.IsAny<Expression<Func<TableEntity, bool>>>(), It.IsAny<int?>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
@@ -82,6 +95,115 @@ public class SingleActivityApiTests
             Assert.Equal(expected.Selections.Select(s => s.Activity.Id), actual.Selections.Select(s => s.Activity.Id));
             Assert.Equal(expected.WinnerActivityId, actual.WinnerActivityId);
         }
+    }
+
+    [Fact]
+    public async Task RetryingCreateAfterLostResponseReturnsSameEventWithoutOverwriting()
+    {
+        var input = Event(activity);
+        var key = Guid.NewGuid().ToString("D");
+        HttpRequest CreateRequest()
+        {
+            var request = Request(input);
+            request.Headers["Idempotency-Key"] = key;
+            return request;
+        }
+
+        // The create commits, but its response never reaches the client.
+        var first = Assert.IsType<CreatedResult>(await functions.SaveCustomized(CreateRequest(), default));
+        var saved = Assert.IsType<EventEntity>(first.Value);
+        var retry = Assert.IsType<OkObjectResult>(await functions.SaveCustomized(CreateRequest(), default));
+        Assert.Equal(saved.Id, Assert.IsType<EventEntity>(retry.Value).Id);
+        await AssertPersisted(saved);
+
+        input.Name = "Changed during retry";
+        Assert.IsType<ConflictObjectResult>(await functions.SaveCustomized(CreateRequest(), default));
+        await AssertPersisted(saved);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StorageFailureBeforeOrAfterCommitCanBeRetried(bool committed)
+    {
+        var input = Event(activity);
+        var key = Guid.NewGuid();
+        HttpRequest CreateRequest()
+        {
+            var request = Request(input);
+            request.Headers["Idempotency-Key"] = key.ToString("D");
+            return request;
+        }
+        failBeforeInsert = !committed;
+        failAfterInsert = committed;
+        await Assert.ThrowsAsync<RequestFailedException>(() => functions.SaveCustomized(CreateRequest(), default));
+        failBeforeInsert = failAfterInsert = false;
+        var result = Assert.IsAssignableFrom<ObjectResult>(await functions.SaveCustomized(CreateRequest(), default));
+        Assert.Equal(committed ? 200 : 201, result.StatusCode);
+        var saved = Assert.IsType<EventEntity>(result.Value);
+        Assert.Equal(key, saved.Id);
+        await AssertPersisted(saved);
+    }
+
+    [Fact]
+    public async Task ConcurrentCreatesWithSameKeyInsertOnlyOnce()
+    {
+        var bothEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var arrivals = 0;
+        beforeInsert = () =>
+        {
+            if (Interlocked.Increment(ref arrivals) == 2) bothEntered.SetResult();
+            return bothEntered.Task;
+        };
+        var input = Event(activity);
+        var key = Guid.NewGuid().ToString("D");
+        HttpRequest CreateRequest()
+        {
+            var request = Request(input);
+            request.Headers["Idempotency-Key"] = key;
+            return request;
+        }
+        var results = await Task.WhenAll(
+            functions.SaveCustomized(CreateRequest(), default),
+            functions.SaveCustomized(CreateRequest(), default)).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Single(results.OfType<CreatedResult>());
+        Assert.Single(results.OfType<OkObjectResult>());
+        var saved = Assert.IsType<EventEntity>(results.OfType<CreatedResult>().Single().Value);
+        await AssertPersisted(saved);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    [InlineData("efb26a9120f848dfb67b104c4096da81")]
+    public async Task InvalidCreateKeysAreRejectedWithoutWriting(string key)
+    {
+        var request = Request(Event(activity));
+        request.Headers["Idempotency-Key"] = key;
+        Assert.IsType<BadRequestObjectResult>(await functions.SaveCustomized(request, default));
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task MultipleCreateKeysAreRejectedWithoutWriting()
+    {
+        var request = Request(Event(activity));
+        request.Headers["Idempotency-Key"] = new Microsoft.Extensions.Primitives.StringValues([Guid.NewGuid().ToString("D"), Guid.NewGuid().ToString("D")]);
+        Assert.IsType<BadRequestObjectResult>(await functions.SaveCustomized(request, default));
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task LegacyCreatesStillReceiveIndependentServerIds()
+    {
+        var input = Event(activity);
+        var first = Assert.IsType<EventEntity>(Assert.IsType<CreatedResult>(await functions.SaveCustomized(Request(input), default)).Value);
+        var second = Assert.IsType<EventEntity>(Assert.IsType<CreatedResult>(await functions.SaveCustomized(Request(input), default)).Value);
+        Assert.NotEqual(input.Id, first.Id);
+        Assert.NotEqual(first.Id, second.Id);
+        var listed = Assert.IsType<List<EventEntity>>(Assert.IsType<OkObjectResult>(await functions.GetAll(Request(new { }), default)).Value);
+        Assert.Equal(2, listed.Count);
     }
 
     private async Task<EventEntity> Update(EventEntity input)

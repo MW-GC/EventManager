@@ -100,9 +100,25 @@ internal sealed class EventFunctions
         if (entity is null) return new BadRequestResult();
         if (entity.ValidateSelections() is { } error) return new BadRequestObjectResult(error);
 
-        entity.Id = Guid.NewGuid();
+        // Optional for older clients. The key identifies one create, never an update.
+        var id = Guid.NewGuid();
+        if (req.Headers.TryGetValue("Idempotency-Key", out var key) &&
+            (key.Count != 1 || !Guid.TryParseExact(key[0], "D", out id) || id == Guid.Empty))
+            return new BadRequestObjectResult("Idempotency-Key must be a non-empty GUID in D format.");
+
+        entity.Id = id;
         entity.NormalizeWinner();
-        await _store.UpsertAsync(entity, ct);
+        if (!await _store.TryAddAsync(entity, ct))
+        {
+            var existing = await _store.GetAsync(id, ct);
+            // Do not silently discard edits made after an ambiguous response, or overwrite
+            // a subsequently edited event. Storage metadata is not part of the request.
+            if (existing is null || existing.Name != entity.Name || existing.Date != entity.Date ||
+                existing.UniqueGamesOnly != entity.UniqueGamesOnly || existing.WinnerActivityId != entity.WinnerActivityId ||
+                System.Text.Json.JsonSerializer.Serialize(existing.Selections) != System.Text.Json.JsonSerializer.Serialize(entity.Selections))
+                return new ConflictObjectResult("This create was already saved with different details. Reload the page and edit the saved event.");
+            return new OkObjectResult(existing);
+        }
         return new CreatedResult($"/api/events/{entity.Id}", entity);
     }
 
