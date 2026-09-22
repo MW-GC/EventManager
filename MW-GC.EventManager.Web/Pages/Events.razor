@@ -616,6 +616,7 @@
         var activities = groups[Random.Shared.Next(groups.Count)].ToList();
         var activity = activities[Random.Shared.Next(activities.Count)];
         _custSelections[index] = new SlotSelection { GameId = activity.GameId, ActivityId = activity.Id };
+        _generationError = null;
     }
 
     private List<ActivityEntity> GetFilteredActivities()
@@ -661,12 +662,14 @@
         var acts = GetAvailableActivities(game.Id, index);
         var act = acts.Count > 0 ? acts[Random.Shared.Next(acts.Count)] : null;
         _custSelections[index] = new SlotSelection { GameId = game.Id, ActivityId = act?.Id ?? Guid.Empty };
+        _generationError = null;
     }
 
     private void ChangeSlotActivity(int index, ActivityEntity? activity)
     {
         if (activity is null) return;
         _custSelections[index] = _custSelections[index] with { ActivityId = activity.Id };
+        _generationError = null;
     }
 
     private void AddSlot()
@@ -689,12 +692,14 @@
         if (acts.Count == 0) return;
         var act = acts[rng.Next(acts.Count)];
         _custSelections.Add(new SlotSelection { GameId = gameId, ActivityId = act.Id });
+        _generationError = null;
     }
 
     private void RemoveSlot(int index)
     {
         if (_custSelections.Count <= 2) return;
         _custSelections.RemoveAt(index);
+        _generationError = null;
     }
 
     // Combines the selected date and time, then resolves the user's local UTC offset so the

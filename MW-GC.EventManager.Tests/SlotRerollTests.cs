@@ -336,6 +336,161 @@ public class SlotRerollTests
             Assert.Equal(ids[(i + 1) % 4], Id(Slots.Cast<object>().Single(s => Id(s, "GameId") == games[i].Id), "ActivityId"));
     }
 
+    [Theory]
+    [InlineData("RandomizeAll", true)]
+    [InlineData("RandomizeAll", false)]
+    [InlineData("RerollSlot", true)]
+    [InlineData("ChangeSlotGame", true)]
+    [InlineData("ChangeSlotActivity", true)]
+    [InlineData("AddSlot", false)]
+    [InlineData("RemoveSlot", true)]
+    [InlineData("ShowEditEvent", true)]
+    [InlineData("ShowCustomize", true)]
+    public void SuccessfulSelectionMutationClearsStaleGenerationError(string handler, bool unique)
+    {
+        Set("_custUniqueGames", unique);
+        Set("_random", new FirstChoiceRandom());
+        Set("_generationError", "Previous generation failure");
+        if (handler == "RemoveSlot") AddSlot(replacement);
+        if (handler == "ShowCustomize")
+        {
+            var game = new GameEntity { Id = Guid.NewGuid() };
+            ((List<GameEntity>)Get("_games")!).Add(game);
+            Activities.Add(Activity(game.Id));
+        }
+
+        switch (handler)
+        {
+            case "RerollSlot":
+                Call(handler, 0);
+                Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
+                break;
+            case "ChangeSlotGame":
+                var newGame = new GameEntity { Id = Guid.NewGuid() };
+                var newActivity = Activity(newGame.Id);
+                ((List<GameEntity>)Get("_games")!).Add(newGame);
+                Activities.Add(newActivity);
+                Call(handler, 0, newGame);
+                Assert.Equal(newGame.Id, Id(Slots[0]!, "GameId"));
+                Assert.Equal(newActivity.Id, Id(Slots[0]!, "ActivityId"));
+                break;
+            case "ChangeSlotActivity":
+                Call(handler, 0, replacement);
+                Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
+                break;
+            case "ShowEditEvent":
+                Call(handler, new EventEntity { Name = "Existing event", Selections = [] });
+                Assert.Empty(Slots);
+                break;
+            default:
+                if (handler == "RemoveSlot") Call(handler, 2);
+                else Call(handler);
+                Assert.Equal(handler is "AddSlot" or "ShowCustomize" ? 3 : 2, Slots.Count);
+                break;
+        }
+        Assert.Null(Get("_generationError"));
+    }
+
+    [Theory]
+    [InlineData("RerollSlot")]
+    [InlineData("InvalidReroll")]
+    [InlineData("ChangeSlotGame")]
+    [InlineData("ChangeSlotActivity")]
+    [InlineData("AddSlot")]
+    [InlineData("FullAddSlot")]
+    [InlineData("RemoveSlot")]
+    public void UnchangedSelectionsKeepGenerationError(string handler)
+    {
+        const string error = "Previous generation failure";
+        Set("_generationError", error);
+        if (handler == "RerollSlot") Activities.Remove(replacement);
+        if (handler == "FullAddSlot")
+            while (Slots.Count < 5) AddSlot(replacement);
+        var original = Slots;
+        var originalSlots = Slots.Cast<object>().ToArray();
+
+        switch (handler)
+        {
+            case "RerollSlot":
+            case "RemoveSlot": Call(handler, 0); break;
+            case "InvalidReroll": Call("RerollSlot", -1); break;
+            case "ChangeSlotGame":
+            case "ChangeSlotActivity": Call(handler, 0, null!); break;
+            default: Call("AddSlot"); break;
+        }
+
+        Assert.Equal(error, Get("_generationError"));
+        Assert.Same(original, Slots);
+        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void FailedRandomizeKeepsSelectionsAndErrorUntilSuccessfulRetry(bool unique)
+    {
+        Set("_custUniqueGames", unique);
+        Set("_random", new FirstChoiceRandom());
+        Set("_custGameIds", new List<Guid> { gameB });
+        var original = Slots;
+        var originalSlots = Slots.Cast<object>().ToArray();
+        Call("RandomizeAll");
+        var error = Get("_generationError");
+        Assert.NotNull(error);
+        Call("RandomizeAll");
+        Assert.Equal(error, Get("_generationError"));
+        Assert.Same(original, Slots);
+        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
+
+        Set("_custGameIds", new List<Guid>());
+        Call("RandomizeAll");
+        Assert.Null(Get("_generationError"));
+        Assert.Equal(2, Slots.Count);
+    }
+
+    [Fact]
+    public void FailedCustomizeGenerationRetainsError()
+    {
+        Activities.Clear();
+        Set("_generationError", "Previous failure");
+        Call("ShowCustomize");
+        Assert.NotNull(Get("_generationError"));
+        Assert.Empty(Slots);
+        Assert.Equal(true, Get("_showCustomize"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedSaveKeepsGenerationErrorAndSelections(bool editing)
+    {
+        const string error = "Previous generation failure";
+        Set("_generationError", error);
+        Set("_custName", "Keep this name");
+        Set("_showCustomize", true);
+        if (editing) Set("_editingEvent", new EventEntity { Id = Guid.NewGuid() });
+        using var http = new HttpClient(new FailedSaveHandler()) { BaseAddress = new Uri("https://example.invalid/") };
+        typeof(Events).GetProperty("EventSvc", Private)!.SetValue(page,
+            new MW_GC.EventManager.Web.Services.EventService(http));
+        var original = Slots;
+        var originalSlots = Slots.Cast<object>().ToArray();
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => (Task)Call("SaveCustomizedEvent")!);
+
+        Assert.Equal(error, Get("_generationError"));
+        Assert.Same(original, Slots);
+        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.Equal("Keep this name", Get("_custName"));
+        Assert.Equal(true, Get("_showCustomize"));
+        Assert.Equal(false, Get("_generating"));
+    }
+
+    private sealed class FailedSaveHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(new HttpRequestException("Save failed"));
+    }
+
     // Stable sort keys and first-choice draws force the greedy dead end.
     private sealed class FirstChoiceRandom : Random
     {
