@@ -50,10 +50,13 @@ internal sealed class EventFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events/generate")] HttpRequest req,
         CancellationToken ct)
     {
-        var request = await req.ReadFromJsonAsync<GenerateEventRequest>(ct) ?? new();
+        var request = await ReadBody<GenerateEventRequest>(req, ct);
+        if (request is null) return new BadRequestResult();
 
-        if (request.Count < 1)
-            return new BadRequestObjectResult("Count must be at least 1.");
+        if (request.Count is < 1 or > EventEntity.MaximumSelections)
+            return new BadRequestObjectResult($"Count must be between 1 and {EventEntity.MaximumSelections}.");
+        if (request.SelectedGameIds is null || request.SelectedThemeIds is null || request.SelectedHolidayIds is null)
+            return new BadRequestObjectResult("Filter lists must not be null.");
 
         var gameEntities = await _games.GetAllAsync(ct);
         var activityEntities = await _activities.GetAllAsync(ct);
@@ -83,6 +86,7 @@ internal sealed class EventFunctions
             UniqueGamesOnly = request.UniqueGamesOnly
         };
 
+        entity.NormalizeWinner();
         await _store.UpsertAsync(entity, ct);
         return new CreatedResult($"/api/events/{entity.Id}", entity);
     }
@@ -92,13 +96,34 @@ internal sealed class EventFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events")] HttpRequest req,
         CancellationToken ct)
     {
-        var entity = await req.ReadFromJsonAsync<EventEntity>(ct);
+        var entity = await ReadBody<EventEntity>(req, ct);
         if (entity is null) return new BadRequestResult();
+        if (entity.ValidateSelections() is { } error) return new BadRequestObjectResult(error);
 
-        entity.Id = Guid.NewGuid();
-        await _store.UpsertAsync(entity, ct);
+        var hasKey = req.Headers.TryGetValue("Idempotency-Key", out var keys);
+        var createId = Guid.NewGuid();
+        if (hasKey && (keys.Count != 1 || !Guid.TryParseExact(keys[0], "D", out createId) || createId == Guid.Empty))
+            return new BadRequestObjectResult("Idempotency-Key must be a non-empty GUID in D format.");
+
+        entity.Id = createId;
+        entity.NormalizeWinner();
+        // Older clients still get a fresh ID; all creates use atomic inserts.
+        if (!await _store.TryAddAsync(entity, ct))
+        {
+            var existing = await _store.GetAsync(createId, ct);
+            if (existing is not null && CreateDetails(existing) == CreateDetails(entity))
+                return new OkObjectResult(existing);
+            return new ConflictObjectResult("This create key already exists with different details. Reload the event list and edit the saved event; do not start another create to retry this save.");
+        }
         return new CreatedResult($"/api/events/{entity.Id}", entity);
     }
+
+    // Compare normalized domain data, not row keys, timestamps or ETags. Never overwrite
+    // a later edit when reconciling an ambiguous create response.
+    private static string CreateDetails(EventEntity entity) => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        entity.Name, Date = entity.Date.ToUniversalTime(), entity.Selections, entity.UniqueGamesOnly, entity.WinnerActivityId
+    });
 
     [Function("UpdateEvent")]
     public async Task<IActionResult> Update(
@@ -108,12 +133,26 @@ internal sealed class EventFunctions
         var existing = await _store.GetAsync(id, ct);
         if (existing is null) return new NotFoundResult();
 
-        var entity = await req.ReadFromJsonAsync<EventEntity>(ct);
+        var entity = await ReadBody<EventEntity>(req, ct);
         if (entity is null) return new BadRequestResult();
+        if (entity.ValidateSelections() is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = id;
+        entity.NormalizeWinner();
         await _store.UpsertAsync(entity, ct);
         return new OkObjectResult(entity);
+    }
+
+    private static async Task<T?> ReadBody<T>(HttpRequest request, CancellationToken ct) where T : class
+    {
+        try
+        {
+            return await request.ReadFromJsonAsync<T>(ct);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     [Function("DeleteEvent")]

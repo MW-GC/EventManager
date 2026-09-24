@@ -97,6 +97,29 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
             return;
         }
 
+        await _table.UpsertEntityAsync(Flatten(entity), TableUpdateMode.Replace, ct);
+    }
+
+    /// <summary>Atomically inserts without replacing an existing row, including on concurrent retries.</summary>
+    public async Task<bool> TryAddAsync(TEntity entity, CancellationToken ct = default)
+    {
+        entity.PartitionKey = _partitionKey;
+        try
+        {
+            if (ComplexProps.Length == 0)
+                await _table.AddEntityAsync(entity, ct);
+            else
+                await _table.AddEntityAsync(Flatten(entity), ct);
+            return true;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 409 && ex.ErrorCode == "EntityAlreadyExists")
+        {
+            return false;
+        }
+    }
+
+    private static TableEntity Flatten(TEntity entity)
+    {
         // Flatten complex properties to JSON strings.
         var row = new TableEntity(entity.PartitionKey, entity.RowKey);
         foreach (var prop in typeof(TEntity).GetProperties(BindingFlags.Public | BindingFlags.Instance))
@@ -112,7 +135,7 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
             else
                 row[prop.Name] = value;
         }
-        await _table.UpsertEntityAsync(row, TableUpdateMode.Replace, ct);
+        return row;
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)

@@ -9,7 +9,15 @@ public sealed class EventService(HttpClient http)
     public Task<List<EventEntity>?> GetAllAsync() => http.GetFromJsonAsync<List<EventEntity>>("api/events");
     public Task<EventEntity?> GetAsync(Guid id) => http.GetFromJsonAsync<EventEntity>($"api/events/{id}");
     public Task<HttpResponseMessage> GenerateAsync(GenerateEventRequest request) => http.PostAsJsonAsync("api/events/generate", request);
-    public Task<HttpResponseMessage> SaveAsync(EventEntity entity) => http.PostAsJsonAsync("api/events", entity);
+    public async Task<HttpResponseMessage> SaveAsync(EventEntity entity, Guid idempotencyKey)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/events")
+        {
+            Content = JsonContent.Create(entity)
+        };
+        request.Headers.Add("Idempotency-Key", idempotencyKey.ToString("D"));
+        return await http.SendAsync(request);
+    }
     public Task<HttpResponseMessage> UpdateAsync(EventEntity entity) => http.PutAsJsonAsync($"api/events/{entity.Id}", entity);
     public Task<HttpResponseMessage> DeleteAsync(Guid id) => http.DeleteAsync($"api/events/{id}");
     public Task<HttpResponseMessage> SelectWinnerAsync(Guid id) => http.PostAsync($"api/events/{id}/winner", null);

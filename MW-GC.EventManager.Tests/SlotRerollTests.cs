@@ -146,6 +146,318 @@ public class SlotRerollTests
     }
 
     private static ActivityEntity Activity(Guid game) => new() { Id = Guid.NewGuid(), GameId = game };
+
+    [Fact]
+    public void RemoveAllowsOneSlotButNeverRemovesLastSlot()
+    {
+        Call("RemoveSlot", 1);
+        Assert.Single(Slots.Cast<object>());
+        Call("RemoveSlot", 0);
+        Assert.Single(Slots.Cast<object>());
+        Assert.Equal(current.Id, Id(Slots[0]!, "ActivityId"));
+    }
+
+    [Fact]
+    public async Task OneSlotCreateAndEditSendAutomaticWinnerAndReload()
+    {
+        Call("RemoveSlot", 1);
+        Set("_custName", "One activity");
+        var handler = new EventHttpHandler();
+        var service = new MW_GC.EventManager.Web.Services.EventService(new HttpClient(handler) { BaseAddress = new Uri("https://example.test") });
+        typeof(Events).GetProperty("EventSvc", Private)!.SetValue(page, service);
+        await (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
+        Assert.Equal(HttpMethod.Post, handler.LastWrite);
+        Assert.Equal(current.Id, handler.Saved!.WinnerActivityId);
+        Assert.Equal(current.Id, Assert.Single((List<EventEntity>)Get("_events")!).WinnerActivityId);
+
+        typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
+        Assert.Single(Slots.Cast<object>());
+        Set("_custGameIds", new List<Guid> { gameA });
+        Assert.Equal(replacement.Id, Assert.Single(Candidates()).Id);
+        Call("RerollSlot", 0);
+        var replacementId = Id(Slots[0]!, "ActivityId");
+        await (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
+        Assert.Equal(HttpMethod.Put, handler.LastWrite);
+        Assert.Equal(replacementId, handler.Saved!.WinnerActivityId);
+        Assert.Equal("One activity", handler.Saved.Name);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OneSlotRandomizationAndRerollRespectFilters(bool unique)
+    {
+        Call("RemoveSlot", 1);
+        Set("_custUniqueGames", unique);
+        Set("_custGameIds", new List<Guid> { gameA });
+        Set("_custThemeIds", new List<Guid> { theme });
+        Set("_custHolidayIds", new List<Guid> { holiday });
+        Set("_custThemedOnly", true);
+        typeof(Events).GetMethod("RandomizeAll", Private)!.Invoke(page, null);
+        Assert.Single(Slots.Cast<object>());
+        Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.Empty(Candidates());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(6)]
+    public async Task InvalidSlotCountDoesNotSendRequest(int count)
+    {
+        Slots.Clear();
+        // Every slot is otherwise valid, isolating the count guard from duplicate guards.
+        Set("_custUniqueGames", false);
+        for (var i = 0; i < count; i++)
+        {
+            var activity = Activity(gameA);
+            Activities.Add(activity);
+            AddSlot(activity);
+        }
+        var handler = ConfigureSave();
+        await Save();
+        Assert.Null(handler.LastWrite);
+        Assert.Contains("Select 1–5", (string)Get("_customizeError")!);
+        Assert.Equal(true, Get("_showCustomize"));
+        Assert.Equal(false, Get("_generating"));
+    }
+
+    [Fact]
+    public async Task IncompleteSlotIsNotSilentlyDroppedIntoAnAutomaticWinner()
+    {
+        Slots[1]!.GetType().GetProperty("ActivityId")!.SetValue(Slots[1], Guid.Empty);
+        var handler = ConfigureSave();
+        await Save();
+        Assert.Null(handler.LastWrite);
+        Assert.Contains("every slot", (string)Get("_customizeError")!);
+        Assert.Equal(2, Slots.Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SaveFailureKeepsDialogAndSelectionsForRetry(bool networkFailure)
+    {
+        Call("RemoveSlot", 1);
+        var handler = ConfigureSave();
+        handler.Fail = true;
+        handler.NetworkFailure = networkFailure;
+        await Save();
+        Assert.Equal(true, Get("_showCustomize"));
+        Assert.Equal(false, Get("_generating"));
+        Assert.NotNull(Get("_customizeError"));
+        Assert.Equal(0, handler.Reads);
+        Assert.Equal(current.Id, Id(Slots[0]!, "ActivityId"));
+        handler.Fail = false;
+        handler.NetworkFailure = false;
+        await Save();
+        Assert.Null(Get("_customizeError"));
+        Assert.Equal(false, Get("_showCustomize"));
+        Assert.Equal(1, handler.Reads);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MultiSelectionEditPreservesOnlyAnExistingWinner(bool replaceWinner)
+    {
+        var handler = ConfigureSave();
+        await Save();
+        Assert.Null(handler.Saved!.WinnerActivityId);
+        handler.Saved.WinnerActivityId = current.Id;
+        typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
+        if (replaceWinner) Call("RerollSlot", 0);
+        await Save();
+        Assert.Equal(HttpMethod.Put, handler.LastWrite);
+        Assert.Equal(2, handler.Saved!.Selections.Count);
+        Assert.Equal(replaceWinner ? (Guid?)null : current.Id, handler.Saved.WinnerActivityId);
+    }
+
+    [Fact]
+    public async Task SavedSoleWinnerIsReadBackForListAndDetails()
+    {
+        Call("RemoveSlot", 1);
+        var handler = ConfigureSave();
+        await Save();
+        var persisted = Assert.Single((List<EventEntity>)Get("_events")!);
+        Assert.NotSame(handler.Saved, persisted);
+        typeof(Events).GetMethod("ShowDetails", Private)!.Invoke(page, [persisted]);
+        var detail = (EventEntity)Get("_detailEvent")!;
+        Assert.Equal(Assert.Single(detail.Selections).Activity.Id, detail.WinnerActivityId);
+        Assert.Same(persisted, detail);
+        Assert.Equal(1, handler.Reads);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{")]
+    [InlineData("[{\"id\":\"not-a-guid\"}]")]
+    public async Task SuccessfulSaveWithFailedReadBackDoesNotOfferCreateRetry(string? readJson)
+    {
+        Call("RemoveSlot", 1);
+        var handler = ConfigureSave();
+        handler.FailRead = readJson is null;
+        handler.ReadJson = readJson;
+        await Save();
+        Assert.Equal(current.Id, handler.Saved!.WinnerActivityId);
+        Assert.Equal(false, Get("_showCustomize"));
+        Assert.Null(Get("_customizeError"));
+        Assert.Contains("event was saved", (string)Get("_pageError")!);
+        Assert.Equal(false, Get("_generating"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SameGameSelectionsRequireUniqueGamesToBeDisabled(bool unique)
+    {
+        Slots.Clear();
+        AddSlot(current);
+        AddSlot(replacement);
+        Set("_custUniqueGames", unique);
+        var handler = ConfigureSave();
+        await Save();
+        if (unique)
+        {
+            Assert.Null(handler.Saved);
+            Assert.Contains("distinct", (string)Get("_customizeError")!);
+        }
+        else
+        {
+            Assert.Equal(2, handler.Saved!.Selections.Count);
+            Assert.False(handler.Saved.UniqueGamesOnly);
+            Assert.Null(handler.Saved.WinnerActivityId);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DuplicateActivityIsRejectedEvenWhenRepeatedGamesAreAllowed(bool unique)
+    {
+        Slots.Clear();
+        AddSlot(current);
+        AddSlot(current);
+        Set("_custUniqueGames", unique);
+        var handler = ConfigureSave();
+        await Save();
+        Assert.Null(handler.LastWrite);
+        Assert.Null(handler.Saved);
+        Assert.Equal(0, handler.Reads);
+        Assert.Contains("distinct", (string)Get("_customizeError")!);
+        Assert.Equal(true, Get("_showCustomize"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MultiSlotEditReducedToOneReloadsAutomaticWinner(bool hadWinner)
+    {
+        var handler = ConfigureSave();
+        await Save();
+        Assert.NotNull(handler.Saved);
+        handler.Saved.WinnerActivityId = hadWinner ? other.Id : null;
+        typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
+        Call("RemoveSlot", 1);
+        await Save();
+        Assert.Null(Get("_customizeError"));
+        Assert.Equal(HttpMethod.Put, handler.LastWrite);
+        Assert.Equal(current.Id, Assert.Single(handler.Saved.Selections).Activity.Id);
+        Assert.Equal(current.Id, handler.Saved.WinnerActivityId);
+        var listed = Assert.Single((List<EventEntity>)Get("_events")!);
+        typeof(Events).GetMethod("ShowDetails", Private)!.Invoke(page, [listed]);
+        Assert.Equal(current.Id, ((EventEntity)Get("_detailEvent")!).WinnerActivityId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AmbiguousCreateRetryReusesKeyAndNewDialogGetsNewKey(bool timeout)
+    {
+        Call("RemoveSlot", 1);
+        var handler = ConfigureSave();
+        handler.LoseWriteResponse = true;
+        handler.Timeout = timeout;
+        await Save();
+        Assert.Equal(true, Get("_showCustomize"));
+        Assert.NotNull(Get("_customizeError"));
+        var key = Assert.Single(handler.CreateKeys);
+        Assert.True(Guid.TryParse(key, out var id));
+        Assert.NotEqual(Guid.Empty, id);
+        var committedId = handler.Saved!.Id;
+
+        handler.LoseWriteResponse = false;
+        await Save();
+        Assert.Equal(new[] { key, key }, handler.CreateKeys);
+        Assert.Equal(committedId, handler.Saved.Id);
+        Assert.Single(handler.Created);
+        Assert.Equal(false, Get("_showCustomize"));
+        Assert.Null(Get("_customizeError"));
+        Assert.Equal(committedId, Assert.Single((List<EventEntity>)Get("_events")!).Id);
+
+        typeof(Events).GetMethod("ShowCustomize", Private)!.Invoke(page, null);
+        Set("_custName", "Another event");
+        await Save();
+        Assert.NotEqual(key, handler.CreateKeys[2]);
+        Assert.Equal(2, handler.Created.Count);
+    }
+
+    private EventHttpHandler ConfigureSave()
+    {
+        Set("_custName", "Test event");
+        Set("_showCustomize", true);
+        var handler = new EventHttpHandler();
+        var service = new MW_GC.EventManager.Web.Services.EventService(new HttpClient(handler) { BaseAddress = new Uri("https://example.test") });
+        typeof(Events).GetProperty("EventSvc", Private)!.SetValue(page, service);
+        return handler;
+    }
+
+    private Task Save() => (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
+
+    private sealed class EventHttpHandler : HttpMessageHandler
+    {
+        public bool Fail { get; set; }
+        public bool LoseWriteResponse { get; set; }
+        public bool Timeout { get; set; }
+        public List<string?> CreateKeys { get; } = [];
+        public Dictionary<Guid, EventEntity> Created { get; } = [];
+        public bool NetworkFailure { get; set; }
+        public bool FailRead { get; set; }
+        public string? ReadJson { get; set; }
+        public int Reads { get; private set; }
+        public EventEntity? Saved { get; private set; }
+        public HttpMethod? LastWrite { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                Reads++;
+                if (FailRead) throw new HttpRequestException("Read unavailable");
+                if (ReadJson is not null)
+                    return new(System.Net.HttpStatusCode.OK) { Content = new StringContent(ReadJson, System.Text.Encoding.UTF8, "application/json") };
+                return new(System.Net.HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(new[] { Saved! }) };
+            }
+            if (NetworkFailure) throw new HttpRequestException("Offline");
+            LastWrite = request.Method;
+            if (Fail) return new(System.Net.HttpStatusCode.BadRequest) { Content = new StringContent("Invalid activity") };
+            Saved = System.Text.Json.JsonSerializer.Deserialize<EventEntity>(await request.Content!.ReadAsStringAsync(cancellationToken), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            if (request.Method == HttpMethod.Post)
+            {
+                var key = request.Headers.TryGetValues("Idempotency-Key", out var keys) ? keys.Single() : null;
+                CreateKeys.Add(key);
+                Saved!.Id = key is null ? Guid.NewGuid() : Guid.Parse(key);
+                Created.TryAdd(Saved.Id, Saved);
+                Saved = Created[Saved.Id];
+            }
+            else
+                Assert.False(request.Headers.Contains("Idempotency-Key"));
+            if (LoseWriteResponse)
+            {
+                if (Timeout) throw new TaskCanceledException("Response timed out after commit");
+                throw new HttpRequestException("Response lost after commit");
+            }
+            return new(System.Net.HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(Saved) };
+        }
+    }
     private IList Slots => (IList)Get("_custSelections")!;
     private List<ActivityEntity> Activities => (List<ActivityEntity>)Get("_activities")!;
     private List<ActivityEntity> Candidates() => (List<ActivityEntity>)Call("GetRerollCandidates", 0)!;
