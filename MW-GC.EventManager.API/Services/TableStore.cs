@@ -18,7 +18,7 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         // Tolerate differently-cased property names so data written by earlier
-        // versions of the app still deserializes on read/import. Writes stay camelCase.
+        // versions of the app still deserializes on read. Writes stay camelCase.
         PropertyNameCaseInsensitive = true
     };
 

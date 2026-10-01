@@ -7,8 +7,8 @@ select winners.
 ## Architecture
 
 - **Web** — .NET 10 Blazor WebAssembly UI with Fluent UI; calls `/api/*`.
-- **API** — .NET 10 Azure Functions v4 isolated worker; handles CRUD, event
-  generation and legacy imports, backed by Azure Table Storage.
+- **API** — .NET 10 Azure Functions v4 isolated worker; handles CRUD and event
+  generation, backed by Azure Table Storage.
 - **Shared** — models, storage entities and request contracts used by both.
 - **Tests** — currently a combined xUnit project; separate MSTest API/Web
   projects are planned in the companion test migration.
