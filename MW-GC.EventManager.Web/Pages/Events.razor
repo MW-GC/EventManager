@@ -517,18 +517,43 @@
 
     private Random _random = Random.Shared;
 
+    private const int DefaultSlotCount = 3;
+    private const string SelectionsKeptError = "Not enough distinct activities or games match the current filters. Existing selections were kept.";
+    private const string NoMatchError = "No activities match the current filters. Adjust the filters or add activities to the library.";
+
+    // A failed generation leaves the current selections untouched, so only claim they
+    // were kept when there are some to keep.
+    private void SetGenerationFailure() =>
+        _generationError = _custSelections.Count > 0 ? SelectionsKeptError : NoMatchError;
+
     private void RandomizeAll()
     {
-        var count = _custSelections.Count > 0 ? _custSelections.Count : 3;
         var rng = _random;
         var available = GetFilteredActivities();
         var grouped = available.GroupBy(a => a.GameId).ToDictionary(g => g.Key, g => g.ToList());
+        int count;
+        if (_custSelections.Count > 0)
+        {
+            count = _custSelections.Count;
+        }
+        else
+        {
+            // Fresh dialog: aim for the default slot count but settle for what the library can fill.
+            var capacity = _custUniqueGames ? grouped.Count : available.Count;
+            if (capacity == 0)
+            {
+                SetGenerationFailure();
+                return;
+            }
+            count = Math.Min(DefaultSlotCount, capacity);
+        }
+
         if (_custUniqueGames)
         {
             var matched = MatchUniqueGames(grouped, count, rng);
             if (matched is null)
             {
-                _generationError = "Not enough distinct activities or games match the current filters. Existing selections were kept.";
+                SetGenerationFailure();
                 return;
             }
             _custSelections = matched;
@@ -548,7 +573,7 @@
                 grouped[g].Any(a => !usedActivities.Contains(a.Id))).ToList();
             if (pool.Count == 0)
             {
-                _generationError = "Not enough distinct activities or games match the current filters. Existing selections were kept.";
+                SetGenerationFailure();
                 return;
             }
             var gameId = pool[rng.Next(pool.Count)];

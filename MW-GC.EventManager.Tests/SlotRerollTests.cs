@@ -834,7 +834,7 @@ public class SlotRerollTests
         Assert.Equal(committedId, Assert.Single((List<EventEntity>)Get("_events")!).Id);
 
         typeof(Events).GetMethod("ShowCustomize", Private)!.Invoke(page, null);
-        // ShowCustomize randomizes three slots and keeps none when the pool is smaller;
+        // ShowCustomize fills as many slots as the two-game fixture allows (here two);
         // pin the single-slot state this test saves instead of relying on that draw.
         SetSlots(current);
         Set("_custName", "Another event");
@@ -928,5 +928,108 @@ public class SlotRerollTests
             slots.Add(slot);
         }
         Set("_custSelections", slots);
+    }
+
+    private const string NoMatchMessage = "No activities match the current filters. Adjust the filters or add activities to the library.";
+
+    // Replaces the fixture library with one game per entry, holding that many activities each.
+    private List<GameEntity> UseLibrary(params int[] activitiesPerGame)
+    {
+        var games = new List<GameEntity>();
+        var activities = new List<ActivityEntity>();
+        foreach (var count in activitiesPerGame)
+        {
+            var game = new GameEntity { Id = Guid.NewGuid() };
+            games.Add(game);
+            for (var i = 0; i < count; i++) activities.Add(Activity(game.Id));
+        }
+        Set("_games", games);
+        Set("_activities", activities);
+        return games;
+    }
+
+    private void AssertFilledSlots(int expected, bool distinctGames)
+    {
+        Assert.Equal(expected, Slots.Count);
+        Assert.Null(Get("_generationError"));
+        var slots = Slots.Cast<object>().ToArray();
+        Assert.Equal(expected, slots.Select(s => Id(s, "ActivityId")).Distinct().Count());
+        if (distinctGames) Assert.Equal(expected, slots.Select(s => Id(s, "GameId")).Distinct().Count());
+    }
+
+    [Theory]
+    [InlineData(1, 1, 1)]
+    [InlineData(2, 1, 2)]
+    [InlineData(2, 2, 2)]
+    [InlineData(1, 2, 1)]
+    [InlineData(3, 1, 3)]
+    [InlineData(5, 1, 3)]
+    [InlineData(8, 2, 3)]
+    public void FreshCustomizeSizesUniqueSlotsToTheGamesTheLibraryCanFill(int games, int activitiesPerGame, int expectedSlots)
+    {
+        UseLibrary(Enumerable.Repeat(activitiesPerGame, games).ToArray());
+        Set("_generationError", "Previous failure");
+        Call("ShowCustomize");
+        AssertFilledSlots(expectedSlots, distinctGames: true);
+        Assert.Equal(true, Get("_showCustomize"));
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(5, 3)]
+    public void FreshRandomizeWithRepeatedGamesAllowedSizesSlotsToTheActivities(int activities, int expectedSlots)
+    {
+        UseLibrary(activities);
+        Slots.Clear();
+        Set("_custUniqueGames", false);
+        Call("RandomizeAll");
+        AssertFilledSlots(expectedSlots, distinctGames: false);
+    }
+
+    [Fact]
+    public void FreshCustomizeWithNoActivitiesReportsNoMatchRatherThanKeptSelections()
+    {
+        UseLibrary(0, 0);
+        Set("_generationError", "Previous failure");
+        Call("ShowCustomize");
+        Assert.Empty(Slots);
+        Assert.Equal(NoMatchMessage, Get("_generationError"));
+        Assert.Equal(true, Get("_showCustomize"));
+    }
+
+    [Theory]
+    [InlineData("_custGameIds", true)]
+    [InlineData("_custGameIds", false)]
+    [InlineData("_custThemeIds", true)]
+    [InlineData("_custThemeIds", false)]
+    [InlineData("_custHolidayIds", true)]
+    [InlineData("_custHolidayIds", false)]
+    public void FreshRandomizeWithFiltersExcludingEverythingReportsNoMatch(string filter, bool unique)
+    {
+        UseLibrary(1, 1, 1);
+        Slots.Clear();
+        Set("_custUniqueGames", unique);
+        Set(filter, new List<Guid> { Guid.NewGuid() });
+        Call("RandomizeAll");
+        Assert.Empty(Slots);
+        Assert.Equal(NoMatchMessage, Get("_generationError"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RandomizeAllWithExistingSelectionsKeepsThemAndSaysSo(bool unique)
+    {
+        var games = UseLibrary(1, 1, 1);
+        SetSlots(Activities.ToArray());
+        Set("_custUniqueGames", unique);
+        Set("_custGameIds", new List<Guid> { games[0].Id, games[1].Id });
+        var original = Slots;
+        var originalSlots = Slots.Cast<object>().ToArray();
+        Call("RandomizeAll");
+        Assert.Same(original, Slots);
+        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.Contains("Existing selections were kept", (string)Get("_generationError")!);
     }
 }
