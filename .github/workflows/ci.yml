@@ -1,0 +1,43 @@
+name: CI - Build and Test
+
+on:
+  pull_request:
+    branches: [ dev, main ]
+  push:
+    branches: [ dev ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore MW-GC.EventManager.slnx
+
+      - name: Build
+        run: dotnet build MW-GC.EventManager.slnx --no-restore -c Release
+
+      - name: Test
+        run: dotnet test MW-GC.EventManager.Tests/MW-GC.EventManager.Tests.csproj --no-build -c Release --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-results
+          path: TestResults
