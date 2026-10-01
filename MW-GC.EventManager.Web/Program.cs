@@ -18,6 +18,5 @@ builder.Services.AddScoped<ActivityService>();
 builder.Services.AddScoped<EventService>();
 builder.Services.AddScoped<ThemeService>();
 builder.Services.AddScoped<HolidayService>();
-builder.Services.AddScoped<ImportService>();
 
 await builder.Build().RunAsync();
