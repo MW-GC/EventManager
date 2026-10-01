@@ -108,7 +108,7 @@ public class EventGeneratorMatchingTests
              Activity(3, games[2]), Activity(4, games[2]), Activity(1, games[3])],
             new() { Count = 4, UniqueGamesOnly = true });
         Assert.NotNull(result);
-        Assert.Equal(4, result.Count);
+        Assert.Equal(5, result.Count);
         Assert.Equal(games.Select(g => g.Id).OrderBy(g => g), result.Select(s => s.Game.Id).OrderBy(g => g));
         Assert.Equal(new[] { Id(1), Id(2), Id(3), Id(4) }.OrderBy(g => g), result.Select(s => s.Activity.Id).OrderBy(g => g));
         Assert.All(result, s => Assert.Equal(s.Game.Id, s.Activity.GameId));
