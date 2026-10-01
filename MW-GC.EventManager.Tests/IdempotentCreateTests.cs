@@ -157,6 +157,15 @@ public class IdempotentCreateTests
         void NewDialog()
         {
             typeof(Events).GetMethod("ShowCustomize", flags)!.Invoke(page, null);
+            // ShowCustomize randomizes three slots and keeps none when the pool is smaller;
+            // pin the single-slot state this test saves instead of relying on that draw.
+            var slotType = typeof(Events).GetNestedType("SlotSelection", BindingFlags.NonPublic)!;
+            var slot = Activator.CreateInstance(slotType)!;
+            slotType.GetProperty("GameId")!.SetValue(slot, selection.Game.Id);
+            slotType.GetProperty("ActivityId")!.SetValue(slot, selection.Activity.Id);
+            var slots = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(slotType))!;
+            slots.Add(slot);
+            Set("_custSelections", slots);
             Set("_custName", input.Name);
         }
         var handler = new ApiHandler(api) { Failures = 2, CommitBeforeFailure = committed, Timeout = timeout };

@@ -35,8 +35,7 @@ internal sealed class EventGenerator
         IReadOnlyList<Activity> activities,
         GenerateEventRequest request)
     {
-        if (request.Count is < 1 or > MW_GC.EventManager.Shared.Entities.EventEntity.MaximumSelections
-            || request.SelectedGameIds is null || request.SelectedThemeIds is null || request.SelectedHolidayIds is null)
+        if (request.SelectedGameIds is null || request.SelectedThemeIds is null || request.SelectedHolidayIds is null)
             return null;
 
         var index = new CandidateIndex(games, FilterActivities(activities, request));

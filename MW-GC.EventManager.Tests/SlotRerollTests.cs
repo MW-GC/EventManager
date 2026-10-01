@@ -489,6 +489,8 @@ public class SlotRerollTests
         if (handler == "RerollSlot") Activities.Remove(replacement);
         if (handler == "FullAddSlot")
             while (Slots.Count < 5) AddSlot(replacement);
+        // RemoveSlot keeps a floor of one slot, so the no-op case needs exactly one slot.
+        if (handler == "RemoveSlot") Slots.RemoveAt(1);
         var original = Slots;
         var originalSlots = Slots.Cast<object>().ToArray();
 
@@ -558,8 +560,9 @@ public class SlotRerollTests
         var original = Slots;
         var originalSlots = Slots.Cast<object>().ToArray();
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => (Task)Call("SaveCustomizedEvent")!);
+        await (Task)Call("SaveCustomizedEvent")!;
 
+        Assert.NotNull(Get("_customizeError"));
         Assert.Equal(error, Get("_generationError"));
         Assert.Same(original, Slots);
         Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
@@ -831,6 +834,9 @@ public class SlotRerollTests
         Assert.Equal(committedId, Assert.Single((List<EventEntity>)Get("_events")!).Id);
 
         typeof(Events).GetMethod("ShowCustomize", Private)!.Invoke(page, null);
+        // ShowCustomize randomizes three slots and keeps none when the pool is smaller;
+        // pin the single-slot state this test saves instead of relying on that draw.
+        SetSlots(current);
         Set("_custName", "Another event");
         await Save();
         Assert.NotEqual(key, handler.CreateKeys[2]);
@@ -908,5 +914,19 @@ public class SlotRerollTests
         type.GetProperty("GameId")!.SetValue(slot, activity.GameId);
         type.GetProperty("ActivityId")!.SetValue(slot, activity.Id);
         Slots.Add(slot);
+    }
+
+    private void SetSlots(params ActivityEntity[] activities)
+    {
+        var type = typeof(Events).GetNestedType("SlotSelection", BindingFlags.NonPublic)!;
+        var slots = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(type))!;
+        foreach (var activity in activities)
+        {
+            var slot = Activator.CreateInstance(type)!;
+            type.GetProperty("GameId")!.SetValue(slot, activity.GameId);
+            type.GetProperty("ActivityId")!.SetValue(slot, activity.Id);
+            slots.Add(slot);
+        }
+        Set("_custSelections", slots);
     }
 }

@@ -343,7 +343,6 @@ public class SingleActivityApiTests
     {
         var request = new GenerateEventRequest { Count = count };
         Assert.IsType<BadRequestObjectResult>(await functions.Generate(Request(request), default));
-        Assert.Null(new EventGenerator().Generate([game], [activity], request));
         Assert.Empty(rows);
     }
 
