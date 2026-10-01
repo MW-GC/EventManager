@@ -379,7 +379,7 @@ public class SlotRerollTests
                 Assert.Equal(count, selections.Select(s => Id(s, "GameId")).Distinct().Count());
                 Assert.Equal(count, selections.Select(s => Id(s, "ActivityId")).Distinct().Count());
                 foreach (var slot in selections)
-                    Assert.True(activities.Any(a => a.GameId == Id(slot, "GameId") && a.Id == Id(slot, "ActivityId")));
+                    Assert.Contains(activities, a => a.GameId == Id(slot, "GameId") && a.Id == Id(slot, "ActivityId"));
             }
 
             // Independent exhaustive oracle: skip a game or use an unclaimed ID.
