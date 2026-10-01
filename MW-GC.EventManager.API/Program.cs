@@ -28,6 +28,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp =>
     new TableStore<HolidayEntity>(sp.GetRequiredService<TableServiceClient>(), "Holidays", "Holiday"));
 
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EventGenerator>();
 
 builder.Build().Run();

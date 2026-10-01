@@ -1,3 +1,4 @@
+using System.Globalization;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Shared.Requests;
 
@@ -21,14 +22,29 @@ namespace MW_GC.EventManager.API.Services;
 internal sealed class EventGenerator
 {
     private readonly Random Rng;
+    private readonly TimeProvider Clock;
 
     public EventGenerator() : this(Random.Shared) { }
 
-    internal EventGenerator(Random random) => Rng = random;
+    // Dependency injection only considers public constructors and picks the longest one it can
+    // satisfy, so this is the one used once Program.cs registers a TimeProvider.
+    public EventGenerator(TimeProvider timeProvider) : this(Random.Shared, timeProvider) { }
+
+    internal EventGenerator(Random random) : this(random, TimeProvider.System) { }
+
+    internal EventGenerator(Random random, TimeProvider timeProvider)
+    {
+        Rng = random;
+        Clock = timeProvider;
+    }
+
+    /// <summary>The current instant from the injected clock. Generated Events store it as their Date.</summary>
+    public DateTimeOffset UtcNow => Clock.GetUtcNow();
 
     /// <summary>
     /// Port of the reference app's <c>generateEventSelections</c>.
-    /// Returns null when constraints cannot be satisfied.
+    /// Returns null when constraints cannot be satisfied, including a negative count in
+    /// either mode. A count of zero returns an empty list.
     /// </summary>
     public List<Selection>? Generate(
         IReadOnlyList<Game> games,
@@ -36,6 +52,8 @@ internal sealed class EventGenerator
         GenerateEventRequest request)
     {
         if (request.SelectedGameIds is null || request.SelectedThemeIds is null || request.SelectedHolidayIds is null)
+            return null;
+        if (request.Count < 0)
             return null;
 
         var index = new CandidateIndex(games, FilterActivities(activities, request));
@@ -45,10 +63,30 @@ internal sealed class EventGenerator
             : GenerateAllowRepeatedGames(index, request.Count);
     }
 
-    public static string GenerateName()
+    /// <summary>
+    /// Default name for a generated Event: "Event - " plus the clock's current time shifted by
+    /// <paramref name="utcOffsetMinutes"/> (the caller's local offset from UTC; null means UTC),
+    /// formatted with the invariant culture, e.g. "Event - Oct 1, 7:30 PM". Callers validate the
+    /// offset against <see cref="GenerateEventRequest.MaximumUtcOffsetMinutes"/> first.
+    /// </summary>
+    public string GenerateName(int? utcOffsetMinutes = null) => GenerateName(UtcNow, utcOffsetMinutes);
+
+    /// <summary>
+    /// Names an Event for an instant already read from the injected clock, so the stored Date and
+    /// the name come from a single clock read.
+    /// </summary>
+    public string GenerateName(DateTimeOffset utcNow, int? utcOffsetMinutes)
     {
-        var now = DateTimeOffset.UtcNow;
-        return $"Event - {now:MMM d, h:mm tt}";
+        var local = utcNow.ToOffset(TimeSpan.FromMinutes(utcOffsetMinutes ?? 0));
+        return "Event - " + local.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Picks one of <paramref name="selections"/> uniformly at random with the injected RNG.</summary>
+    public Selection PickWinner(IReadOnlyList<Selection> selections)
+    {
+        if (selections.Count == 0)
+            throw new ArgumentException("At least one selection is required to pick a winner.", nameof(selections));
+        return selections[Rng.Next(selections.Count)];
     }
 
     // Selected ids become hash sets once and each activity is tested with a plain loop, so

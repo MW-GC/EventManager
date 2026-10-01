@@ -57,6 +57,8 @@ internal sealed class EventFunctions
             return new BadRequestObjectResult($"Count must be between 1 and {EventEntity.MaximumSelections}.");
         if (request.SelectedGameIds is null || request.SelectedThemeIds is null || request.SelectedHolidayIds is null)
             return new BadRequestObjectResult("Filter lists must not be null.");
+        if (request.UtcOffsetMinutes is < -GenerateEventRequest.MaximumUtcOffsetMinutes or > GenerateEventRequest.MaximumUtcOffsetMinutes)
+            return new BadRequestObjectResult($"UtcOffsetMinutes must be between -{GenerateEventRequest.MaximumUtcOffsetMinutes} and {GenerateEventRequest.MaximumUtcOffsetMinutes}.");
 
         var gameEntities = await _games.GetAllAsync(ct);
         var activityEntities = await _activities.GetAllAsync(ct);
@@ -77,11 +79,13 @@ internal sealed class EventFunctions
         if (selections is null)
             return new BadRequestObjectResult("Not enough games/activities to satisfy the request.");
 
+        // One clock read names the Event in the caller's local time and stores the UTC instant.
+        var now = _generator.UtcNow;
         var entity = new EventEntity
         {
             Id = Guid.NewGuid(),
-            Name = EventGenerator.GenerateName(),
-            Date = DateTimeOffset.UtcNow,
+            Name = _generator.GenerateName(now, request.UtcOffsetMinutes),
+            Date = now,
             Selections = selections,
             UniqueGamesOnly = request.UniqueGamesOnly
         };
@@ -175,7 +179,7 @@ internal sealed class EventFunctions
         if (entity.Selections.Count == 0)
             return new BadRequestObjectResult("Event has no selections.");
 
-        var winner = entity.Selections[Random.Shared.Next(entity.Selections.Count)];
+        var winner = _generator.PickWinner(entity.Selections);
         entity.WinnerActivityId = winner.Activity.Id;
         await _store.UpsertAsync(entity, ct);
         return new OkObjectResult(entity);
