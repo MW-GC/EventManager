@@ -35,6 +35,9 @@ internal sealed class EventGenerator
         IReadOnlyList<Activity> activities,
         GenerateEventRequest request)
     {
+        if (request.SelectedGameIds is null || request.SelectedThemeIds is null || request.SelectedHolidayIds is null)
+            return null;
+
         var index = new CandidateIndex(games, FilterActivities(activities, request));
 
         return request.UniqueGamesOnly
