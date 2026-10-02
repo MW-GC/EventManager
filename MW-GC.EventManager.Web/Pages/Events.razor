@@ -8,6 +8,8 @@
 @inject HolidayService HolidaySvc
 
 <PageHeader Title="Events" Subtitle="Generate, view, and manage gaming events" />
+<ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
+<ApiErrorBar Message="@_actionError" OnDismiss="@(() => _actionError = null)" />
 @if (_pageError is not null)
 {
     <div role="alert">@_pageError</div>
@@ -16,12 +18,15 @@
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
     @if (_events is null)
     {
-        <FluentCard AreaRestricted="false">
-            <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
-                <FluentProgressRing />
-                <FluentLabel>Loading events...</FluentLabel>
-            </div>
-        </FluentCard>
+        @if (!_loads.Failed("Events"))
+        {
+            <FluentCard AreaRestricted="false">
+                <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
+                    <FluentProgressRing />
+                    <FluentLabel>Loading events...</FluentLabel>
+                </div>
+            </FluentCard>
+        }
     }
     else
     {
@@ -308,6 +313,7 @@
                 @_detailEvent.Date.ToLocalTime().ToString("f")
             </FluentLabel>
 
+            <ApiErrorBar Message="@_winnerError" />
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding-right: 8px;">
                 @if (_detailEvent.Selections.Count == 1 && _detailEvent.WinnerActivityId == _detailEvent.Selections[0].Activity.Id)
                 {
@@ -482,22 +488,28 @@
         else if (!add) list.Remove(id);
     }
 
-    protected override async Task OnInitializedAsync()
-    {
-        var t1 = EventSvc.GetAllAsync();
-        var t2 = GameSvc.GetAllAsync();
-        var t3 = ActivitySvc.GetAllAsync();
-        var t4 = ThemeSvc.GetAllAsync();
-        var t5 = HolidaySvc.GetAllAsync();
-        await Task.WhenAll(t1, t2, t3, t4, t5);
-        _events = await t1 ?? [];
-        _games = await t2 ?? [];
-        _activities = await t3 ?? [];
-        _themes = await t4 ?? [];
-        _holidays = await t5 ?? [];
-    }
+    // Each list loads on its own: a failed Theme or Holiday list never hides the Events, and
+    // the error bar names what failed, with Retry.
+    private readonly LoadErrors _loads = new();
+    // A failed Delete, shown above the list; the list stays as it was.
+    private string? _actionError;
+    // A failed Select Winner, shown in the details dialog; the previous winner stays.
+    private string? _winnerError;
 
+    protected override Task OnInitializedAsync() => LoadAll();
+
+    private Task LoadAll() => Task.WhenAll(
+        _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
+        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
+        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []),
+        _loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? []),
+        _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []));
+
+    // Throws on failure: SaveCustomizedEvent reports a saved-but-not-refreshed Event itself.
     private async Task Reload() => _events = await EventSvc.GetAllAsync() ?? [];
+
+    // Never throws: a failed refresh keeps the current list and names Events in the error bar.
+    private Task RefreshEvents() => _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []);
 
     #region Customize Dialog
 
@@ -861,12 +873,9 @@
             using var response = _editingEvent is not null
                 ? await EventSvc.UpdateAsync(entity)
                 : await EventSvc.SaveAsync(entity, _createKey);
-            if (!response.IsSuccessStatusCode)
+            if (await ApiResult.ErrorAsync(response) is { } error)
             {
-                var message = await response.Content.ReadAsStringAsync();
-                _customizeError = string.IsNullOrWhiteSpace(message)
-                    ? $"Unable to save the event ({(int)response.StatusCode}). Please try again."
-                    : $"Unable to save the event: {message}";
+                _customizeError = $"The event was not saved. {error}";
                 return;
             }
 
@@ -893,15 +902,26 @@
         _detailEvent = e;
         _detailComments = [];
         _detailCommentError = null;
+        _winnerError = null;
     }
 
     private async Task SelectWinner(Guid activityId)
     {
         if (_detailEvent is null) return;
-        _detailEvent.WinnerActivityId = activityId;
-        await EventSvc.UpdateAsync(_detailEvent);
-        await Reload();
-        _detailEvent = _events?.FirstOrDefault(ev => ev.Id == _detailEvent.Id);
+        var detail = _detailEvent;
+        var previous = detail.WinnerActivityId;
+        detail.WinnerActivityId = activityId;
+        var error = await ApiResult.SendAsync(() => EventSvc.UpdateAsync(detail));
+        if (error is not null)
+        {
+            // Not saved: put the previous winner back so the dialog and the list stay truthful.
+            detail.WinnerActivityId = previous;
+            _winnerError = $"The winner was not saved. {error}";
+            return;
+        }
+        _winnerError = null;
+        await RefreshEvents();
+        _detailEvent = _events?.FirstOrDefault(ev => ev.Id == detail.Id);
     }
 
     // The comment is stored on the Activity, so prefer the loaded Activity over the
@@ -924,19 +944,10 @@
     {
         if (!_detailComments.TryGetValue(activityId, out var val)) return;
         _detailCommentError = null;
-        try
+        if (await ApiResult.SendAsync(() => ActivitySvc.UpdateCommentsAsync(activityId, val)) is { } error)
         {
-            using var response = await ActivitySvc.UpdateCommentsAsync(activityId, val);
-            if (!response.IsSuccessStatusCode)
-            {
-                // Keep the typed text in the buffer so the user can retry.
-                _detailCommentError = $"Unable to save the comments ({(int)response.StatusCode}). Your text is kept; try again.";
-                return;
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _detailCommentError = "The comments could not be saved. Your text is kept; try again.";
+            // Keep the typed text in the buffer so the user can retry.
+            _detailCommentError = ApiResult.CommentsNotSaved(error);
             return;
         }
 
@@ -958,6 +969,12 @@
 
     #endregion
 
-    private async Task Delete(Guid id) { await EventSvc.DeleteAsync(id); await Reload(); }
+    private async Task Delete(Guid id)
+    {
+        var error = await ApiResult.SendAsync(() => EventSvc.DeleteAsync(id));
+        _actionError = error is null ? null : $"The event was not deleted. {error}";
+        if (error is not null) return;
+        await RefreshEvents();
+    }
 }
 

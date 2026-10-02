@@ -3,16 +3,21 @@
 @inject HolidayService HolidaySvc
 
 <PageHeader Title="Holidays" Subtitle="Manage holiday tags for activity categorization" />
+<ApiErrorBar Message="@_loads.Message" OnRetry="Reload" />
+<ApiErrorBar Message="@_actionError" OnDismiss="@(() => _actionError = null)" />
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
     @if (_holidays is null)
     {
-        <FluentCard AreaRestricted="false">
-            <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
-                <FluentProgressRing />
-                <FluentLabel>Loading holidays...</FluentLabel>
-            </div>
-        </FluentCard>
+        @if (!_loads.Failed("Holidays"))
+        {
+            <FluentCard AreaRestricted="false">
+                <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
+                    <FluentProgressRing />
+                    <FluentLabel>Loading holidays...</FluentLabel>
+                </div>
+            </FluentCard>
+        }
     }
     else
     {
@@ -74,14 +79,15 @@
 
 @if (_showCreate)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 400px;" OnDismiss="@((DialogEventArgs _) => _showCreate = false)">
+    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 400px;" OnDismiss="@((DialogEventArgs _) => HideCreate())">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Add Holiday</FluentLabel>
             <EditForm Model="@_create" OnValidSubmit="Create">
                 <DataAnnotationsValidator />
                 <FluentTextField @bind-Value="_create.Name" Label="Name" Required Style="width: 100%;" Placeholder="Enter holiday name..." />
+                <ApiErrorBar Message="@_dialogError" />
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
-                    <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => _showCreate = false)">Cancel</FluentButton>
+                    <FluentButton Appearance="Appearance.Neutral" OnClick="HideCreate">Cancel</FluentButton>
                     <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Add())">Add Holiday</FluentButton>
                 </FluentStack>
             </EditForm>
@@ -97,6 +103,7 @@
             <EditForm Model="@_edit" OnValidSubmit="SaveEdit">
                 <DataAnnotationsValidator />
                 <FluentTextField @bind-Value="_edit.Name" Label="Name" Required Style="width: 100%;" />
+                <ApiErrorBar Message="@_dialogError" />
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
                     <FluentButton Appearance="Appearance.Neutral" OnClick="CancelEdit">Cancel</FluentButton>
                     <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Save())">Save</FluentButton>
@@ -123,29 +130,55 @@
         : _holidays!.Where(h => h.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)).AsQueryable();
 
     private void HandleSearch() { }
-    protected override async Task OnInitializedAsync() => await Reload();
-    private async Task Reload() => _holidays = await HolidaySvc.GetAllAsync() ?? [];
+    // A failed load shows the message and Retry instead of the spinner; the list keeps its previous contents.
+    private readonly LoadErrors _loads = new();
+    // A failed Delete, shown above the list; the list stays as it was.
+    private string? _actionError;
+    // A failed create or update, shown inside the open dialog, which keeps the entered data.
+    private string? _dialogError;
 
-    private void ShowCreate() { _create = new HolidayEntity { Name = string.Empty }; _showCreate = true; }
+    protected override async Task OnInitializedAsync() => await Reload();
+    private Task Reload() => _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []);
+
+    private void ShowCreate() { _create = new HolidayEntity { Name = string.Empty }; _dialogError = null; _showCreate = true; }
+    private void HideCreate() { _showCreate = false; _dialogError = null; }
 
     private async Task Create()
     {
         if (_saving) return;
         _saving = true;
-        try { await HolidaySvc.CreateAsync(_create); _showCreate = false; await Reload(); }
+        try
+        {
+            _dialogError = await ApiResult.SendAsync(() => HolidaySvc.CreateAsync(_create));
+            if (_dialogError is not null) return;
+            _showCreate = false;
+            await Reload();
+        }
         finally { _saving = false; }
     }
 
-    private void ShowEdit(HolidayEntity h) { _editingId = h.Id; _edit = new HolidayEntity { Id = h.Id, Name = h.Name }; }
-    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; }
+    private void ShowEdit(HolidayEntity h) { _dialogError = null; _editingId = h.Id; _edit = new HolidayEntity { Id = h.Id, Name = h.Name }; }
+    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; _dialogError = null; }
 
     private async Task SaveEdit()
     {
         if (_saving) return;
         _saving = true;
-        try { await HolidaySvc.UpdateAsync(_edit); CancelEdit(); await Reload(); }
+        try
+        {
+            _dialogError = await ApiResult.SendAsync(() => HolidaySvc.UpdateAsync(_edit));
+            if (_dialogError is not null) return;
+            CancelEdit();
+            await Reload();
+        }
         finally { _saving = false; }
     }
 
-    private async Task Delete(Guid id) { await HolidaySvc.DeleteAsync(id); await Reload(); }
+    private async Task Delete(Guid id)
+    {
+        var error = await ApiResult.SendAsync(() => HolidaySvc.DeleteAsync(id));
+        _actionError = error is null ? null : $"The holiday was not deleted. {error}";
+        if (error is not null) return;
+        await Reload();
+    }
 }

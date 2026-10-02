@@ -6,16 +6,21 @@
 @inject HolidayService HolidaySvc
 
 <PageHeader Title="Games" Subtitle="Manage your game library" />
+<ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
+<ApiErrorBar Message="@_actionError" OnDismiss="@(() => _actionError = null)" />
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
     @if (_games is null)
     {
-        <FluentCard AreaRestricted="false">
-            <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
-                <FluentProgressRing />
-                <FluentLabel>Loading games...</FluentLabel>
-            </div>
-        </FluentCard>
+        @if (!_loads.Failed("Games"))
+        {
+            <FluentCard AreaRestricted="false">
+                <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
+                    <FluentProgressRing />
+                    <FluentLabel>Loading games...</FluentLabel>
+                </div>
+            </FluentCard>
+        }
     }
     else
     {
@@ -146,6 +151,7 @@
                             Paste a Steam store URL or game website to auto-fetch the icon
                         </FluentLabel>
                     </div>
+                    <ApiErrorBar Message="@_dialogError" />
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
                         <FluentButton Appearance="Appearance.Neutral" OnClick="HideCreate">Cancel</FluentButton>
                         <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Add())">Add Game</FluentButton>
@@ -174,6 +180,7 @@
                             Paste a Steam store URL or game website to auto-fetch the icon
                         </FluentLabel>
                     </div>
+                    <ApiErrorBar Message="@_dialogError" />
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
                         <FluentButton Appearance="Appearance.Neutral" OnClick="CancelEdit">Cancel</FluentButton>
                         <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Save())">Save Changes</FluentButton>
@@ -241,30 +248,27 @@
 
     private void HandleSearch() { }
 
-    protected override async Task OnInitializedAsync()
-    {
-        var t1 = GameSvc.GetAllAsync();
-        var t2 = ActivitySvc.GetAllAsync();
-        var t3 = ThemeSvc.GetAllAsync();
-        var t4 = HolidaySvc.GetAllAsync();
-        await Task.WhenAll(t1, t2, t3, t4);
-        _games = await t1 ?? [];
-        _activities = await t2 ?? [];
-        _themes = await t3 ?? [];
-        _holidays = await t4 ?? [];
-    }
+    // A failed list keeps its previous contents and is named in the page's error bar with Retry.
+    private readonly LoadErrors _loads = new();
+    // A failed Delete, shown above the list; the list stays as it was.
+    private string? _actionError;
+    // A failed create or update, shown inside the open dialog, which keeps the entered data.
+    private string? _dialogError;
 
-    private async Task Reload()
-    {
-        var t1 = GameSvc.GetAllAsync();
-        var t2 = ActivitySvc.GetAllAsync();
-        await Task.WhenAll(t1, t2);
-        _games = await t1 ?? [];
-        _activities = await t2 ?? [];
-    }
+    protected override Task OnInitializedAsync() => LoadAll();
 
-    private void ShowCreate() { _create = new GameEntity { Name = string.Empty }; _showCreate = true; }
-    private void HideCreate() => _showCreate = false;
+    private Task LoadAll() => Task.WhenAll(
+        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
+        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []),
+        _loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? []),
+        _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []));
+
+    private Task Reload() => Task.WhenAll(
+        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
+        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []));
+
+    private void ShowCreate() { _create = new GameEntity { Name = string.Empty }; _dialogError = null; _showCreate = true; }
+    private void HideCreate() { _showCreate = false; _dialogError = null; }
 
     private async Task CreateGame()
     {
@@ -272,7 +276,8 @@
         _saving = true;
         try
         {
-            await GameSvc.CreateAsync(_create);
+            _dialogError = await ApiResult.SendAsync(() => GameSvc.CreateAsync(_create));
+            if (_dialogError is not null) return;
             _showCreate = false;
             await Reload();
         }
@@ -281,6 +286,7 @@
 
     private void ShowEdit(GameEntity g)
     {
+        _dialogError = null;
         _editingId = g.Id;
         _edit = new GameEntity
         {
@@ -293,7 +299,7 @@
         _editActivities = _activities?.Where(a => a.GameId == g.Id).ToList() ?? [];
     }
 
-    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; _editActivities = []; }
+    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; _editActivities = []; _dialogError = null; }
 
     private async Task SaveEdit()
     {
@@ -301,12 +307,19 @@
         _saving = true;
         try
         {
-            await GameSvc.UpdateAsync(_edit);
+            _dialogError = await ApiResult.SendAsync(() => GameSvc.UpdateAsync(_edit));
+            if (_dialogError is not null) return;
             CancelEdit();
             await Reload();
         }
         finally { _saving = false; }
     }
 
-    private async Task Delete(Guid id) { await GameSvc.DeleteAsync(id); await Reload(); }
+    private async Task Delete(Guid id)
+    {
+        var error = await ApiResult.SendAsync(() => GameSvc.DeleteAsync(id));
+        _actionError = error is null ? null : $"The game was not deleted. {error}";
+        if (error is not null) return;
+        await Reload();
+    }
 }

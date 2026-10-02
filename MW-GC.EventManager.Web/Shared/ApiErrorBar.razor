@@ -1,0 +1,42 @@
+@* An API failure message: a session-expired message gets a sign-in link, a load failure gets Retry. *@
+@inject NavigationManager Nav
+
+@if (!string.IsNullOrEmpty(Message))
+{
+    <div role="alert" style="margin-bottom: 12px;">
+        <FluentMessageBar Intent="MessageIntent.Error" AllowDismiss="false" FadeIn="false">
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true">
+                <span>@Message</span>
+                @if (ApiResult.IsSessionExpired(Message))
+                {
+                    @* target="_top" makes this a real page load, so the Blazor router does not swallow the /.auth route. *@
+                    <a href="@ApiResult.SignInUrl("/" + Nav.ToBaseRelativePath(Nav.Uri))" target="_top">Sign in</a>
+                }
+                @if (OnRetry.HasDelegate)
+                {
+                    <FluentButton Appearance="Appearance.Outline" Loading="@_retrying" OnClick="Retry">Retry</FluentButton>
+                }
+                @if (OnDismiss.HasDelegate)
+                {
+                    <FluentButton Appearance="Appearance.Stealth" OnClick="@(() => OnDismiss.InvokeAsync())">Dismiss</FluentButton>
+                }
+            </FluentStack>
+        </FluentMessageBar>
+    </div>
+}
+
+@code {
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public EventCallback OnDismiss { get; set; }
+
+    private bool _retrying;
+
+    private async Task Retry()
+    {
+        if (_retrying) return;
+        _retrying = true;
+        try { await OnRetry.InvokeAsync(); }
+        finally { _retrying = false; }
+    }
+}

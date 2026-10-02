@@ -6,16 +6,21 @@
 @inject HolidayService HolidaySvc
 
 <PageHeader Title="Activities" Subtitle="Manage game activities, rules, and descriptions" />
+<ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
+<ApiErrorBar Message="@_actionError" OnDismiss="@(() => _actionError = null)" />
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
     @if (_activities is null)
     {
-        <FluentCard AreaRestricted="false">
-            <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
-                <FluentProgressRing />
-                <FluentLabel>Loading activities...</FluentLabel>
-            </div>
-        </FluentCard>
+        @if (!_loads.Failed("Activities"))
+        {
+            <FluentCard AreaRestricted="false">
+                <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
+                    <FluentProgressRing />
+                    <FluentLabel>Loading activities...</FluentLabel>
+                </div>
+            </FluentCard>
+        }
     }
     else
     {
@@ -147,6 +152,10 @@
                     <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px;">Track notes about this activity's performance in events</FluentLabel>
                     <FluentTextArea @bind-Value="_detailComments" @bind-Value:after="OnDetailCommentsChanged" Style="width: 100%;" Rows="4"
                                     Placeholder="Add notes about success, challenges, or improvements..." />
+                    @if (_commentsError is not null)
+                    {
+                        <div role="alert" style="color: var(--error); margin-top: 6px;">@_commentsError</div>
+                    }
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.Start" Style="margin-top: 8px;">
                         <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Disabled="@(!_detailCommentsDirty)" Loading="@_savingComments" OnClick="SaveDetailComments">
                             Save Comments
@@ -169,7 +178,7 @@
     var model = isEdit ? _edit : _create;
 
     <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 680px;"
-                  OnDismiss="@((DialogEventArgs _) => { if (isEdit) CancelEdit(); else _showCreate = false; })">
+                  OnDismiss="@((DialogEventArgs _) => { if (isEdit) CancelEdit(); else HideCreate(); })">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">@(isEdit ? "Edit Activity" : "Add Activity")</FluentLabel>
             <EditForm Model="@model" OnValidSubmit="@(isEdit ? SaveEdit : CreateActivity)">
@@ -227,8 +236,9 @@
                         </FluentGridItem>
                     </FluentGrid>
 
+                    <ApiErrorBar Message="@_dialogError" />
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
-                        <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => { if (isEdit) CancelEdit(); else _showCreate = false; })">Cancel</FluentButton>
+                        <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => { if (isEdit) CancelEdit(); else HideCreate(); })">Cancel</FluentButton>
                         <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving"
                                       IconStart="@(isEdit ? new Size16.Save() : (Icon)new Size16.Add())">
                             @(isEdit ? "Save Changes" : "Add Activity")
@@ -286,35 +296,47 @@
 
     private void HandleSearch() { }
 
-    protected override async Task OnInitializedAsync()
-    {
-        var t1 = ActivitySvc.GetAllAsync();
-        var t2 = GameSvc.GetAllAsync();
-        var t3 = ThemeSvc.GetAllAsync();
-        var t4 = HolidaySvc.GetAllAsync();
-        await Task.WhenAll(t1, t2, t3, t4);
-        _activities = await t1 ?? [];
-        _games = await t2 ?? [];
-        _themes = await t3 ?? [];
-        _holidays = await t4 ?? [];
-    }
+    // A failed list keeps its previous contents and is named in the page's error bar with Retry.
+    private readonly LoadErrors _loads = new();
+    // A failed Delete or Duplicate, shown above the list; the list stays as it was.
+    private string? _actionError;
+    // A failed create or update, shown inside the open dialog, which keeps the entered data.
+    private string? _dialogError;
+    // A failed comment save, shown under the box; the typed text stays and Save stays enabled.
+    private string? _commentsError;
 
-    private async Task Reload() => _activities = await ActivitySvc.GetAllAsync() ?? [];
+    protected override Task OnInitializedAsync() => LoadAll();
+
+    private Task LoadAll() => Task.WhenAll(
+        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []),
+        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
+        _loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? []),
+        _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []));
+
+    private Task Reload() => _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []);
 
     private static ActivityEntity NewActivity() => new() { Name = string.Empty };
 
-    private void ShowCreate() { _create = NewActivity(); _showCreate = true; }
+    private void ShowCreate() { _create = NewActivity(); _dialogError = null; _showCreate = true; }
+    private void HideCreate() { _showCreate = false; _dialogError = null; }
 
     private async Task CreateActivity()
     {
         if (_saving) return;
         _saving = true;
-        try { await ActivitySvc.CreateAsync(_create); _showCreate = false; await Reload(); }
+        try
+        {
+            _dialogError = await ApiResult.SendAsync(() => ActivitySvc.CreateAsync(_create));
+            if (_dialogError is not null) return;
+            _showCreate = false;
+            await Reload();
+        }
         finally { _saving = false; }
     }
 
     private void ShowEdit(ActivityEntity a)
     {
+        _dialogError = null;
         _editingId = a.Id;
         _edit = new ActivityEntity
         {
@@ -324,13 +346,19 @@
         };
     }
 
-    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; }
+    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; _dialogError = null; }
 
     private async Task SaveEdit()
     {
         if (_saving) return;
         _saving = true;
-        try { await ActivitySvc.UpdateAsync(_edit); CancelEdit(); await Reload(); }
+        try
+        {
+            _dialogError = await ApiResult.SendAsync(() => ActivitySvc.UpdateAsync(_edit));
+            if (_dialogError is not null) return;
+            CancelEdit();
+            await Reload();
+        }
         finally { _saving = false; }
     }
 
@@ -339,6 +367,7 @@
         _detailActivity = a;
         _detailComments = a.Comments ?? string.Empty;
         _detailCommentsDirty = false;
+        _commentsError = null;
     }
 
     private void CloseDetails()
@@ -346,6 +375,7 @@
         _detailActivity = null;
         _detailComments = string.Empty;
         _detailCommentsDirty = false;
+        _commentsError = null;
     }
 
     private void OnDetailCommentsChanged() =>
@@ -357,15 +387,36 @@
         _savingComments = true;
         try
         {
-            await ActivitySvc.UpdateCommentsAsync(_detailActivity.Id, _detailComments);
-            _detailActivity.Comments = _detailComments;
+            var activity = _detailActivity;
+            var error = await ApiResult.SendAsync(() => ActivitySvc.UpdateCommentsAsync(activity.Id, _detailComments));
+            if (error is not null)
+            {
+                // Keep the typed text and the dirty flag so Save stays enabled for a retry.
+                _commentsError = ApiResult.CommentsNotSaved(error);
+                return;
+            }
+            _commentsError = null;
+            activity.Comments = _detailComments;
             _detailCommentsDirty = false;
             await Reload();
         }
         finally { _savingComments = false; }
     }
 
-    private async Task Duplicate(Guid id) { await ActivitySvc.DuplicateAsync(id); await Reload(); }
-    private async Task Delete(Guid id) { await ActivitySvc.DeleteAsync(id); await Reload(); }
+    private async Task Duplicate(Guid id)
+    {
+        var error = await ApiResult.SendAsync(() => ActivitySvc.DuplicateAsync(id));
+        _actionError = error is null ? null : $"The activity was not duplicated. {error}";
+        if (error is not null) return;
+        await Reload();
+    }
+
+    private async Task Delete(Guid id)
+    {
+        var error = await ApiResult.SendAsync(() => ActivitySvc.DeleteAsync(id));
+        _actionError = error is null ? null : $"The activity was not deleted. {error}";
+        if (error is not null) return;
+        await Reload();
+    }
 }
 
