@@ -60,7 +60,7 @@ public class SingleActivityApiTests
             .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(activityRows, null, Mock.Of<Response>())]));
         service.Setup(s => s.GetTableClient("games")).Returns(games.Object);
         service.Setup(s => s.GetTableClient("activities")).Returns(activities.Object);
-        functions = new EventFunctions(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new());
+        functions = new EventFunctions(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
     }
 
     private EventEntity Event(params Activity[] activities) => new()
@@ -136,7 +136,8 @@ public class SingleActivityApiTests
         }
         failBeforeInsert = !committed;
         failAfterInsert = committed;
-        await Assert.ThrowsAsync<RequestFailedException>(() => functions.SaveCustomized(CreateRequest(), default));
+        // #45: a storage outage is now logged and answered with a 503, not thrown to the host.
+        Assert.Equal(503, Assert.IsType<ObjectResult>(await functions.SaveCustomized(CreateRequest(), default)).StatusCode);
         failBeforeInsert = failAfterInsert = false;
         var result = Assert.IsAssignableFrom<ObjectResult>(await functions.SaveCustomized(CreateRequest(), default));
         Assert.Equal(committed ? 200 : 201, result.StatusCode);
@@ -459,8 +460,9 @@ public class SingleActivityApiTests
             request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
             return request;
         }
-        Assert.IsType<BadRequestResult>(await functions.SaveCustomized(Body(), default));
-        Assert.IsType<BadRequestResult>(await functions.Update(Body(), saved.Id, default));
+        // #45: the body guard answers a 400 with a short message (BadRequestObjectResult).
+        Assert.IsType<BadRequestObjectResult>(await functions.SaveCustomized(Body(), default));
+        Assert.IsType<BadRequestObjectResult>(await functions.Update(Body(), saved.Id, default));
         Assert.Single(rows);
         Assert.Equal(activity.Id, (await Read(saved.Id)).WinnerActivityId);
     }

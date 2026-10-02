@@ -172,7 +172,7 @@ public class EventGenerationClockAndRngTests
             service.Setup(s => s.GetTableClient("events")).Returns(Events.Object);
             service.Setup(s => s.GetTableClient("games")).Returns(games.Object);
             service.Setup(s => s.GetTableClient("activities")).Returns(activities.Object);
-            Functions = new EventFunctions(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), generator);
+            Functions = new EventFunctions(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), generator, Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
         }
 
         public void VerifyUpserts(int times)
