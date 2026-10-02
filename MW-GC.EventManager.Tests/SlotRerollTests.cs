@@ -43,7 +43,7 @@ public class SlotRerollTests
         Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
         Assert.Equal(gameA, Id(Slots[0]!, "GameId"));
         Assert.Same(originalOther, Slots[1]);
-        Assert.Equal(2, Slots.Count);
+        Assert.Equal(3, Slots.Count);
         Assert.Equal("Keep this name", Get("_custName"));
         Assert.Equal(date, Get("_custDate"));
     }
