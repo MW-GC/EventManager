@@ -5,6 +5,16 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!--
+      NETSDK1188 ("has a resource with the locale 'cs'. This locale is not recognized by .NET") is raised for
+      every satellite resource folder (cs, de, ... zh-Hant) of Microsoft.TestPlatform.ObjectModel and
+      Microsoft.TestPlatform.TestHost, which Microsoft.NET.Test.Sdk brings in. The SDK checks each folder name
+      with CultureInfo.GetCultureInfo, and a build running with invariant globalization
+      (DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1, for example on a host without ICU) cannot resolve any culture.
+      A newer Microsoft.NET.Test.Sdk (18.10.1) does not change it. The warning is harmless: the SDK still
+      copies the resources. Suppressed for this test project only.
+    -->
+    <NoWarn>$(NoWarn);NETSDK1188</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

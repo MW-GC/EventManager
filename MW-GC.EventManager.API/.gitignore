@@ -4,6 +4,9 @@
 # Azure Functions localsettings file
 local.settings.json
 
+# Visual Studio connected-services settings for this machine (local emulator)
+serviceDependencies.local.json
+
 # User-specific files
 *.suo
 *.user

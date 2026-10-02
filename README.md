@@ -17,6 +17,10 @@ Production deployment uses Azure Static Web Apps and Azure Functions. The
 [Web routing configuration](MW-GC.EventManager.Web/staticwebapp.config.json)
 restricts application and API access to the `admin` role.
 
+The Function App is a bring-your-own backend linked to the Static Web App. The
+`admin` role is enforced by the Static Web App route table, and the linked
+backend accepts traffic only through the Static Web App.
+
 ## Prerequisites and setup
 
 Install the .NET 10 SDK. For the full local app, also install Azure Functions
@@ -119,9 +123,14 @@ Package restore requires access to NuGet or a populated local package cache.
 
 ## Further documentation
 
-- [Companion documentation directory](docs/) — the `/docs` material is expected
-  from the separate docs relocation work. This directory is **not present yet**;
-  the link will resolve once that companion work lands.
+- [Idempotent customized event creates](docs/idempotent-event-creates.md) — how
+  `POST /api/events` uses the `Idempotency-Key` header so retries do not
+  create duplicate events.
+- [Customized event create retries](docs/event-create-retries.md) — moved;
+  points to the idempotent creates guide.
+- Agent guides: [issue tracker](docs/agents/issue-tracker.md),
+  [triage labels](docs/agents/triage-labels.md) and
+  [domain docs](docs/agents/domain.md).
 - [Solution/project layout](MW-GC.EventManager.slnx).
 - [API startup and storage configuration](MW-GC.EventManager.API/Program.cs).
 - [Web startup and API configuration](MW-GC.EventManager.Web/Program.cs).
