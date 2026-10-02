@@ -1,0 +1,86 @@
+name: CI - Build and Test
+
+on:
+  pull_request:
+    branches: [ dev, main ]
+  push:
+    branches: [ dev ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Restore
+        run: dotnet restore MW-GC.EventManager.slnx
+
+      - name: Build
+        id: build
+        run: dotnet build MW-GC.EventManager.slnx --no-restore -c Release
+
+      - name: Test
+        id: test
+        continue-on-error: true
+        run: dotnet test MW-GC.EventManager.Tests/MW-GC.EventManager.Tests.csproj --no-build -c Release --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-results
+          path: TestResults
+
+      - name: Create CTRF report
+        id: create-ctrf
+        if: always()
+        run: |
+          mkdir -p ctrf
+          if [[ -f TestResults/test-results.trx ]]; then
+            dotnet tool run DotnetCtrfJsonReporter -p TestResults/test-results.trx -f test-results.json -d ctrf
+          fi
+
+      - name: Publish test report
+        id: ctrf
+        if: ${{ always() && hashFiles('ctrf/*.json') != '' }}
+        uses: ctrf-io/github-test-reporter@7974087018bf4857cf5a9d78723e152038c3fa31 # v1
+        with:
+          report-path: './ctrf/*.json'
+          summary-report: true
+          failed-report: true
+          summary: true
+          annotate: true
+          # Fork and Dependabot PRs run with a read-only GITHUB_TOKEN, so a PR comment would fail with 403.
+          # They still get the job summary, the annotations and the ctrf-report artifact.
+          pull-request: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+          update-comment: true
+          overwrite-comment: true
+          always-latest-comment: true
+          comment-tag: ${{ github.workflow }}-${{ github.job }}
+          upload-artifact: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fail if any step failed
+        if: ${{ always() && (steps.build.outcome == 'failure' || steps.test.outcome == 'failure' || steps.create-ctrf.outcome == 'failure' || steps.ctrf.outcome == 'failure') }}
+        run: exit 1
