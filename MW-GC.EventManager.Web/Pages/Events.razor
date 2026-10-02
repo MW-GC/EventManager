@@ -264,9 +264,21 @@
 
                     @if (_custSelections.Count < 5)
                     {
-                        <FluentButton Appearance="Appearance.Outline" Style="width: 100%;" OnClick="AddSlot" IconStart="@(new Size16.Add())">
+                        var addSlotBlocked = GetAddSlotBlockedReason();
+                        <FluentButton Appearance="Appearance.Outline" Style="width: 100%;" OnClick="AddSlot" IconStart="@(new Size16.Add())"
+                                      Title="@(addSlotBlocked ?? "Add an activity slot")"
+                                      Disabled="@(addSlotBlocked is not null)">
                             Add Activity Slot
                         </FluentButton>
+                        @* Show the live reason; a click that found nothing to add raises it to an alert. *@
+                        @if (addSlotBlocked is not null && addSlotBlocked == _addSlotError)
+                        {
+                            <div role="alert" style="color: var(--error); font-size: 0.75rem;">@addSlotBlocked</div>
+                        }
+                        else if (addSlotBlocked is not null)
+                        {
+                            <FluentLabel role="status" Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">@addSlotBlocked</FluentLabel>
+                        }
                     }
                 </FluentStack>
             </FluentStack>
@@ -379,11 +391,18 @@
                             {
                                 <FluentDivider />
                                 <div>
-                                    <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments</FluentLabel>
+                                    <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments (Activity note, shared across all Events)</FluentLabel>
+                                    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-bottom: 4px;">
+                                        Stored on the activity, not on this Event: every Event that uses this activity, and the Activities page, show the same note.
+                                    </FluentLabel>
                                     <FluentTextArea Value="@GetDetailComment(selection.Activity.Id)"
                                                     ValueChanged="@(v => SetDetailComment(selection.Activity.Id, v))"
                                                     Style="width: 100%;" Rows="3"
                                                     Placeholder="Add notes about this activity's success, challenges, or improvements..." />
+                                    @if (_detailCommentError is not null)
+                                    {
+                                        <div role="alert" style="color: var(--error); margin-top: 6px;">@_detailCommentError</div>
+                                    }
                                     <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Style="margin-top: 6px;"
                                                   Disabled="@(!IsDetailCommentDirty(selection.Activity.Id))"
                                                   OnClick="@(() => SaveDetailComment(selection.Activity.Id))">
@@ -432,10 +451,13 @@
     private List<Guid> _custHolidayIds = [];
     private bool _custUniqueGames = true;
     private string? _generationError;
+    // Set when Add Activity Slot is invoked with nothing to add.
+    private string? _addSlotError;
     private List<SlotSelection> _custSelections = [];
 
     // Detail dialog comment editing
     private Dictionary<Guid, string> _detailComments = [];
+    private string? _detailCommentError;
 
     private record SlotSelection
     {
@@ -493,6 +515,7 @@
         _custHolidayIds = [];
         _custUniqueGames = true;
         _custSelections = [];
+        _addSlotError = null;
         RandomizeAll();
         _showCustomize = true;
     }
@@ -512,6 +535,7 @@
         _custThemeIds = [];
         _custHolidayIds = [];
         _custSelections = e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id }).ToList();
+        _addSlotError = null;
         _showCustomize = true;
     }
 
@@ -639,21 +663,41 @@
         }
     }
 
-    private List<ActivityEntity> GetRerollCandidates(int index)
+    // The one candidate pool for changing a single slot: Activities that pass the filters,
+    // are not in any other slot and, with Unique games only on, belong to a Game no other
+    // slot uses. freeSlot is the slot being replaced (re-roll); pass -1 to keep every slot (add).
+    private List<ActivityEntity> GetSlotCandidates(int freeSlot, bool uniqueGames)
     {
-        if (index < 0 || index >= _custSelections.Count || _games is null) return [];
-
-        var current = _custSelections[index];
-        var others = _custSelections.Where((_, i) => i != index).ToList();
+        var others = _custSelections.Where((_, i) => i != freeSlot).ToList();
         var usedActivities = others.Select(s => s.ActivityId).ToHashSet();
         var usedGames = others.Select(s => s.GameId).ToHashSet();
-        var knownGames = _games.Select(g => g.Id).ToHashSet();
 
         return GetFilteredActivities().Where(a =>
-            knownGames.Contains(a.GameId) &&
-            a.Id != current.ActivityId &&
             !usedActivities.Contains(a.Id) &&
-            (!_custUniqueGames || !usedGames.Contains(a.GameId))).ToList();
+            (!uniqueGames || !usedGames.Contains(a.GameId))).ToList();
+    }
+
+    private List<ActivityEntity> GetRerollCandidates(int index)
+    {
+        if (index < 0 || index >= _custSelections.Count) return [];
+        var current = _custSelections[index].ActivityId;
+        return GetSlotCandidates(index, _custUniqueGames).Where(a => a.Id != current).ToList();
+    }
+
+    private List<ActivityEntity> GetAddSlotCandidates() => GetSlotCandidates(-1, _custUniqueGames);
+
+    private const string AddSlotFullReason = "An Event holds at most 5 activities.";
+    private const string AddSlotUniqueGamesReason = "Every Game with an unused activity is already in a slot. Turn off Unique games only to repeat a Game.";
+    private const string AddSlotNoMatchReason = "No unused activity matches the current filters. Adjust the filters or add activities to the library.";
+
+    // Null when Add Activity Slot can add a slot; otherwise the reason it cannot.
+    private string? GetAddSlotBlockedReason()
+    {
+        if (_custSelections.Count >= EventEntity.MaximumSelections) return AddSlotFullReason;
+        if (GetAddSlotCandidates().Count > 0) return null;
+        return _custUniqueGames && GetSlotCandidates(-1, uniqueGames: false).Count > 0
+            ? AddSlotUniqueGamesReason
+            : AddSlotNoMatchReason;
     }
 
     private void RerollSlot(int index)
@@ -725,24 +769,20 @@
 
     private void AddSlot()
     {
-        if (_custSelections.Count >= 5) return;
+        // The button is disabled with this reason; a stale click still says why nothing was added.
+        if (GetAddSlotBlockedReason() is { } reason)
+        {
+            _addSlotError = reason;
+            return;
+        }
+
+        // Pick a game first, as re-roll does, so games with larger catalogs do not dominate.
         var rng = Random.Shared;
-        var available = GetFilteredActivities();
-        var usedGames = _custSelections.Select(s => s.GameId).ToHashSet();
-        var usedActivities = _custSelections.Select(s => s.ActivityId).ToHashSet();
-
-        var grouped = available.Where(a => !usedActivities.Contains(a.Id))
-            .GroupBy(a => a.GameId).ToDictionary(g => g.Key, g => g.ToList());
-        var pool = _custUniqueGames
-            ? grouped.Keys.Where(g => !usedGames.Contains(g)).ToList()
-            : grouped.Keys.ToList();
-        if (pool.Count == 0) return;
-
-        var gameId = pool[rng.Next(pool.Count)];
-        var acts = grouped[gameId].Where(a => !usedActivities.Contains(a.Id)).ToList();
-        if (acts.Count == 0) return;
+        var groups = GetAddSlotCandidates().GroupBy(a => a.GameId).ToList();
+        var acts = groups[rng.Next(groups.Count)].ToList();
         var act = acts[rng.Next(acts.Count)];
-        _custSelections.Add(new SlotSelection { GameId = gameId, ActivityId = act.Id });
+        _custSelections.Add(new SlotSelection { GameId = act.GameId, ActivityId = act.Id });
+        _addSlotError = null;
         _generationError = null;
     }
 
@@ -852,6 +892,7 @@
     {
         _detailEvent = e;
         _detailComments = [];
+        _detailCommentError = null;
     }
 
     private async Task SelectWinner(Guid activityId)
@@ -863,26 +904,55 @@
         _detailEvent = _events?.FirstOrDefault(ev => ev.Id == _detailEvent.Id);
     }
 
-    private string GetDetailComment(Guid activityId)
-    {
-        if (_detailComments.TryGetValue(activityId, out var val)) return val;
-        var act = _detailEvent?.Selections.FirstOrDefault(s => s.Activity.Id == activityId)?.Activity;
-        return act?.Comments ?? string.Empty;
-    }
+    // The comment is stored on the Activity, so prefer the loaded Activity over the
+    // Event's snapshot, which keeps the text the Activity had when the Event was saved.
+    private string GetStoredComment(Guid activityId) =>
+        (_activities?.FirstOrDefault(a => a.Id == activityId) is { } activity
+            ? activity.Comments
+            : _detailEvent?.Selections.FirstOrDefault(s => s.Activity.Id == activityId)?.Activity.Comments)
+        ?? string.Empty;
+
+    private string GetDetailComment(Guid activityId) =>
+        _detailComments.TryGetValue(activityId, out var val) ? val : GetStoredComment(activityId);
 
     private void SetDetailComment(Guid activityId, string value) => _detailComments[activityId] = value;
 
-    private bool IsDetailCommentDirty(Guid activityId)
-    {
-        if (!_detailComments.TryGetValue(activityId, out var val)) return false;
-        var original = _detailEvent?.Selections.FirstOrDefault(s => s.Activity.Id == activityId)?.Activity.Comments ?? string.Empty;
-        return val != original;
-    }
+    private bool IsDetailCommentDirty(Guid activityId) =>
+        _detailComments.TryGetValue(activityId, out var val) && val != GetStoredComment(activityId);
 
     private async Task SaveDetailComment(Guid activityId)
     {
         if (!_detailComments.TryGetValue(activityId, out var val)) return;
-        await ActivitySvc.UpdateCommentsAsync(activityId, val);
+        _detailCommentError = null;
+        try
+        {
+            using var response = await ActivitySvc.UpdateCommentsAsync(activityId, val);
+            if (!response.IsSuccessStatusCode)
+            {
+                // Keep the typed text in the buffer so the user can retry.
+                _detailCommentError = $"Unable to save the comments ({(int)response.StatusCode}). Your text is kept; try again.";
+                return;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _detailCommentError = "The comments could not be saved. Your text is kept; try again.";
+            return;
+        }
+
+        // Saved: update the loaded Activity and the Event's snapshot so the box, the
+        // dirty check and a reopened dialog all show the saved text.
+        if (_activities?.FirstOrDefault(a => a.Id == activityId) is { } activity)
+            activity.Comments = val;
+        if (_detailEvent is not null)
+        {
+            var index = _detailEvent.Selections.FindIndex(s => s.Activity.Id == activityId);
+            if (index >= 0)
+            {
+                var selection = _detailEvent.Selections[index];
+                _detailEvent.Selections[index] = selection with { Activity = selection.Activity with { Comments = val } };
+            }
+        }
         _detailComments.Remove(activityId);
     }
 
