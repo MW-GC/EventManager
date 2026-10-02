@@ -1,5 +1,7 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject NavigationManager Nav
 
 <FluentDesignTheme @bind-Mode="@_themeMode" StorageName="theme" />
 
@@ -37,7 +39,22 @@
         </FluentNavMenu>
 
         <FluentBodyContent Style="padding: 24px; overflow-y: auto;">
-            @Body
+            @* Only the page body sits inside the boundary, so the header and nav menu keep working after a page crashes. *@
+            <ErrorBoundary @ref="_boundary">
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent>
+                    <div role="alert">
+                        <FluentMessageBar Intent="MessageIntent.Error" AllowDismiss="false" FadeIn="false">
+                            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true">
+                                <span>Something went wrong on this page.</span>
+                                <FluentButton Appearance="Appearance.Outline" OnClick="Recover">Recover</FluentButton>
+                            </FluentStack>
+                        </FluentMessageBar>
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
         </FluentBodyContent>
     </FluentStack>
 </FluentStack>
@@ -50,6 +67,16 @@
 
 @code {
     private DesignThemeModes _themeMode = DesignThemeModes.System;
+    private ErrorBoundary? _boundary;
+
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+
+    // Going to another page clears a caught error, so the new page renders.
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => Recover();
+
+    private void Recover() => _boundary?.Recover();
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
 
     private void ToggleTheme()
     {

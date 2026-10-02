@@ -9,7 +9,8 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 var apiBase = builder.Configuration["ApiBaseUrl"] ?? builder.HostEnvironment.BaseAddress;
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBase) });
+// A stalled API call ends with a message after 30 seconds instead of a spinner that never stops.
+builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBase), Timeout = TimeSpan.FromSeconds(30) });
 
 builder.Services.AddFluentUIComponents();
 
