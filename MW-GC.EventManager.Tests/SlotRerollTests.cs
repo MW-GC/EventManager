@@ -1032,4 +1032,251 @@ public class SlotRerollTests
         Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
         Assert.Contains("Existing selections were kept", (string)Get("_generationError")!);
     }
+
+    private const string AddSlotNoMatchReason = "No unused activity matches the current filters. Adjust the filters or add activities to the library.";
+
+    private string? AddSlotBlockedReason() => (string?)Call("GetAddSlotBlockedReason");
+    private List<ActivityEntity> AddSlotCandidates() => (List<ActivityEntity>)Call("GetAddSlotCandidates")!;
+
+    // A blocked Add Activity Slot keeps every slot, keeps the generation error and says why.
+    private void AssertAddSlotRefused(string expectedReason)
+    {
+        const string error = "Previous generation failure";
+        Set("_generationError", error);
+        var original = Slots;
+        var originalSlots = Slots.Cast<object>().ToArray();
+        Assert.Equal(expectedReason, AddSlotBlockedReason());
+
+        Call("AddSlot");
+
+        Assert.Same(original, Slots);
+        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.Equal(expectedReason, Get("_addSlotError"));
+        Assert.Equal(error, Get("_generationError"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AddSlotWithEveryActivityInASlotIsDisabledWithReason(bool unique)
+    {
+        // Three Games of one Activity each: Create Event fills all three and nothing is left.
+        UseLibrary(1, 1, 1);
+        Call("ShowCustomize");
+        AssertFilledSlots(3, distinctGames: true);
+        Set("_custUniqueGames", unique);
+        Assert.Empty(AddSlotCandidates());
+        AssertAddSlotRefused(AddSlotNoMatchReason);
+    }
+
+    [Fact]
+    public void UniqueGamesBlocksAddWhenOnlyUsedGamesHaveFreeActivities()
+    {
+        var games = UseLibrary(2, 1, 1);
+        var free = Activities[1];
+        SetSlots(Activities[0], Activities[2], Activities[3]);
+        Set("_custUniqueGames", true);
+        Assert.Empty(AddSlotCandidates());
+        AssertAddSlotRefused("Every Game with an unused activity is already in a slot. Turn off Unique games only to repeat a Game.");
+
+        Set("_custUniqueGames", false);
+        Assert.Null(AddSlotBlockedReason());
+        Assert.Equal(free.Id, Assert.Single(AddSlotCandidates()).Id);
+        Call("AddSlot");
+        Assert.Equal(4, Slots.Count);
+        Assert.Equal(free.Id, Id(Slots[3]!, "ActivityId"));
+        Assert.Equal(games[0].Id, Id(Slots[3]!, "GameId"));
+        Assert.Null(Get("_addSlotError"));
+        Assert.Equal(4, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+    }
+
+    [Theory]
+    [InlineData("_custGameIds", true)]
+    [InlineData("_custGameIds", false)]
+    [InlineData("_custThemeIds", true)]
+    [InlineData("_custThemeIds", false)]
+    [InlineData("_custHolidayIds", true)]
+    [InlineData("_custHolidayIds", false)]
+    public void FiltersExcludingEveryUnusedActivityDisableAddWithReason(string filter, bool unique)
+    {
+        var games = UseLibrary(1, 1, 1, 1);
+        SetSlots(Activities[0], Activities[1], Activities[2]);
+        Set("_custUniqueGames", unique);
+        Set(filter, new List<Guid> { Guid.NewGuid() });
+        Assert.Empty(AddSlotCandidates());
+        AssertAddSlotRefused(AddSlotNoMatchReason);
+
+        // Clearing the filter frees the fourth Game: one click adds exactly that one slot.
+        Set(filter, new List<Guid>());
+        Assert.Null(AddSlotBlockedReason());
+        Call("AddSlot");
+        Assert.Equal(4, Slots.Count);
+        Assert.Equal(Activities[3].Id, Id(Slots[3]!, "ActivityId"));
+        Assert.Equal(games[3].Id, Id(Slots[3]!, "GameId"));
+        Assert.Null(Get("_addSlotError"));
+        Assert.Null(Get("_generationError"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AddSlotAddsExactlyOneUniqueSlotPerClickUntilTheLimit(bool unique)
+    {
+        UseLibrary(2, 2, 2, 2, 2, 2);
+        Set("_custUniqueGames", unique);
+        for (var run = 0; run < 50; run++)
+        {
+            SetSlots(Activities[0]);
+            for (var expected = 2; expected <= EventEntity.MaximumSelections; expected++)
+            {
+                Assert.Null(AddSlotBlockedReason());
+                Call("AddSlot");
+                Assert.Equal(expected, Slots.Count);
+                var slots = Slots.Cast<object>().ToArray();
+                Assert.Equal(expected, slots.Select(s => Id(s, "ActivityId")).Distinct().Count());
+                if (unique) Assert.Equal(expected, slots.Select(s => Id(s, "GameId")).Distinct().Count());
+                Assert.All(slots, s => Assert.Contains(Activities, a => a.Id == Id(s, "ActivityId") && a.GameId == Id(s, "GameId")));
+            }
+            AssertAddSlotRefused("An Event holds at most 5 activities.");
+        }
+    }
+
+    [Fact]
+    public void RerollAndAddSlotShareOneCandidatePool()
+    {
+        // Same filters, same used Activities, same Unique games rule: the slot being re-rolled
+        // is the only difference, so removing it makes the re-roll pool the add pool.
+        Activities.Add(Activity(gameA));
+        Activities.Add(Activity(gameB));
+        Activities.Add(Activity(Guid.NewGuid()));
+        foreach (var unique in new[] { true, false })
+        {
+            Set("_custUniqueGames", unique);
+            var rerollPool = Candidates().Select(a => a.Id).ToHashSet();
+            var removed = Slots[0]!;
+            Slots.RemoveAt(0);
+            var addPool = AddSlotCandidates().Select(a => a.Id).ToHashSet();
+            Slots.Insert(0, removed);
+            addPool.Remove(current.Id);
+            Assert.Equal(addPool, rerollPool);
+        }
+    }
+
+    // Event details: the Winner's comment is stored on the Activity.
+    private (EventEntity Event, CommentHttpHandler Handler) OpenWinnerDetails(string? stored)
+    {
+        current.Name = "Winner activity";
+        current.Comments = stored;
+        var game = new MW_GC.EventManager.Shared.Models.Game { Id = gameA, Name = "Game A" };
+        var snapshot = new MW_GC.EventManager.Shared.Models.Activity { Id = current.Id, GameId = gameA, Name = current.Name, Comments = stored };
+        var otherSnapshot = new MW_GC.EventManager.Shared.Models.Activity { Id = other.Id, GameId = gameB, Name = "Other" };
+        var ev = new EventEntity
+        {
+            Id = Guid.NewGuid(),
+            Name = "Game night",
+            Selections =
+            [
+                new() { Game = game, Activity = snapshot },
+                new() { Game = new MW_GC.EventManager.Shared.Models.Game { Id = gameB, Name = "Game B" }, Activity = otherSnapshot }
+            ],
+            WinnerActivityId = current.Id
+        };
+        Set("_events", new List<EventEntity> { ev });
+        var handler = new CommentHttpHandler();
+        typeof(Events).GetProperty("ActivitySvc", Private)!.SetValue(page,
+            new MW_GC.EventManager.Web.Services.ActivityService(new HttpClient(handler) { BaseAddress = new Uri("https://example.test") }));
+        Call("ShowDetails", ev);
+        return (ev, handler);
+    }
+
+    private string DetailComment(Guid id) => (string)Call("GetDetailComment", id)!;
+    private bool DetailCommentDirty(Guid id) => (bool)Call("IsDetailCommentDirty", id)!;
+    private Task SaveComment(Guid id) => (Task)Call("SaveDetailComment", id)!;
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Old note")]
+    public async Task SavedCommentStaysVisibleAfterSaveAndReopen(string? stored)
+    {
+        var (ev, handler) = OpenWinnerDetails(stored);
+        Assert.Equal(stored ?? string.Empty, DetailComment(current.Id));
+        Call("SetDetailComment", current.Id, "Ran long; start earlier");
+        Assert.True(DetailCommentDirty(current.Id));
+
+        await SaveComment(current.Id);
+
+        Assert.Equal(HttpMethod.Patch, handler.LastMethod);
+        Assert.Equal($"/api/activities/{current.Id}/comments", handler.LastPath);
+        Assert.Contains("Ran long; start earlier", handler.LastBody);
+        Assert.Null(Get("_detailCommentError"));
+        Assert.Equal("Ran long; start earlier", DetailComment(current.Id));
+        Assert.False(DetailCommentDirty(current.Id));
+        // Both in-memory copies carry the saved text: the Activity list and the Event's snapshot.
+        Assert.Equal("Ran long; start earlier", current.Comments);
+        Assert.Equal("Ran long; start earlier", ev.Selections[0].Activity.Comments);
+        Assert.Null(ev.Selections[1].Activity.Comments);
+
+        Set("_detailEvent", null!);
+        Call("ShowDetails", Assert.Single((List<EventEntity>)Get("_events")!));
+        Assert.Equal("Ran long; start earlier", DetailComment(current.Id));
+        Assert.False(DetailCommentDirty(current.Id));
+
+        // A list reload returns the Event as stored, whose snapshot still holds the old text;
+        // the box follows the Activity, where the comment is actually saved.
+        var reloaded = new EventEntity
+        {
+            Id = ev.Id,
+            Name = ev.Name,
+            Selections = [ev.Selections[0] with { Activity = ev.Selections[0].Activity with { Comments = stored } }, ev.Selections[1]],
+            WinnerActivityId = current.Id
+        };
+        Call("ShowDetails", reloaded);
+        Assert.Equal("Ran long; start earlier", DetailComment(current.Id));
+        Assert.False(DetailCommentDirty(current.Id));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedCommentSaveKeepsTypedTextAndShowsError(bool networkFailure)
+    {
+        var (ev, handler) = OpenWinnerDetails("Old note");
+        handler.Fail = true;
+        handler.NetworkFailure = networkFailure;
+        Call("SetDetailComment", current.Id, "Typed but not saved");
+
+        await SaveComment(current.Id);
+
+        Assert.False(string.IsNullOrWhiteSpace((string?)Get("_detailCommentError")));
+        Assert.Equal("Typed but not saved", DetailComment(current.Id));
+        Assert.True(DetailCommentDirty(current.Id));
+        Assert.Equal("Old note", current.Comments);
+        Assert.Equal("Old note", ev.Selections[0].Activity.Comments);
+
+        // A retry that succeeds clears the error and keeps the text.
+        handler.Fail = false;
+        handler.NetworkFailure = false;
+        await SaveComment(current.Id);
+        Assert.Null(Get("_detailCommentError"));
+        Assert.Equal("Typed but not saved", DetailComment(current.Id));
+        Assert.False(DetailCommentDirty(current.Id));
+        Assert.Equal("Typed but not saved", ev.Selections[0].Activity.Comments);
+    }
+
+    private sealed class CommentHttpHandler : HttpMessageHandler
+    {
+        public bool Fail { get; set; }
+        public bool NetworkFailure { get; set; }
+        public HttpMethod? LastMethod { get; private set; }
+        public string? LastPath { get; private set; }
+        public string LastBody { get; private set; } = string.Empty;
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (NetworkFailure) throw new HttpRequestException("Offline");
+            LastMethod = request.Method;
+            LastPath = request.RequestUri!.AbsolutePath;
+            LastBody = await request.Content!.ReadAsStringAsync(cancellationToken);
+            return new(Fail ? System.Net.HttpStatusCode.InternalServerError : System.Net.HttpStatusCode.OK);
+        }
+    }
 }
