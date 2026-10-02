@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Logging;
 using MW_GC.EventManager.API.Services;
+using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Shared.Requests;
@@ -14,44 +16,48 @@ internal sealed class EventFunctions
     private readonly TableStore<GameEntity> _games;
     private readonly TableStore<ActivityEntity> _activities;
     private readonly EventGenerator _generator;
+    private readonly ILogger<EventFunctions> _logger;
 
     public EventFunctions(
         TableStore<EventEntity> store,
         TableStore<GameEntity> games,
         TableStore<ActivityEntity> activities,
-        EventGenerator generator)
+        EventGenerator generator,
+        ILogger<EventFunctions> logger)
     {
         _store = store;
         _games = games;
         _activities = activities;
         _generator = generator;
+        _logger = logger;
     }
 
     [Function("GetEvents")]
-    public async Task<IActionResult> GetAll(
+    public Task<IActionResult> GetAll(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "events")] HttpRequest req,
-        CancellationToken ct)
+        CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetEvents", ct, async () =>
     {
         var events = await _store.GetAllAsync(ct);
         return new OkObjectResult(events);
-    }
+    });
 
     [Function("GetEvent")]
-    public async Task<IActionResult> Get(
+    public Task<IActionResult> Get(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "events/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct)
+        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetEvent", ct, async () =>
     {
         var evt = await _store.GetAsync(id, ct);
         return evt is null ? new NotFoundResult() : new OkObjectResult(evt);
-    }
+    });
 
     [Function("GenerateEvent")]
-    public async Task<IActionResult> Generate(
+    public Task<IActionResult> Generate(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events/generate")] HttpRequest req,
-        CancellationToken ct)
+        CancellationToken ct) => RouteFailures.RunAsync(_logger, "GenerateEvent", ct, async () =>
     {
-        var request = await ReadBody<GenerateEventRequest>(req, ct);
-        if (request is null) return new BadRequestResult();
+        var body = await RequestBody.ReadAsync<GenerateEventRequest>(req, ct);
+        if (!body.Ok) return body.Error;
+        var request = body.Value;
 
         if (request.Count is < 1 or > EventEntity.MaximumSelections)
             return new BadRequestObjectResult($"Count must be between 1 and {EventEntity.MaximumSelections}.");
@@ -93,16 +99,17 @@ internal sealed class EventFunctions
         entity.NormalizeWinner();
         await _store.UpsertAsync(entity, ct);
         return new CreatedResult($"/api/events/{entity.Id}", entity);
-    }
+    });
 
     [Function("SaveCustomizedEvent")]
-    public async Task<IActionResult> SaveCustomized(
+    public Task<IActionResult> SaveCustomized(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events")] HttpRequest req,
-        CancellationToken ct)
+        CancellationToken ct) => RouteFailures.RunAsync(_logger, "SaveCustomizedEvent", ct, async () =>
     {
-        var entity = await ReadBody<EventEntity>(req, ct);
-        if (entity is null) return new BadRequestResult();
-        if (entity.ValidateSelections() is { } error) return new BadRequestObjectResult(error);
+        var body = await RequestBody.ReadAsync<EventEntity>(req, ct);
+        if (!body.Ok) return body.Error;
+        var entity = body.Value;
+        if (EventValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
 
         var hasKey = req.Headers.TryGetValue("Idempotency-Key", out var keys);
         var createId = Guid.NewGuid();
@@ -120,7 +127,7 @@ internal sealed class EventFunctions
             return new ConflictObjectResult("This create key already exists with different details. Reload the event list and edit the saved event; do not start another create to retry this save.");
         }
         return new CreatedResult($"/api/events/{entity.Id}", entity);
-    }
+    });
 
     // Compare normalized domain data, not row keys, timestamps or ETags. Never overwrite
     // a later edit when reconciling an ambiguous create response.
@@ -130,48 +137,37 @@ internal sealed class EventFunctions
     });
 
     [Function("UpdateEvent")]
-    public async Task<IActionResult> Update(
+    public Task<IActionResult> Update(
         [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "events/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct)
+        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "UpdateEvent", ct, async () =>
     {
         var existing = await _store.GetAsync(id, ct);
         if (existing is null) return new NotFoundResult();
 
-        var entity = await ReadBody<EventEntity>(req, ct);
-        if (entity is null) return new BadRequestResult();
-        if (entity.ValidateSelections() is { } error) return new BadRequestObjectResult(error);
+        var body = await RequestBody.ReadAsync<EventEntity>(req, ct);
+        if (!body.Ok) return body.Error;
+        var entity = body.Value;
+        if (EventValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = id;
         entity.NormalizeWinner();
         await _store.UpsertAsync(entity, ct);
         return new OkObjectResult(entity);
-    }
-
-    private static async Task<T?> ReadBody<T>(HttpRequest request, CancellationToken ct) where T : class
-    {
-        try
-        {
-            return await request.ReadFromJsonAsync<T>(ct);
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return null;
-        }
-    }
+    });
 
     [Function("DeleteEvent")]
-    public async Task<IActionResult> Delete(
+    public Task<IActionResult> Delete(
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "events/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct)
+        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteEvent", ct, async () =>
     {
         await _store.DeleteAsync(id, ct);
         return new NoContentResult();
-    }
+    });
 
     [Function("SelectWinner")]
-    public async Task<IActionResult> SelectWinner(
+    public Task<IActionResult> SelectWinner(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events/{id:guid}/winner")] HttpRequest req,
-        Guid id, CancellationToken ct)
+        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "SelectWinner", ct, async () =>
     {
         var entity = await _store.GetAsync(id, ct);
         if (entity is null) return new NotFoundResult();
@@ -183,5 +179,5 @@ internal sealed class EventFunctions
         entity.WinnerActivityId = winner.Activity.Id;
         await _store.UpsertAsync(entity, ct);
         return new OkObjectResult(entity);
-    }
+    });
 }

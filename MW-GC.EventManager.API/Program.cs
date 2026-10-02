@@ -11,10 +11,6 @@ var builder = FunctionsApplication.CreateBuilder(args);
 
 builder.ConfigureFunctionsWebApplication();
 
-//builder.Services
-//    .AddApplicationInsightsTelemetryWorkerService()
-//    .ConfigureFunctionsApplicationInsights();
-
 builder.Services.AddSingleton(CreateTableServiceClient());
 
 builder.Services.AddSingleton(sp =>
