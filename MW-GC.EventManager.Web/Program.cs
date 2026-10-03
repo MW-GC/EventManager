@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -10,7 +11,13 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 
 var apiBase = builder.Configuration["ApiBaseUrl"] ?? builder.HostEnvironment.BaseAddress;
 // A stalled API call ends with a message after 30 seconds instead of a spinner that never stops.
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBase), Timeout = TimeSpan.FromSeconds(30) });
+// An API call that finds the session expired sends the user to sign in (SessionExpiredHandler).
+builder.Services.AddScoped(sp => new HttpClient(
+    new SessionExpiredHandler(sp.GetRequiredService<NavigationManager>()) { InnerHandler = new HttpClientHandler() })
+{
+    BaseAddress = new Uri(apiBase),
+    Timeout = TimeSpan.FromSeconds(30)
+});
 
 builder.Services.AddFluentUIComponents();
 

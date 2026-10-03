@@ -46,6 +46,9 @@
     "401": {
       "redirect": "/.auth/login/aad?post_login_redirect_uri=.referrer",
       "statusCode": 302
+    },
+    "403": {
+      "rewrite": "/403.html"
     }
   }
 }
