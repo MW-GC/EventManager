@@ -38,7 +38,9 @@ Winner.
 
 **Selection**:
 One Game and one of that Game's Activities chosen for an Event, stored as a
-snapshot of the Game and Activity when the Event is saved. An Activity can
+snapshot of the Game and Activity as they were when the Selection was chosen.
+Editing the Event keeps that snapshot, even if the Game or Activity has since
+changed or been deleted, unless the user changes that slot. An Activity can
 appear in an Event only once.
 
 **Unique games only**:
