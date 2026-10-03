@@ -1162,6 +1162,233 @@ public class SlotRerollTests
         }
     }
 
+    // Scenarios carried over from the API generator tests that #48 removed: the page is now the
+    // only place that draws slots, so it must keep these rules.
+
+    [TestMethod]
+    public void RepeatedGamesExhaustPoolWithoutRepeatingIds()
+    {
+        var games = UseLibrary(5);
+        Activities.Add(Activities[0]); // Duplicate records do not add capacity.
+        var library = Activities.ToArray();
+        Set("_custUniqueGames", false);
+        for (var i = 0; i < 100; i++)
+        {
+            SetSlots(Enumerable.Repeat(Activities[0], 5).ToArray());
+            Call("RandomizeAll");
+            AssertFilledSlots(5, distinctGames: false);
+            foreach (var s in Slots.Cast<object>()) Assert.AreEqual(games[0].Id, Id(s, "GameId"));
+        }
+        Assert.AreSequenceEqual(library, Activities.ToArray());
+
+        // Four distinct ids plus the duplicate cannot fill five slots.
+        Activities.Remove(library[4]);
+        var original = Slots;
+        var originalSlots = Slots.Cast<object>().ToArray();
+        Call("RandomizeAll");
+        Assert.AreSame(original, Slots);
+        Assert.AreSequenceEqual(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.IsNotNull(Get("_generationError"));
+
+        // One Game cannot fill two slots with Unique games only on.
+        SetSlots(library[0], library[1]);
+        Set("_custUniqueGames", true);
+        Set("_generationError", null!);
+        original = Slots;
+        Call("RandomizeAll");
+        Assert.AreSame(original, Slots);
+        Assert.IsNotNull(Get("_generationError"));
+    }
+
+    [TestMethod]
+    public void SkewedPoolAlwaysFillsEverySlot()
+    {
+        // One Game holds almost every Activity; four Games hold one each.
+        UseLibrary(50, 1, 1, 1, 1);
+        Set("_custUniqueGames", false);
+        for (var i = 0; i < 100; i++)
+        {
+            SetSlots(Enumerable.Repeat(Activities[0], 5).ToArray());
+            Call("RandomizeAll");
+            AssertFilledSlots(5, distinctGames: false);
+            foreach (var s in Slots.Cast<object>())
+                Assert.Contains(a => a.Id == Id(s, "ActivityId") && a.GameId == Id(s, "GameId"), Activities);
+        }
+    }
+
+    [TestMethod]
+    public void SkewedPoolExhaustsEveryDistinctIdWithoutMutatingInputs()
+    {
+        // Five distinct ids, two of them on one Game, plus duplicate records of that Game's ids.
+        var games = UseLibrary(2, 1, 1, 1);
+        var expected = Activities.Select(a => a.Id).ToArray();
+        Activities.AddRange(Activities.Take(2).ToArray());
+        var library = Activities.ToArray();
+        var originalGames = games.ToArray();
+        Set("_custUniqueGames", false);
+
+        // Reuse the same page and inputs to catch state leaking between draws.
+        for (var run = 0; run < 50; run++)
+        {
+            SetSlots(Enumerable.Repeat(Activities[0], 5).ToArray());
+            Call("RandomizeAll");
+            AssertFilledSlots(5, distinctGames: false);
+            CollectionAssert.AreEquivalent(expected, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).ToArray());
+            foreach (var s in Slots.Cast<object>())
+                Assert.Contains(a => a.Id == Id(s, "ActivityId") && a.GameId == Id(s, "GameId"), Activities);
+            Assert.AreSequenceEqual(library, Activities.ToArray());
+            Assert.AreSequenceEqual(originalGames, ((List<GameEntity>)Get("_games")!).ToArray());
+        }
+    }
+
+    [TestMethod]
+    public void DuplicateIdsAcrossPoolsAreRemovedTogetherIncludingExhaustedGames()
+    {
+        var games = UseLibrary(Enumerable.Repeat(0, 10).ToArray());
+        var (one, two, three) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        // Ids one and two appear in every Game (one twice per Game); id three only in the first.
+        var activities = games.SelectMany(g => new[]
+        {
+            new ActivityEntity { Id = one, GameId = g.Id },
+            new ActivityEntity { Id = one, GameId = g.Id },
+            new ActivityEntity { Id = two, GameId = g.Id },
+        }).ToList();
+        activities.Add(new ActivityEntity { Id = three, GameId = games[0].Id });
+        Set("_activities", activities);
+        Set("_custUniqueGames", false);
+
+        for (var run = 0; run < 20; run++)
+        {
+            SetSlots(activities[0], activities[0], activities[0]);
+            Call("RandomizeAll");
+            AssertFilledSlots(3, distinctGames: false);
+            CollectionAssert.AreEquivalent(new[] { one, two, three }, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).ToArray());
+            foreach (var s in Slots.Cast<object>())
+                Assert.Contains(a => a.Id == Id(s, "ActivityId") && a.GameId == Id(s, "GameId"), activities);
+        }
+
+        // Three distinct ids cannot fill four slots, however many Games repeat them.
+        SetSlots(activities[0], activities[0], activities[0], activities[0]);
+        var original = Slots;
+        Call("RandomizeAll");
+        Assert.AreSame(original, Slots);
+        Assert.IsNotNull(Get("_generationError"));
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void IndexedPoolsRespectCombinedFiltersAndIgnoreOrphanCapacity(bool unique)
+    {
+        var orphan = Guid.NewGuid(); // Selected in the Game filter, but no such Game exists.
+        ActivityEntity Tagged(Guid game, bool withTheme, bool withHoliday)
+        {
+            var a = Activity(game);
+            if (withTheme) a.ThemeIds = [theme];
+            if (withHoliday) a.HolidayIds = [holiday];
+            return a;
+        }
+        var eligible = Tagged(gameA, true, true);
+        var wrongGame = Tagged(gameB, true, true);
+        var orphanActivity = Tagged(orphan, true, true); // Passes every filter but has no known Game.
+        var themeOnly = Tagged(gameA, true, false);
+        var holidayOnly = Tagged(gameA, false, true);
+        var unthemed = Tagged(gameA, false, false);
+        Set("_activities", new List<ActivityEntity> { eligible, wrongGame, orphanActivity, themeOnly, holidayOnly, unthemed });
+        Set("_custUniqueGames", unique);
+        Set("_custThemedOnly", true);
+        Set("_custGameIds", new List<Guid> { gameA, orphan });
+        Set("_custThemeIds", new List<Guid> { theme });
+        Set("_custHolidayIds", new List<Guid> { holiday });
+
+        SetSlots(current);
+        Call("RandomizeAll");
+        AssertFilledSlots(1, distinctGames: true);
+        Assert.AreEqual(eligible.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.AreEqual(gameA, Id(Slots[0]!, "GameId"));
+
+        // The orphan's Activity must not add capacity ...
+        SetSlots(current, other);
+        var original = Slots;
+        Call("RandomizeAll");
+        Assert.AreSame(original, Slots);
+        Assert.IsNotNull(Get("_generationError"));
+
+        // ... and no Games means no capacity at all.
+        var library = (List<GameEntity>)Get("_games")!;
+        Set("_games", new List<GameEntity>());
+        SetSlots(current);
+        original = Slots;
+        Call("RandomizeAll");
+        Assert.AreSame(original, Slots);
+        Assert.IsNotNull(Get("_generationError"));
+        Set("_games", library);
+
+        // Dropping the Theme filter admits the holiday-only Activity (themed via its Holiday).
+        Set("_activities", new List<ActivityEntity> { holidayOnly });
+        Set("_custThemeIds", new List<Guid>());
+        Call("RandomizeAll");
+        AssertFilledSlots(1, distinctGames: true);
+        Assert.AreEqual(holidayOnly.Id, Id(Slots[0]!, "ActivityId"));
+
+        // An unthemed Activity stays excluded while Themed activities only is on ...
+        Set("_activities", new List<ActivityEntity> { unthemed });
+        Set("_custHolidayIds", new List<Guid>());
+        original = Slots;
+        Call("RandomizeAll");
+        Assert.AreSame(original, Slots);
+        Assert.IsNotNull(Get("_generationError"));
+
+        // ... and is admitted once every Filter is cleared.
+        Set("_custThemedOnly", false);
+        Set("_custGameIds", new List<Guid>());
+        Call("RandomizeAll");
+        AssertFilledSlots(1, distinctGames: true);
+        Assert.AreEqual(unthemed.Id, Id(Slots[0]!, "ActivityId"));
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task RepeatedGameIdsAreToleratedFirstGameWins(bool unique)
+    {
+        var first = new GameEntity { Id = Guid.NewGuid(), Name = "First" };
+        var impostor = new GameEntity { Id = first.Id, Name = "Same id, listed later" };
+        var activity = Activity(first.Id);
+        Set("_games", new List<GameEntity> { first, impostor });
+        Set("_activities", new List<ActivityEntity> { activity });
+        Set("_custUniqueGames", unique);
+        SetSlots(current);
+
+        Call("RandomizeAll");
+
+        AssertFilledSlots(1, distinctGames: true);
+        Assert.AreEqual(activity.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.AreEqual(first.Id, Id(Slots[0]!, "GameId"));
+        // The saved snapshot takes the first Game listed with that id.
+        var handler = ConfigureSave();
+        await Save();
+        var selection = Assert.ContainsSingle(handler.Saved!.Selections);
+        Assert.AreEqual("First", selection.Game.Name);
+        Assert.AreEqual(activity.Id, selection.Activity.Id);
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void RandomizeAllAcceptsUpperBoundaryWithoutRepeatingActivities(bool unique)
+    {
+        // With repeated Games allowed, use one Game so all five slots must share it.
+        UseLibrary(unique ? new[] { 1, 1, 1, 1, 1 } : new[] { 5 });
+        Set("_custUniqueGames", unique);
+        for (var i = 0; i < 100; i++)
+        {
+            SetSlots(Enumerable.Repeat(Activities[0], EventEntity.MaximumSelections).ToArray());
+            Call("RandomizeAll");
+            AssertFilledSlots(EventEntity.MaximumSelections, distinctGames: unique);
+        }
+    }
+
     // Event details: the Winner's comment is stored on the Activity.
     private (EventEntity Event, CommentHttpHandler Handler) OpenWinnerDetails(string? stored)
     {

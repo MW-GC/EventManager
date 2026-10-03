@@ -116,7 +116,7 @@ internal sealed class LibraryHarness
         ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, "Themes", "Theme"), activities, ThemeLog);
         HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), activities, HolidayLog);
         ActivityApi = new ActivityFunctions(activities, games, ActivityLog);
-        EventApi = new EventFunctions(new TableStore<EventEntity>(service.Object, "Events", "Event"), games, activities, new EventGenerator(), EventLog);
+        EventApi = new EventFunctions(new TableStore<EventEntity>(service.Object, "Events", "Event"), games, activities, EventLog);
     }
 
     /// <summary>Insert and upsert calls that reached any table. Seeding writes the dictionaries directly, so it never counts.</summary>

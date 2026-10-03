@@ -51,7 +51,7 @@ public class DialogRetryTests
             .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(rows.Values.ToList(), null, Mock.Of<Response>())]));
         var service = new Mock<TableServiceClient>();
         service.Setup(s => s.GetTableClient(It.IsAny<string>())).Returns(table.Object);
-        api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
+        api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
     }
 
     [TestMethod]

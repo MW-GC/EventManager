@@ -5,8 +5,6 @@ using Microsoft.Extensions.Logging;
 using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
-using MW_GC.EventManager.Shared.Models;
-using MW_GC.EventManager.Shared.Requests;
 
 namespace MW_GC.EventManager.API.Functions;
 
@@ -15,20 +13,17 @@ internal sealed class EventFunctions
     private readonly TableStore<EventEntity> _store;
     private readonly TableStore<GameEntity> _games;
     private readonly TableStore<ActivityEntity> _activities;
-    private readonly EventGenerator _generator;
     private readonly ILogger<EventFunctions> _logger;
 
     public EventFunctions(
         TableStore<EventEntity> store,
         TableStore<GameEntity> games,
         TableStore<ActivityEntity> activities,
-        EventGenerator generator,
         ILogger<EventFunctions> logger)
     {
         _store = store;
         _games = games;
         _activities = activities;
-        _generator = generator;
         _logger = logger;
     }
 
@@ -48,57 +43,6 @@ internal sealed class EventFunctions
     {
         var evt = await _store.GetAsync(id, ct);
         return evt is null ? new NotFoundResult() : new OkObjectResult(evt);
-    });
-
-    [Function("GenerateEvent")]
-    public Task<IActionResult> Generate(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events/generate")] HttpRequest req,
-        CancellationToken ct) => RouteFailures.RunAsync(_logger, "GenerateEvent", ct, async () =>
-    {
-        var body = await RequestBody.ReadAsync<GenerateEventRequest>(req, ct);
-        if (!body.Ok) return body.Error;
-        var request = body.Value;
-
-        if (request.Count is < 1 or > EventEntity.MaximumSelections)
-            return new BadRequestObjectResult($"Count must be between 1 and {EventEntity.MaximumSelections}.");
-        if (request.SelectedGameIds is null || request.SelectedThemeIds is null || request.SelectedHolidayIds is null)
-            return new BadRequestObjectResult("Filter lists must not be null.");
-        if (request.UtcOffsetMinutes is < -GenerateEventRequest.MaximumUtcOffsetMinutes or > GenerateEventRequest.MaximumUtcOffsetMinutes)
-            return new BadRequestObjectResult($"UtcOffsetMinutes must be between -{GenerateEventRequest.MaximumUtcOffsetMinutes} and {GenerateEventRequest.MaximumUtcOffsetMinutes}.");
-
-        var gameEntities = await _games.GetAllAsync(ct);
-        var activityEntities = await _activities.GetAllAsync(ct);
-
-        var games = gameEntities.Select(g => new Game
-        {
-            Id = g.Id, Name = g.Name, ImageUrl = g.ImageUrl, Website = g.Website, IconUrl = g.IconUrl
-        }).ToList();
-
-        var activities = activityEntities.Select(a => new Activity
-        {
-            Id = a.Id, GameId = a.GameId, Name = a.Name, Description = a.Description,
-            Rules = a.Rules, ThemeIds = a.ThemeIds, HolidayIds = a.HolidayIds,
-            SetupRequirements = a.SetupRequirements, Comments = a.Comments
-        }).ToList();
-
-        var selections = _generator.Generate(games, activities, request);
-        if (selections is null)
-            return new BadRequestObjectResult("Not enough games/activities to satisfy the request.");
-
-        // One clock read names the Event in the caller's local time and stores the UTC instant.
-        var now = _generator.UtcNow;
-        var entity = new EventEntity
-        {
-            Id = Guid.NewGuid(),
-            Name = _generator.GenerateName(now, request.UtcOffsetMinutes),
-            Date = now,
-            Selections = selections,
-            UniqueGamesOnly = request.UniqueGamesOnly
-        };
-
-        entity.NormalizeWinner();
-        await _store.UpsertAsync(entity, ct);
-        return new CreatedResult($"/api/events/{entity.Id}", entity);
     });
 
     [Function("SaveCustomizedEvent")]
@@ -162,22 +106,5 @@ internal sealed class EventFunctions
     {
         await _store.DeleteAsync(id, ct);
         return new NoContentResult();
-    });
-
-    [Function("SelectWinner")]
-    public Task<IActionResult> SelectWinner(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events/{id:guid}/winner")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "SelectWinner", ct, async () =>
-    {
-        var entity = await _store.GetAsync(id, ct);
-        if (entity is null) return new NotFoundResult();
-
-        if (entity.Selections.Count == 0)
-            return new BadRequestObjectResult("Event has no selections.");
-
-        var winner = _generator.PickWinner(entity.Selections);
-        entity.WinnerActivityId = winner.Activity.Id;
-        await _store.UpsertAsync(entity, ct);
-        return new OkObjectResult(entity);
     });
 }

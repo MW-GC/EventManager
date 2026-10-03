@@ -15,7 +15,7 @@ All routes stay `AuthorizationLevel.Anonymous` on purpose: the Static Web App ro
 
 Property names are case-insensitive and camelCase, as before. A `charset` other than UTF-8 is transcoded. The body is read and deserialised once.
 
-The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/themes`, `PUT /api/themes/{id}`, `POST /api/holidays`, `PUT /api/holidays/{id}`, `POST /api/activities`, `PUT /api/activities/{id}`, `PATCH /api/activities/{id}/comments`, `POST /api/events/generate`, `POST /api/events` and `PUT /api/events/{id}`. An update to an id that does not exist is still a 404, checked before the body is read.
+The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/themes`, `PUT /api/themes/{id}`, `POST /api/holidays`, `PUT /api/holidays/{id}`, `POST /api/activities`, `PUT /api/activities/{id}`, `PATCH /api/activities/{id}/comments`, `POST /api/events` and `PUT /api/events/{id}`. An update to an id that does not exist is still a 404, checked before the body is read.
 
 ## Field rules (400, the message names the field)
 
@@ -28,7 +28,7 @@ The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/them
 | Activity | `ThemeIds`, `HolidayIds` | Lenient: a missing or `null` list is stored as `[]`, and duplicates are removed. Whether the ids exist is not checked. |
 | Event | `Selections` and the rest | Unchanged: the existing `ValidateSelections` messages, run after the name rule. |
 
-`POST /api/events/generate` keeps its own rules unchanged: `Count` from 1 to 5, non-null filter lists, `UtcOffsetMinutes` from -840 to 840. The event-create idempotency flow is unchanged too: 201 on first insert, 200 on a matching replay, 409 when the details differ, and 400 for a bad `Idempotency-Key` (see `idempotent-event-creates.md`).
+The event-create idempotency flow is unchanged: 201 on first insert, 200 on a matching replay, 409 when the details differ, and 400 for a bad `Idempotency-Key` (see `idempotent-event-creates.md`).
 
 ## Delete refusal (Games, Themes, Holidays)
 

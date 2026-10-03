@@ -54,8 +54,8 @@ Selection as its Winner.
 _Avoid_: winning game
 
 **slot**:
-A position for one Selection while an Event is put together, either in the
-create or edit Event dialog or when an Event is generated. Re-rolling a slot
+A position for one Selection while an Event is put together in the create or
+edit Event dialog. Re-rolling a slot
 gives it a different random Activity that matches the Filters and does not
 clash with the other slots, which stay unchanged.
 
