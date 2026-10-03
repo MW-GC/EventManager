@@ -27,6 +27,10 @@ internal sealed class PageHarness : IDisposable
 
     public IRenderedComponent<TPage> Render<TPage>() where TPage : IComponent => _context.Render<TPage>();
 
+    // A shared component on its own, with parameters.
+    public IRenderedComponent<TComponent> Render<TComponent>(Action<ComponentParameterCollectionBuilder<TComponent>> parameters)
+        where TComponent : IComponent => _context.Render(parameters);
+
     public void Dispose() => _context.Dispose();
 }
 
@@ -55,6 +59,23 @@ internal static class Rendered
         cut.FindAll("fluent-dialog").Count > 0;
 
     public static IElement Dialog<T>(this IRenderedComponent<T> cut) where T : IComponent => cut.Find("fluent-dialog");
+
+    // The page's form or details dialog, never the confirmation shown over it.
+    public static IElement FormDialog<T>(this IRenderedComponent<T> cut) where T : IComponent =>
+        cut.FindAll("fluent-dialog").Single(d => !d.ClassList.Contains("confirm-dialog"));
+
+    public static bool HasFormDialog<T>(this IRenderedComponent<T> cut) where T : IComponent =>
+        cut.FindAll("fluent-dialog").Any(d => !d.ClassList.Contains("confirm-dialog"));
+
+    // The ConfirmDialog question (a delete or a discard) shown over the page.
+    public static IElement Confirmation<T>(this IRenderedComponent<T> cut) where T : IComponent => cut.Find("fluent-dialog.confirm-dialog");
+
+    public static bool HasConfirmation<T>(this IRenderedComponent<T> cut) where T : IComponent =>
+        cut.FindAll("fluent-dialog.confirm-dialog").Count > 0;
+
+    // Answers the open confirmation with its confirm button, such as Delete.
+    public static Task ConfirmAsync<T>(this IRenderedComponent<T> cut, string text = "Delete") where T : IComponent =>
+        cut.Confirmation().Button(text).ClickAsync(new());
 
     public static string DialogTitle<T>(this IRenderedComponent<T> cut) where T : IComponent =>
         cut.Find("fluent-dialog .fluent-dialog-body > .fluent-typography").TextContent.Trim();

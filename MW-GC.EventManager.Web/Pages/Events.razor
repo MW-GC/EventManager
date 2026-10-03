@@ -74,13 +74,13 @@
                 </TemplateColumn>
                 <TemplateColumn Title="Actions">
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" OnClick="@(() => ShowDetails(context))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowDetails(context))">
                             <FluentIcon Value="@(new Size16.Eye())" />
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" OnClick="@(() => ShowEditEvent(context))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEditEvent(context))">
                             <FluentIcon Value="@(new Size16.Edit())" />
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" OnClick="@(() => Delete(context.Id))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
                             <FluentIcon Value="@(new Size16.Delete())" />
                         </FluentButton>
                     </FluentStack>
@@ -93,7 +93,7 @@
 @* Customize / Create / Edit Event dialog *@
 @if (_showCustomize)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 860px; --dialog-height: 85vh;" OnDismiss="@((DialogEventArgs _) => _showCustomize = false)">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 860px; --dialog-height: 85vh;" @ondialogdismiss="@((DialogEventArgs _) => DismissCustomize())">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 4px;">@(_editingEvent is not null ? "Edit Event" : "Customize Event")</FluentLabel>
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 16px;">
@@ -297,7 +297,7 @@
                 <div role="alert" style="color: var(--error); margin-top: 12px;">@_customizeError</div>
             }
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
-                <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => _showCustomize = false)">Cancel</FluentButton>
+                <FluentButton Appearance="Appearance.Neutral" Disabled="@_generating" OnClick="CancelCustomize">Cancel</FluentButton>
                 <FluentButton Appearance="Appearance.Accent" Loading="@_generating" OnClick="SaveCustomizedEvent"
                               Disabled="@(string.IsNullOrWhiteSpace(_custName))">
                     @(_editingEvent is not null ? "Update Event" : "Create Event")
@@ -310,7 +310,7 @@
 @* Event Details dialog — shows selections as cards with winner selection and comments *@
 @if (_detailEvent is not null)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 800px; --dialog-height: 85vh;" OnDismiss="@((DialogEventArgs _) => _detailEvent = null)">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 800px; --dialog-height: 85vh;" @ondialogdismiss="@((DialogEventArgs _) => DismissDetails())">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H3" Style="margin-bottom: 4px;">@_detailEvent.Name</FluentLabel>
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 16px;">
@@ -364,7 +364,7 @@
                                 }
                                 else
                                 {
-                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => SelectWinner(selection.Activity.Id))"
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_selectingWinner" OnClick="@(() => SelectWinner(selection.Activity.Id))"
                                                   IconStart="@(new Size16.Trophy())">
                                         Select Winner
                                     </FluentButton>
@@ -426,10 +426,17 @@
             </FluentStack>
 
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" Style="margin-top: 16px;">
-                <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => _detailEvent = null)">Close</FluentButton>
+                <FluentButton Appearance="Appearance.Neutral" Disabled="@_selectingWinner" OnClick="CancelDetails">Close</FluentButton>
             </FluentStack>
         </FluentDialogBody>
     </FluentDialog>
+}
+
+@if (_confirm is { } confirm)
+{
+    <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
+                   CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => _confirm = null)" />
 }
 
 @code {
@@ -446,7 +453,18 @@
 
     // Customize dialog state
     private bool _showCustomize;
+    // Set by the save that runs; only that save clears it, never a dismiss.
     private bool _generating;
+    // The open customize dialog: a save only closes the dialog it started from.
+    private readonly DialogSession _customize = new();
+    // The open details dialog: a late Select Winner or comment save never touches a newer one.
+    private readonly DialogSession _details = new();
+    // Set while one Select Winner runs; every Select Winner button is disabled meanwhile.
+    private bool _selectingWinner;
+    // The row whose Delete is running.
+    private readonly RowAction _rows = new();
+    // The open question (delete or discard), if any.
+    private ConfirmRequest? _confirm;
     private string? _customizeError;
     private string? _pageError;
     private EventEntity? _editingEvent;
@@ -536,6 +554,7 @@
         _addSlotError = null;
         RandomizeAll();
         _showCustomize = true;
+        _customize.Open(CustomizeFields);
     }
 
     private void ShowEditEvent(EventEntity e)
@@ -557,7 +576,23 @@
         _shownActivities.Clear();
         _addSlotError = null;
         _showCustomize = true;
+        _customize.Open(CustomizeFields);
     }
+
+    // Everything the customize dialog binds, compared to tell unsaved changes. Slots count by their
+    // Game and Activity ids only, so an untouched edit of an Event whose Activity was deleted is clean.
+    private object CustomizeFields() => new
+    {
+        _custName, _custDate, _custTime, _custThemedOnly, _custUniqueGames,
+        _custGameIds, _custThemeIds, _custHolidayIds,
+        Slots = _custSelections.Select(s => new { s.GameId, s.ActivityId })
+    };
+
+    // The Cancel button closes at once without asking, but never while the save runs.
+    private void CancelCustomize() { if (!_generating) CloseCustomize(); }
+    private void CloseCustomize() { _showCustomize = false; _customize.Close(); }
+    // Overlay click or Escape.
+    private void DismissCustomize() => _confirm = ConfirmRequest.ForDismiss(_confirm, _generating, _customize.IsDirty, CloseCustomize);
 
     // An edited slot is its stored snapshot until the user changes its Game or Activity, so a
     // later library edit or delete never rewrites it. Null when the slot has been changed.
@@ -915,6 +950,8 @@
         _generating = true;
         var saved = false;
         _pageError = null;
+        // The dialog this save belongs to; a dismissed or replaced dialog is left alone.
+        var token = _customize.Current;
         try
         {
             entity.NormalizeWinner();
@@ -924,20 +961,23 @@
                 : await EventSvc.SaveAsync(entity, _createKey);
             if (await ApiResult.ErrorAsync(response) is { } error)
             {
-                _customizeError = $"The event was not saved. {error}";
+                if (_customize.IsCurrent(token)) _customizeError = $"The event was not saved. {error}";
+                else _actionError = $"The event was not saved. {error}";
                 return;
             }
 
             saved = true;
-            _showCustomize = false;
+            if (_customize.IsCurrent(token)) CloseCustomize();
             await Reload();
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
         {
             if (saved)
                 _pageError = "The event was saved, but the list could not be refreshed. Reload the page to see the saved event.";
-            else
+            else if (_customize.IsCurrent(token))
                 _customizeError = "The save could not be confirmed. Retry in this dialog to avoid creating a duplicate. If you changed the details, reload the event list and check for the saved event first.";
+            else
+                _pageError = "An event save could not be confirmed. Reload the event list and check for the event before creating it again.";
         }
         finally { _generating = false; }
     }
@@ -952,25 +992,40 @@
         _detailComments = [];
         _detailCommentError = null;
         _winnerError = null;
+        _details.Open();
     }
+
+    // The Close button closes at once without asking, but never while Select Winner runs.
+    private void CancelDetails() { if (!_selectingWinner) CloseDetails(); }
+    private void CloseDetails() { _detailEvent = null; _details.Close(); }
+    // Overlay click or Escape: an unsaved comment asks first.
+    private void DismissDetails() =>
+        _confirm = ConfirmRequest.ForDismiss(_confirm, _selectingWinner, _detailComments.Keys.Any(IsDetailCommentDirty), CloseDetails);
 
     private async Task SelectWinner(Guid activityId)
     {
-        if (_detailEvent is null) return;
-        var detail = _detailEvent;
-        var previous = detail.WinnerActivityId;
-        detail.WinnerActivityId = activityId;
-        var error = await ApiResult.SendAsync(() => EventSvc.UpdateAsync(detail));
-        if (error is not null)
+        if (_detailEvent is null || _selectingWinner) return;
+        _selectingWinner = true;
+        var token = _details.Current;
+        try
         {
-            // Not saved: put the previous winner back so the dialog and the list stay truthful.
-            detail.WinnerActivityId = previous;
-            _winnerError = $"The winner was not saved. {error}";
-            return;
+            var detail = _detailEvent;
+            var previous = detail.WinnerActivityId;
+            detail.WinnerActivityId = activityId;
+            var error = await ApiResult.SendAsync(() => EventSvc.UpdateAsync(detail));
+            if (error is not null)
+            {
+                // Not saved: put the previous winner back so the dialog and the list stay truthful.
+                detail.WinnerActivityId = previous;
+                if (_details.IsCurrent(token)) _winnerError = $"The winner was not saved. {error}";
+                else _actionError = $"The winner was not saved. {error}";
+                return;
+            }
+            if (_details.IsCurrent(token)) _winnerError = null;
+            await RefreshEvents();
+            if (_details.IsCurrent(token)) _detailEvent = _events?.FirstOrDefault(ev => ev.Id == detail.Id);
         }
-        _winnerError = null;
-        await RefreshEvents();
-        _detailEvent = _events?.FirstOrDefault(ev => ev.Id == detail.Id);
+        finally { _selectingWinner = false; }
     }
 
     // The comment is stored on the Activity, so prefer the loaded Activity over the
@@ -993,10 +1048,13 @@
     {
         if (!_detailComments.TryGetValue(activityId, out var val)) return;
         _detailCommentError = null;
+        var token = _details.Current;
+        var detailEvent = _detailEvent;
         if (await ApiResult.SendAsync(() => ActivitySvc.UpdateCommentsAsync(activityId, val)) is { } error)
         {
             // Keep the typed text in the buffer so the user can retry.
-            _detailCommentError = ApiResult.CommentsNotSaved(error);
+            if (_details.IsCurrent(token)) _detailCommentError = ApiResult.CommentsNotSaved(error);
+            else _actionError = ApiResult.CommentsNotSaved(error);
             return;
         }
 
@@ -1004,19 +1062,34 @@
         // dirty check and a reopened dialog all show the saved text.
         if (_activities?.FirstOrDefault(a => a.Id == activityId) is { } activity)
             activity.Comments = val;
-        if (_detailEvent is not null)
+        if (detailEvent is not null)
         {
-            var index = _detailEvent.Selections.FindIndex(s => s.Activity.Id == activityId);
+            var index = detailEvent.Selections.FindIndex(s => s.Activity.Id == activityId);
             if (index >= 0)
             {
-                var selection = _detailEvent.Selections[index];
-                _detailEvent.Selections[index] = selection with { Activity = selection.Activity with { Comments = val } };
+                var selection = detailEvent.Selections[index];
+                detailEvent.Selections[index] = selection with { Activity = selection.Activity with { Comments = val } };
             }
         }
-        _detailComments.Remove(activityId);
+        // A newer details dialog keeps its own buffer; this one only drops the text it saved.
+        if (_details.IsCurrent(token) && _detailComments.TryGetValue(activityId, out var now) && now == val)
+            _detailComments.Remove(activityId);
     }
 
     #endregion
+
+    private void AskDelete(EventEntity e)
+    {
+        if (_rows.BusyId is not null) return;
+        _confirm = ConfirmRequest.Delete("Delete event", $"Delete {e.Name}? This cannot be undone.", () => _rows.RunAsync(e.Id, () => Delete(e.Id)));
+    }
+
+    private async Task Confirmed(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        await confirm.OnConfirm();
+    }
 
     private async Task Delete(Guid id)
     {
