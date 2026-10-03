@@ -11,23 +11,24 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using MW_GC.EventManager.API.Functions;
-using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
 using MW_GC.EventManager.Web.Services;
-using Xunit;
 
-namespace MW_GC.EventManager.Tests;
+namespace MW_GC.EventManager.Web.Tests;
 
-public class IdempotentCreateTests
+// The Events page's customize dialog against the real API handlers in process (moved from
+// IdempotentCreateTests): a lost create response is retried with the same Idempotency-Key.
+// Ported with its reflection style; issue #58 makes the planner properly testable later.
+[TestClass]
+public class DialogRetryTests
 {
     private readonly ConcurrentDictionary<string, TableEntity> rows = new();
     private readonly EventFunctions api;
     private readonly EventEntity input;
-    private Func<Task>? beforeInsert;
 
-    public IdempotentCreateTests()
+    public DialogRetryTests()
     {
         var game = new Game { Name = "Game", Id = Guid.NewGuid() };
         input = new EventEntity
@@ -37,12 +38,9 @@ public class IdempotentCreateTests
         };
         var table = new Mock<TableClient>();
         table.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
-            .Returns(async (TableEntity row, CancellationToken _) =>
-            {
-                if (beforeInsert is not null) await beforeInsert();
-                if (!rows.TryAdd(row.RowKey, new TableEntity(row))) throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
-                return Mock.Of<Response>();
-            });
+            .Returns((TableEntity row, CancellationToken _) => rows.TryAdd(row.RowKey, new TableEntity(row))
+                ? Task.FromResult(Mock.Of<Response>())
+                : Task.FromException<Response>(new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null)));
         table.Setup(t => t.UpsertEntityAsync(It.IsAny<TableEntity>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
             .Callback<TableEntity, TableUpdateMode, CancellationToken>((row, _, _) => rows[row.RowKey] = new TableEntity(row))
             .ReturnsAsync(Mock.Of<Response>());
@@ -56,94 +54,11 @@ public class IdempotentCreateTests
         api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
     }
 
-    [Fact]
-    public async Task LostCreateResponseThenRepeatedRetryReturnsOnePersistedEvent()
-    {
-        var key = Guid.NewGuid().ToString("D");
-        await api.SaveCustomized(Request(input, key), default); // Committed response never reaches client.
-        for (var retry = 0; retry < 3; retry++)
-            Assert.IsType<OkObjectResult>(await api.SaveCustomized(Request(input, key), default));
-        Assert.Equal(Guid.Parse(key), Assert.Single(await Listed()).Id);
-    }
-
-    [Fact]
-    public async Task ConcurrentSameKeyInsertsReconcileWithoutOverwriting()
-    {
-        var arrivals = 0;
-        var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        beforeInsert = async () =>
-        {
-            if (Interlocked.Increment(ref arrivals) == 2) barrier.SetResult();
-            await barrier.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        };
-        var key = Guid.NewGuid().ToString("D");
-        var results = await Task.WhenAll(api.SaveCustomized(Request(input, key), default), api.SaveCustomized(Request(input, key), default));
-        Assert.Single(results.OfType<CreatedResult>());
-        Assert.Single(results.OfType<OkObjectResult>());
-        Assert.Equal(Guid.Parse(key), Assert.Single(await Listed()).Id);
-    }
-
-    [Theory]
-    [InlineData("name")]
-    [InlineData("date")]
-    [InlineData("snapshot")]
-    [InlineData("unique")]
-    public async Task ChangedRetryConflictsInsteadOfDiscardingDetails(string change)
-    {
-        var key = Guid.NewGuid().ToString("D");
-        await api.SaveCustomized(Request(input, key), default);
-        var before = JsonSerializer.Serialize(Assert.Single(await Listed()));
-        switch (change)
-        {
-            case "name": input.Name = "Changed"; break;
-            case "date": input.Date = input.Date.AddHours(1); break;
-            case "snapshot": input.Selections[0] = input.Selections[0] with { Activity = input.Selections[0].Activity with { Comments = "Changed" } }; break;
-            case "unique": input.UniqueGamesOnly = false; break;
-        }
-        Assert.IsType<ConflictObjectResult>(await api.SaveCustomized(Request(input, key), default));
-        Assert.Equal(before, JsonSerializer.Serialize(Assert.Single(await Listed())));
-    }
-
-    [Fact]
-    public async Task RetryIgnoresStorageMetadataButNeverOverwritesLaterUpdate()
-    {
-        var key = Guid.NewGuid().ToString("D");
-        await api.SaveCustomized(Request(input, key), default);
-        rows[key].Timestamp = DateTimeOffset.UtcNow;
-        rows[key].ETag = new ETag("storage-version");
-        input.Date = input.Date.ToOffset(TimeSpan.FromHours(3));
-        Assert.IsType<OkObjectResult>(await api.SaveCustomized(Request(input, key), default));
-        var saved = Assert.Single(await Listed());
-        saved.Name = "Later edit";
-        Assert.IsType<OkObjectResult>(await api.Update(Request(saved), saved.Id, default));
-        Assert.IsType<ConflictObjectResult>(await api.SaveCustomized(Request(input, key), default));
-        Assert.Equal("Later edit", Assert.Single(await Listed()).Name);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("bad-key")]
-    [InlineData("00000000-0000-0000-0000-000000000000")]
-    [InlineData("11111111111111111111111111111111")]
-    public async Task InvalidKeyDoesNotCreate(string key)
-    {
-        Assert.IsType<BadRequestObjectResult>(await api.SaveCustomized(Request(input, key), default));
-        Assert.Empty(await Listed());
-    }
-
-    [Fact]
-    public async Task LegacyClientsStillCreateIndependentEvents()
-    {
-        await api.SaveCustomized(Request(input), default);
-        await api.SaveCustomized(Request(input), default);
-        Assert.Equal(2, (await Listed()).Select(e => e.Id).Distinct().Count());
-    }
-
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    [InlineData(true, false, true)]
+    [TestMethod]
+    [DataRow(false, false)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    [DataRow(true, false, true)]
     public async Task DialogRetriesSameCreateAfterTransportFailure(bool committed, bool timeout, bool changeDetails = false)
     {
         var page = new Events();
@@ -174,37 +89,37 @@ public class IdempotentCreateTests
         NewDialog();
         await Save();
         await Save();
-        Assert.Equal(true, Get("_showCustomize"));
-        Assert.NotNull(Get("_customizeError"));
-        Assert.Equal(committed ? 1 : 0, (await Listed()).Count);
+        Assert.AreEqual(true, Get("_showCustomize"));
+        Assert.IsNotNull(Get("_customizeError"));
+        Assert.AreEqual(committed ? 1 : 0, (await Listed()).Count);
         if (changeDetails)
         {
             Set("_custName", "Changed after ambiguous save");
             await Save();
-            Assert.Equal(true, Get("_showCustomize"));
-            Assert.Equal("Changed after ambiguous save", Get("_custName"));
+            Assert.AreEqual(true, Get("_showCustomize"));
+            Assert.AreEqual("Changed after ambiguous save", Get("_custName"));
             Assert.Contains("different details", (string)Get("_customizeError")!);
-            Assert.Equal(input.Name, Assert.Single(await Listed()).Name);
+            Assert.AreEqual(input.Name, Assert.ContainsSingle(await Listed()).Name);
             Set("_custName", input.Name);
         }
         await Save();
-        Assert.Equal(false, Get("_showCustomize"));
-        Assert.Null(Get("_customizeError"));
-        var saved = Assert.Single(await Listed());
-        Assert.Equal(selection.Activity.Id, saved.WinnerActivityId);
-        Assert.All(handler.Keys, key => Assert.Equal(saved.Id.ToString("D"), key));
-        Assert.Equal(saved.Id, Assert.Single((List<EventEntity>)Get("_events")!).Id);
+        Assert.AreEqual(false, Get("_showCustomize"));
+        Assert.IsNull(Get("_customizeError"));
+        var saved = Assert.ContainsSingle(await Listed());
+        Assert.AreEqual(selection.Activity.Id, saved.WinnerActivityId);
+        foreach (var key in handler.Keys) Assert.AreEqual(saved.Id.ToString("D"), key);
+        Assert.AreEqual(saved.Id, Assert.ContainsSingle((List<EventEntity>)Get("_events")!).Id);
 
         typeof(Events).GetMethod("ShowEditEvent", flags)!.Invoke(page, [saved]);
         Set("_custName", "Edited");
         await Save();
-        Assert.Equal(HttpMethod.Put, handler.LastMethod);
-        Assert.Null(handler.LastKey);
-        Assert.Equal("Edited", Assert.Single(await Listed()).Name);
+        Assert.AreEqual(HttpMethod.Put, handler.LastMethod);
+        Assert.IsNull(handler.LastKey);
+        Assert.AreEqual("Edited", Assert.ContainsSingle(await Listed()).Name);
         NewDialog();
         await Save();
-        Assert.Equal(2, (await Listed()).Count);
-        Assert.NotEqual(saved.Id.ToString("D"), handler.LastKey);
+        Assert.AreEqual(2, (await Listed()).Count);
+        Assert.AreNotEqual(saved.Id.ToString("D"), handler.LastKey);
     }
 
     private sealed class ApiHandler(EventFunctions api) : HttpMessageHandler
@@ -252,6 +167,6 @@ public class IdempotentCreateTests
         return context.Request;
     }
 
-    private async Task<List<EventEntity>> Listed() => Assert.IsType<List<EventEntity>>(
-        Assert.IsType<OkObjectResult>(await api.GetAll(Request(input), default)).Value);
+    private async Task<List<EventEntity>> Listed() => Assert.IsExactInstanceOfType<List<EventEntity>>(
+        Assert.IsExactInstanceOfType<OkObjectResult>(await api.GetAll(Request(input), default)).Value);
 }

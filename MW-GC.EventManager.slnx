@@ -6,5 +6,6 @@
   <Project Path="MW-GC.EventManager.Web/MW-GC.EventManager.Web.csproj">
     <BuildDependency Project="MW-GC.EventManager.Shared/MW-GC.EventManager.Shared.csproj" />
   </Project>
-  <Project Path="MW-GC.EventManager.Tests/MW-GC.EventManager.Tests.csproj" />
+  <Project Path="MW-GC.EventManager.Api.Tests/MW-GC.EventManager.Api.Tests.csproj" />
+  <Project Path="MW-GC.EventManager.Web.Tests/MW-GC.EventManager.Web.Tests.csproj" />
 </Solution>

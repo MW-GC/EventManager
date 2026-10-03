@@ -11,15 +11,15 @@ using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Shared.Requests;
-using Xunit;
 
-namespace MW_GC.EventManager.Tests;
+namespace MW_GC.EventManager.Api.Tests;
 
 /// <summary>
 /// Event generation with an injected clock and RNG: the default name follows the caller's
 /// local offset, the winner pick is reproducible, a negative count behaves the same in both
 /// modes, and <c>POST /api/events/generate</c> persists the Event it returns exactly once.
 /// </summary>
+[TestClass]
 public class EventGenerationClockAndRngTests
 {
     // 00:30 UTC on Oct 2 is still Oct 1 for a caller at UTC-05:00.
@@ -47,24 +47,24 @@ public class EventGenerationClockAndRngTests
         .Select(g => new Selection { Game = g, Activity = new Activity { Id = Guid.NewGuid(), GameId = g.Id, Name = $"{g.Name} activity" } })
         .ToList();
 
-    [Theory]
-    [InlineData(-300, "Event - Oct 1, 7:30 PM")]   // UTC-05:00: the caller's evening of Oct 1.
-    [InlineData(null, "Event - Oct 2, 12:30 AM")]  // No offset: UTC, as before.
-    [InlineData(0, "Event - Oct 2, 12:30 AM")]
-    [InlineData(540, "Event - Oct 2, 9:30 AM")]     // UTC+09:00.
-    [InlineData(330, "Event - Oct 2, 6:00 AM")]     // UTC+05:30, a non-whole-hour offset.
-    [InlineData(-840, "Event - Oct 1, 10:30 AM")]  // Lower bound, UTC-14:00.
-    [InlineData(840, "Event - Oct 2, 2:30 PM")]     // Upper bound, UTC+14:00.
+    [TestMethod]
+    [DataRow(-300, "Event - Oct 1, 7:30 PM")]   // UTC-05:00: the caller's evening of Oct 1.
+    [DataRow(null, "Event - Oct 2, 12:30 AM")]  // No offset: UTC, as before.
+    [DataRow(0, "Event - Oct 2, 12:30 AM")]
+    [DataRow(540, "Event - Oct 2, 9:30 AM")]     // UTC+09:00.
+    [DataRow(330, "Event - Oct 2, 6:00 AM")]     // UTC+05:30, a non-whole-hour offset.
+    [DataRow(-840, "Event - Oct 1, 10:30 AM")]  // Lower bound, UTC-14:00.
+    [DataRow(840, "Event - Oct 2, 2:30 PM")]     // Upper bound, UTC+14:00.
     public void NameUsesTheCallersLocalTimeFromTheInjectedClock(int? offset, string expected)
     {
         var generator = new EventGenerator(new Random(1), new FixedTimeProvider(Instant));
 
-        Assert.Equal(Instant, generator.UtcNow);
-        Assert.Equal(expected, generator.GenerateName(offset));
-        Assert.Equal(expected, generator.GenerateName(Instant, offset));
+        Assert.AreEqual(Instant, generator.UtcNow);
+        Assert.AreEqual(expected, generator.GenerateName(offset));
+        Assert.AreEqual(expected, generator.GenerateName(Instant, offset));
     }
 
-    [Fact]
+    [TestMethod]
     public void DependencyInjectionHandsTheRegisteredTimeProviderToTheGenerator()
     {
         // Program.cs registers TimeProvider.System next to EventGenerator; a registered fake must
@@ -76,45 +76,45 @@ public class EventGenerationClockAndRngTests
 
         var generator = services.GetRequiredService<EventGenerator>();
 
-        Assert.Equal(Instant, generator.UtcNow);
-        Assert.Equal("Event - Oct 1, 7:30 PM", generator.GenerateName(-300));
+        Assert.AreEqual(Instant, generator.UtcNow);
+        Assert.AreEqual("Event - Oct 1, 7:30 PM", generator.GenerateName(-300));
     }
 
-    [Fact]
+    [TestMethod]
     public void SeededRandomDeterminesTheWinnerPick()
     {
         var selections = Selections();
         var generator = new EventGenerator(new Random(44), new FixedTimeProvider(Instant));
 
         // new Random(44).Next(3) yields 2, 2, 1, 2, 0.
-        Assert.Same(selections[2], generator.PickWinner(selections));
-        Assert.Same(selections[2], generator.PickWinner(selections));
-        Assert.Same(selections[1], generator.PickWinner(selections));
-        Assert.Same(selections[2], generator.PickWinner(selections));
-        Assert.Same(selections[0], generator.PickWinner(selections));
+        Assert.AreSame(selections[2], generator.PickWinner(selections));
+        Assert.AreSame(selections[2], generator.PickWinner(selections));
+        Assert.AreSame(selections[1], generator.PickWinner(selections));
+        Assert.AreSame(selections[2], generator.PickWinner(selections));
+        Assert.AreSame(selections[0], generator.PickWinner(selections));
 
         // The same seed replays the same picks, so the pick depends only on the injected RNG.
         var reference = new Random(44);
         var replay = new EventGenerator(new Random(44), new FixedTimeProvider(Instant));
         for (var i = 0; i < 20; i++)
-            Assert.Same(selections[reference.Next(selections.Count)], replay.PickWinner(selections));
+            Assert.AreSame(selections[reference.Next(selections.Count)], replay.PickWinner(selections));
     }
 
-    [Fact]
+    [TestMethod]
     public void WinnerPickDrawsOnceOverTheWholeSelectionList()
     {
         var selections = Selections();
         var random = new FixedIndexRandom(1);
 
-        Assert.Same(selections[1], new EventGenerator(random, new FixedTimeProvider(Instant)).PickWinner(selections));
-        Assert.Equal(3, Assert.Single(random.Bounds));
-        Assert.Throws<ArgumentException>(() => new EventGenerator(random).PickWinner([]));
+        Assert.AreSame(selections[1], new EventGenerator(random, new FixedTimeProvider(Instant)).PickWinner(selections));
+        Assert.AreEqual(3, Assert.ContainsSingle(random.Bounds));
+        Assert.ThrowsExactly<ArgumentException>(() => new EventGenerator(random).PickWinner([]));
     }
 
-    [Theory]
-    [InlineData(-1)]
-    [InlineData(-5)]
-    [InlineData(int.MinValue)]
+    [TestMethod]
+    [DataRow(-1)]
+    [DataRow(-5)]
+    [DataRow(int.MinValue)]
     public void NegativeCountReturnsNullInBothModesWithoutThrowing(int count)
     {
         var activities = Selections().Select(s => s.Activity).ToArray();
@@ -124,20 +124,20 @@ public class EventGenerationClockAndRngTests
         {
             var unique = generator.Generate(games, activities, new() { Count = count, UniqueGamesOnly = true });
             var repeated = generator.Generate(games, activities, new() { Count = count, UniqueGamesOnly = false });
-            Assert.Null(unique);
-            Assert.Null(repeated);
+            Assert.IsNull(unique);
+            Assert.IsNull(repeated);
         }
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void ZeroCountStillReturnsAnEmptyList(bool unique)
     {
         var activities = Selections().Select(s => s.Activity).ToArray();
         var result = new EventGenerator(new Random(3), new FixedTimeProvider(Instant)).Generate(Games, activities, new() { Count = 0, UniqueGamesOnly = unique });
-        Assert.NotNull(result);
-        Assert.Empty(result);
+        Assert.IsNotNull(result);
+        Assert.IsEmpty(result);
     }
 
     // ---- HTTP functions over a mocked Table Storage client.
@@ -193,84 +193,84 @@ public class EventGenerationClockAndRngTests
 
     private static HttpRequest Request<T>(T value) => Request(JsonSerializer.Serialize(value));
 
-    [Fact]
+    [TestMethod]
     public async Task GenerateNamesTheEventForTheCallersLocalDateStoresTheUtcInstantAndPersistsItOnce()
     {
         var harness = new Harness(new EventGenerator(new Random(5), new FixedTimeProvider(Instant)));
 
         // The same camelCase body the browser and the run step send.
-        var created = Assert.IsType<CreatedResult>(await harness.Functions.Generate(Request("{\"count\":2,\"utcOffsetMinutes\":-300}"), default));
-        var generated = Assert.IsType<EventEntity>(created.Value);
+        var created = Assert.IsExactInstanceOfType<CreatedResult>(await harness.Functions.Generate(Request("{\"count\":2,\"utcOffsetMinutes\":-300}"), default));
+        var generated = Assert.IsExactInstanceOfType<EventEntity>(created.Value);
 
-        Assert.Equal("Event - Oct 1, 7:30 PM", generated.Name);
-        Assert.Equal(Instant, generated.Date);
-        Assert.Equal(TimeSpan.Zero, generated.Date.Offset);
-        Assert.Equal($"/api/events/{generated.Id}", created.Location);
-        Assert.Equal(2, generated.Selections.Count);
+        Assert.AreEqual("Event - Oct 1, 7:30 PM", generated.Name);
+        Assert.AreEqual(Instant, generated.Date);
+        Assert.AreEqual(TimeSpan.Zero, generated.Date.Offset);
+        Assert.AreEqual($"/api/events/{generated.Id}", created.Location);
+        Assert.AreEqual(2, generated.Selections.Count);
 
         // Decision: generate persists the Event it returns, with exactly one upsert.
         harness.VerifyUpserts(1);
-        var row = Assert.Single(harness.Rows).Value;
-        Assert.Equal(generated.Id.ToString(), row.RowKey);
-        Assert.Equal("Event - Oct 1, 7:30 PM", row.GetString("Name"));
-        Assert.Equal(Instant, row.GetDateTimeOffset("Date"));
+        var row = Assert.ContainsSingle(harness.Rows).Value;
+        Assert.AreEqual(generated.Id.ToString(), row.RowKey);
+        Assert.AreEqual("Event - Oct 1, 7:30 PM", row.GetString("Name"));
+        Assert.AreEqual(Instant, row.GetDateTimeOffset("Date"));
 
-        var stored = Assert.IsType<EventEntity>(Assert.IsType<OkObjectResult>(await harness.Functions.Get(Request("{}"), generated.Id, default)).Value);
-        Assert.Equal(generated.Name, stored.Name);
-        Assert.Equal(generated.Date, stored.Date);
-        Assert.Equal(generated.Selections.Select(s => s.Activity.Id), stored.Selections.Select(s => s.Activity.Id));
-        var listed = Assert.IsType<List<EventEntity>>(Assert.IsType<OkObjectResult>(await harness.Functions.GetAll(Request("{}"), default)).Value);
-        Assert.Equal(generated.Id, Assert.Single(listed).Id);
+        var stored = Assert.IsExactInstanceOfType<EventEntity>(Assert.IsExactInstanceOfType<OkObjectResult>(await harness.Functions.Get(Request("{}"), generated.Id, default)).Value);
+        Assert.AreEqual(generated.Name, stored.Name);
+        Assert.AreEqual(generated.Date, stored.Date);
+        Assert.AreSequenceEqual(generated.Selections.Select(s => s.Activity.Id), stored.Selections.Select(s => s.Activity.Id));
+        var listed = Assert.IsExactInstanceOfType<List<EventEntity>>(Assert.IsExactInstanceOfType<OkObjectResult>(await harness.Functions.GetAll(Request("{}"), default)).Value);
+        Assert.AreEqual(generated.Id, Assert.ContainsSingle(listed).Id);
     }
 
-    [Theory]
-    [InlineData("{\"count\":1}", "Event - Oct 2, 12:30 AM")]
-    [InlineData("{\"count\":1,\"utcOffsetMinutes\":null}", "Event - Oct 2, 12:30 AM")]
-    [InlineData("{\"count\":1,\"utcOffsetMinutes\":540}", "Event - Oct 2, 9:30 AM")]
-    [InlineData("{\"count\":1,\"utcOffsetMinutes\":-840}", "Event - Oct 1, 10:30 AM")]
-    [InlineData("{\"count\":1,\"utcOffsetMinutes\":840}", "Event - Oct 2, 2:30 PM")]
+    [TestMethod]
+    [DataRow("{\"count\":1}", "Event - Oct 2, 12:30 AM")]
+    [DataRow("{\"count\":1,\"utcOffsetMinutes\":null}", "Event - Oct 2, 12:30 AM")]
+    [DataRow("{\"count\":1,\"utcOffsetMinutes\":540}", "Event - Oct 2, 9:30 AM")]
+    [DataRow("{\"count\":1,\"utcOffsetMinutes\":-840}", "Event - Oct 1, 10:30 AM")]
+    [DataRow("{\"count\":1,\"utcOffsetMinutes\":840}", "Event - Oct 2, 2:30 PM")]
     public async Task GenerateAcceptsOffsetsWithinRangeAndDefaultsToUtc(string json, string expectedName)
     {
         var harness = new Harness(new EventGenerator(new Random(5), new FixedTimeProvider(Instant)));
 
-        var generated = Assert.IsType<EventEntity>(Assert.IsType<CreatedResult>(await harness.Functions.Generate(Request(json), default)).Value);
+        var generated = Assert.IsExactInstanceOfType<EventEntity>(Assert.IsExactInstanceOfType<CreatedResult>(await harness.Functions.Generate(Request(json), default)).Value);
 
-        Assert.Equal(expectedName, generated.Name);
-        Assert.Equal(Instant, generated.Date);
+        Assert.AreEqual(expectedName, generated.Name);
+        Assert.AreEqual(Instant, generated.Date);
         harness.VerifyUpserts(1);
     }
 
-    [Theory]
-    [InlineData(841)]
-    [InlineData(-841)]
-    [InlineData(900)]
-    [InlineData(int.MaxValue)]
-    [InlineData(int.MinValue)]
+    [TestMethod]
+    [DataRow(841)]
+    [DataRow(-841)]
+    [DataRow(900)]
+    [DataRow(int.MaxValue)]
+    [DataRow(int.MinValue)]
     public async Task OutOfRangeOffsetIsRejectedWithoutWriting(int offset)
     {
         var harness = new Harness(new EventGenerator(new Random(5), new FixedTimeProvider(Instant)));
 
-        var result = Assert.IsType<BadRequestObjectResult>(await harness.Functions.Generate(Request(new GenerateEventRequest { Count = 2, UtcOffsetMinutes = offset }), default));
+        var result = Assert.IsExactInstanceOfType<BadRequestObjectResult>(await harness.Functions.Generate(Request(new GenerateEventRequest { Count = 2, UtcOffsetMinutes = offset }), default));
 
-        Assert.Equal("UtcOffsetMinutes must be between -840 and 840.", Assert.IsType<string>(result.Value));
+        Assert.AreEqual("UtcOffsetMinutes must be between -840 and 840.", Assert.IsExactInstanceOfType<string>(result.Value));
         harness.VerifyUpserts(0);
-        Assert.Empty(harness.Rows);
+        Assert.IsEmpty(harness.Rows);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SelectWinnerUsesTheGeneratorsInjectedRandomAndPersistsTheWinner()
     {
         var random = new FixedIndexRandom(2);
         var harness = new Harness(new EventGenerator(random, new FixedTimeProvider(Instant)));
-        var generated = Assert.IsType<EventEntity>(Assert.IsType<CreatedResult>(await harness.Functions.Generate(Request("{\"count\":3,\"uniqueGamesOnly\":true}"), default)).Value);
-        Assert.Null(generated.WinnerActivityId);
+        var generated = Assert.IsExactInstanceOfType<EventEntity>(Assert.IsExactInstanceOfType<CreatedResult>(await harness.Functions.Generate(Request("{\"count\":3,\"uniqueGamesOnly\":true}"), default)).Value);
+        Assert.IsNull(generated.WinnerActivityId);
         random.Bounds.Clear();
 
-        var picked = Assert.IsType<EventEntity>(Assert.IsType<OkObjectResult>(await harness.Functions.SelectWinner(Request("{}"), generated.Id, default)).Value);
+        var picked = Assert.IsExactInstanceOfType<EventEntity>(Assert.IsExactInstanceOfType<OkObjectResult>(await harness.Functions.SelectWinner(Request("{}"), generated.Id, default)).Value);
 
-        Assert.Equal(3, Assert.Single(random.Bounds));
-        Assert.Equal(picked.Selections[2].Activity.Id, picked.WinnerActivityId);
-        Assert.Equal(picked.WinnerActivityId, harness.Rows[generated.Id.ToString()].GetGuid("WinnerActivityId"));
+        Assert.AreEqual(3, Assert.ContainsSingle(random.Bounds));
+        Assert.AreEqual(picked.Selections[2].Activity.Id, picked.WinnerActivityId);
+        Assert.AreEqual(picked.WinnerActivityId, harness.Rows[generated.Id.ToString()].GetGuid("WinnerActivityId"));
         harness.VerifyUpserts(2); // One for generate, one for the winner.
     }
 }

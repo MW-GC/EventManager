@@ -1,15 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 
-namespace MW_GC.EventManager.Tests;
+namespace MW_GC.EventManager.Web.Tests;
 
 // A stub API for page tests: routes answer with a fixed status, throw a transport error, or
-// return JSON. Unrouted requests answer 404. Every request is recorded.
+// return JSON. Unrouted requests answer 404. Every request is recorded with its body.
 internal sealed class StubApiHandler : HttpMessageHandler
 {
     private readonly List<(HttpMethod Method, string Path, Func<HttpResponseMessage> Respond)> _routes = [];
 
-    public List<(HttpMethod Method, string Path)> Requests { get; } = [];
+    public List<(HttpMethod Method, string Path, string? Body)> Requests { get; } = [];
 
     public HttpClient Client() => new(this) { BaseAddress = new Uri("https://example.test/") };
 
@@ -31,13 +31,18 @@ internal sealed class StubApiHandler : HttpMessageHandler
 
     public int Count(HttpMethod method, string path) => Requests.Count(r => r.Method == method && r.Path == path);
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    // The bodies sent to one route, oldest first.
+    public List<string?> Bodies(HttpMethod method, string path) =>
+        Requests.Where(r => r.Method == method && r.Path == path).Select(r => r.Body).ToList();
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var path = request.RequestUri!.AbsolutePath;
-        Requests.Add((request.Method, path));
+        var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+        Requests.Add((request.Method, path, body));
         foreach (var route in _routes)
             if (route.Method == request.Method && route.Path == path)
-                return Task.FromResult(route.Respond());
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                return route.Respond();
+        return new HttpResponseMessage(HttpStatusCode.NotFound);
     }
 }

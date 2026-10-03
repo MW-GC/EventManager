@@ -39,10 +39,15 @@ jobs:
         id: build
         run: dotnet build MW-GC.EventManager.slnx --no-restore -c Release
 
-      - name: Test
-        id: test
+      - name: Api tests
+        id: test-api
         continue-on-error: true
-        run: dotnet test MW-GC.EventManager.Tests/MW-GC.EventManager.Tests.csproj --no-build -c Release --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+        run: dotnet test MW-GC.EventManager.Api.Tests/MW-GC.EventManager.Api.Tests.csproj --no-build -c Release --logger "trx;LogFileName=api.trx" --results-directory TestResults
+
+      - name: Web tests
+        id: test-web
+        continue-on-error: true
+        run: dotnet test MW-GC.EventManager.Web.Tests/MW-GC.EventManager.Web.Tests.csproj --no-build -c Release --logger "trx;LogFileName=web.trx" --results-directory TestResults
 
       - name: Upload test results
         if: always()
@@ -56,9 +61,11 @@ jobs:
         if: always()
         run: |
           mkdir -p ctrf
-          if [[ -f TestResults/test-results.trx ]]; then
-            dotnet tool run DotnetCtrfJsonReporter -p TestResults/test-results.trx -f test-results.json -d ctrf
-          fi
+          for project in api web; do
+            if [[ -f "TestResults/$project.trx" ]]; then
+              dotnet tool run DotnetCtrfJsonReporter -p "TestResults/$project.trx" -f "$project.json" -d ctrf
+            fi
+          done
 
       - name: Publish test report
         id: ctrf
@@ -82,5 +89,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Fail if any step failed
-        if: ${{ always() && (steps.build.outcome == 'failure' || steps.test.outcome == 'failure' || steps.create-ctrf.outcome == 'failure' || steps.ctrf.outcome == 'failure') }}
+        if: ${{ always() && (steps.build.outcome == 'failure' || steps.test-api.outcome == 'failure' || steps.test-web.outcome == 'failure' || steps.create-ctrf.outcome == 'failure' || steps.ctrf.outcome == 'failure') }}
         run: exit 1
