@@ -11,7 +11,7 @@ The API validates selections, normalizes the winner, then uses Azure Table Stora
 - Deduplication is backed by the event row, not a permanent request ledger. Deleting the row ends retention; a later retry can recreate it.
 - The key lives in dialog memory. Reloading the browser, navigating away or opening a new create dialog does not resume the old operation. After an ambiguous save, retry in the same dialog or check the event list before intentionally starting another create.
 - Changed retry details are not silently discarded or applied as an update. A 409 keeps the dialog and its edits visible; inspect the saved event and use its edit action.
-- The generated-event endpoint (`POST /api/events/generate`) and other entities are outside this change.
+- Other entities are outside this change.
 
 ## Regression coverage
 

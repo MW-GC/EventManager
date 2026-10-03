@@ -7,9 +7,10 @@ select winners.
 ## Architecture
 
 - **Web** — .NET 10 Blazor WebAssembly UI with Fluent UI; calls `/api/*`.
-- **API** — .NET 10 Azure Functions v4 isolated worker; handles CRUD and event
-  generation, backed by Azure Table Storage.
-- **Shared** — models, storage entities and request contracts used by both.
+- **API** — .NET 10 Azure Functions v4 isolated worker; handles CRUD for the
+  library and Events, backed by Azure Table Storage. The Web builds each
+  Event's selections itself and saves them through the API.
+- **Shared** — models and storage entities used by both.
 - **Tests** — two MSTest projects: `MW-GC.EventManager.Api.Tests` for the API
   logic and `MW-GC.EventManager.Web.Tests` for the Web UI, which renders pages
   with bUnit.

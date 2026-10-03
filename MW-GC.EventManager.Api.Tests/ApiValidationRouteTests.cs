@@ -23,7 +23,7 @@ public class ApiValidationRouteTests
     [
         ["CreateGame"], ["UpdateGame"], ["CreateTheme"], ["UpdateTheme"], ["CreateHoliday"], ["UpdateHoliday"],
         ["CreateActivity"], ["UpdateActivity"], ["UpdateActivityComments"],
-        ["GenerateEvent"], ["SaveCustomizedEvent"], ["UpdateEvent"],
+        ["SaveCustomizedEvent"], ["UpdateEvent"],
     ];
 
     private Task<IActionResult> Call(string route, HttpRequest req)
@@ -55,7 +55,6 @@ public class ApiValidationRouteTests
             "CreateActivity" => h.ActivityApi.Create(req, default),
             "UpdateActivity" => h.ActivityApi.Update(req, activityId, default),
             "UpdateActivityComments" => h.ActivityApi.UpdateComments(req, activityId, default),
-            "GenerateEvent" => h.EventApi.Generate(req, default),
             "SaveCustomizedEvent" => h.EventApi.SaveCustomized(req, default),
             "UpdateEvent" => h.EventApi.Update(req, eventId, default),
             _ => throw new ArgumentOutOfRangeException(nameof(route), route, null),
