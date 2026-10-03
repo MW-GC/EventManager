@@ -213,10 +213,10 @@
                                         <FluentIcon Value="@(new Size16.XboxController())" Style="margin-right: 2px;" /> Game @(idx + 1)
                                     </FluentLabel>
                                     <FluentSelect TOption="GameEntity"
-                                                  Items="@GetAvailableGames(idx)"
+                                                  Items="@WithCurrent(GetAvailableGames(idx), SlotGame(sel))"
                                                   OptionValue="@(g => g.Id.ToString())"
                                                   OptionText="@(g => g.Name)"
-                                                  SelectedOption="@(_games?.FirstOrDefault(g => g.Id == sel.GameId))"
+                                                  SelectedOption="@SlotGame(sel)"
                                                   SelectedOptionChanged="@(g => ChangeSlotGame(idx, g))"
                                                   Style="width: 100%;" />
                                 </FluentGridItem>
@@ -242,12 +242,16 @@
                                         }
                                     </FluentStack>
                                     <FluentSelect TOption="ActivityEntity"
-                                                  Items="@GetAvailableActivities(sel.GameId, idx)"
+                                                  Items="@WithCurrent(GetAvailableActivities(sel.GameId, idx), SlotActivity(sel))"
                                                   OptionValue="@(a => a.Id.ToString())"
                                                   OptionText="@(a => a.Name)"
-                                                  SelectedOption="@(_activities?.FirstOrDefault(a => a.Id == sel.ActivityId))"
+                                                  SelectedOption="@SlotActivity(sel)"
                                                   SelectedOptionChanged="@(a => ChangeSlotActivity(idx, a))"
                                                   Style="width: 100%;" />
+                                    @if (ReplacesWinner(sel))
+                                    {
+                                        <FluentLabel role="status" Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-top: 4px;">Replacing this activity clears the Winner.</FluentLabel>
+                                    }
                                 </FluentGridItem>
                                 <FluentGridItem xs="12" sm="2" Style="display: flex; align-items: flex-end; justify-content: flex-end;">
                                     <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
@@ -469,6 +473,8 @@
     {
         public Guid GameId { get; set; }
         public Guid ActivityId { get; set; }
+        // The Selection as saved in the Event being edited; null for slots made in this dialog.
+        public Selection? Stored { get; init; }
     }
 
     private IQueryable<EventEntity> Filtered => string.IsNullOrWhiteSpace(_search)
@@ -546,10 +552,70 @@
         _custGameIds = [];
         _custThemeIds = [];
         _custHolidayIds = [];
-        _custSelections = e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id }).ToList();
+        _custSelections = e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id, Stored = s }).ToList();
+        _shownGames.Clear();
+        _shownActivities.Clear();
         _addSlotError = null;
         _showCustomize = true;
     }
+
+    // An edited slot is its stored snapshot until the user changes its Game or Activity, so a
+    // later library edit or delete never rewrites it. Null when the slot has been changed.
+    private static Selection? Unchanged(SlotSelection s) =>
+        s.Stored is { } stored && stored.Game.Id == s.GameId && stored.Activity.Id == s.ActivityId ? stored : null;
+
+    // What a slot saves: its snapshot while unchanged, otherwise rebuilt from the library.
+    // Null when a changed slot names a Game or Activity the library does not offer.
+    private Selection? BuildSelection(SlotSelection s)
+    {
+        if (Unchanged(s) is { } stored) return stored;
+        var game = _games?.FirstOrDefault(g => g.Id == s.GameId);
+        var act = _activities?.FirstOrDefault(a => a.Id == s.ActivityId && a.GameId == s.GameId);
+        if (game is null || act is null) return null;
+        return new Selection
+        {
+            Game = new Game { Id = game.Id, Name = game.Name, ImageUrl = game.ImageUrl, Website = game.Website, IconUrl = game.IconUrl },
+            Activity = new Activity
+            {
+                Id = act.Id, GameId = act.GameId, Name = act.Name, Description = act.Description,
+                Rules = act.Rules, SetupRequirements = act.SetupRequirements, Comments = act.Comments
+            }
+        };
+    }
+
+    // Stand-ins for a stored Game or Activity the library no longer has. They are shown only as
+    // the current value of their own slot, and kept per id so the picker sees the same option.
+    private readonly Dictionary<Guid, GameEntity> _shownGames = [];
+    private readonly Dictionary<Guid, ActivityEntity> _shownActivities = [];
+
+    private static string StoredName(string name, bool libraryLoaded) => libraryLoaded ? $"(deleted) {name}" : name;
+
+    private GameEntity? SlotGame(SlotSelection s)
+    {
+        if (_games?.FirstOrDefault(g => g.Id == s.GameId) is { } game) return game;
+        if (Unchanged(s) is not { } stored) return null;
+        var shown = _shownGames.TryGetValue(stored.Game.Id, out var known) ? known : _shownGames[stored.Game.Id] = new GameEntity { Id = stored.Game.Id };
+        shown.Name = StoredName(stored.Game.Name, _games is not null);
+        return shown;
+    }
+
+    private ActivityEntity? SlotActivity(SlotSelection s)
+    {
+        if (_activities?.FirstOrDefault(a => a.Id == s.ActivityId) is { } act) return act;
+        if (Unchanged(s) is not { } stored) return null;
+        var shown = _shownActivities.TryGetValue(stored.Activity.Id, out var known) ? known : _shownActivities[stored.Activity.Id] = new ActivityEntity { Id = stored.Activity.Id, GameId = stored.Game.Id };
+        shown.Name = StoredName(stored.Activity.Name, _activities is not null);
+        return shown;
+    }
+
+    // A picker's live choices, plus the slot's own current value when the library lacks it.
+    private static List<T> WithCurrent<T>(List<T> choices, T? current) where T : EntityBase =>
+        current is null || choices.Any(c => c.Id == current.Id) ? choices : [current, .. choices];
+
+    // The slot held the Event's Winner and its Activity has been changed. One slot always wins.
+    private bool ReplacesWinner(SlotSelection s) =>
+        _editingEvent?.WinnerActivityId is { } winner && _custSelections.Count > 1 &&
+        s.Stored?.Activity.Id == winner && s.ActivityId != winner;
 
     private Random _random = Random.Shared;
 
@@ -720,7 +786,7 @@
         if (groups.Count == 0) return;
         var activities = groups[Random.Shared.Next(groups.Count)].ToList();
         var activity = activities[Random.Shared.Next(activities.Count)];
-        _custSelections[index] = new SlotSelection { GameId = activity.GameId, ActivityId = activity.Id };
+        _custSelections[index] = _custSelections[index] with { GameId = activity.GameId, ActivityId = activity.Id };
         _generationError = null;
     }
 
@@ -768,7 +834,7 @@
         var acts = GetAvailableActivities(game.Id, index);
         if (acts.Count == 0) return;
         var act = acts[Random.Shared.Next(acts.Count)];
-        _custSelections[index] = new SlotSelection { GameId = game.Id, ActivityId = act.Id };
+        _custSelections[index] = _custSelections[index] with { GameId = game.Id, ActivityId = act.Id };
         _generationError = null;
     }
 
@@ -824,15 +890,24 @@
             _customizeError = "Select 1–5 activities before saving. Adjust the filters or add an activity slot.";
             return;
         }
-        if (_custSelections.Any(s => s.GameId == Guid.Empty || s.ActivityId == Guid.Empty ||
-            _games?.Any(g => g.Id == s.GameId) != true ||
-            _activities?.Any(a => a.Id == s.ActivityId && a.GameId == s.GameId) != true))
+        // Unchanged slots save their stored snapshot; a changed slot must be a library choice.
+        var built = _custSelections.Select(BuildSelection).ToList();
+        if (_custSelections.Any(s => s.GameId == Guid.Empty || s.ActivityId == Guid.Empty) || built.Any(s => s is null))
         {
             _customizeError = "Choose a valid game and activity for every slot before saving.";
             return;
         }
-        if (_custSelections.Select(s => s.ActivityId).Distinct().Count() != _custSelections.Count ||
-            (_custUniqueGames && _custSelections.Select(s => s.GameId).Distinct().Count() != _custSelections.Count))
+        var entity = new EventEntity
+        {
+            Id = _editingEvent?.Id ?? Guid.Empty,
+            Name = _custName,
+            Date = BuildEventDate(),
+            Selections = built.OfType<Selection>().ToList(),
+            UniqueGamesOnly = _custUniqueGames,
+            // Replacing the Winner's slot clears the Winner, as its notice says.
+            WinnerActivityId = _custSelections.Any(ReplacesWinner) ? null : _editingEvent?.WinnerActivityId
+        };
+        if (entity.ValidateSelections() is not null)
         {
             _customizeError = "Activities must be distinct, and games must be distinct when Unique games only is enabled.";
             return;
@@ -842,32 +917,6 @@
         _pageError = null;
         try
         {
-            var selections = _custSelections
-                .Select(s =>
-                {
-                    var game = _games!.First(g => g.Id == s.GameId);
-                    var act = _activities!.First(a => a.Id == s.ActivityId);
-                    return new Selection
-                    {
-                        Game = new Game { Id = game.Id, Name = game.Name, ImageUrl = game.ImageUrl, Website = game.Website, IconUrl = game.IconUrl },
-                        Activity = new Activity
-                        {
-                            Id = act.Id, GameId = act.GameId, Name = act.Name, Description = act.Description,
-                            Rules = act.Rules, SetupRequirements = act.SetupRequirements, Comments = act.Comments
-                        }
-                    };
-                }).ToList();
-
-            var entity = new EventEntity
-            {
-                Id = _editingEvent?.Id ?? Guid.Empty,
-                Name = _custName,
-                Date = BuildEventDate(),
-                Selections = selections,
-                UniqueGamesOnly = _custUniqueGames,
-                WinnerActivityId = _editingEvent?.WinnerActivityId
-            };
-
             entity.NormalizeWinner();
 
             using var response = _editingEvent is not null
