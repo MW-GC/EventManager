@@ -31,7 +31,15 @@ public class SingleActivityApiTests
         var table = new Mock<TableClient>();
         table.Setup(t => t.UpsertEntityAsync(It.IsAny<TableEntity>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
             .Callback<TableEntity, TableUpdateMode, CancellationToken>((row, _, _) => rows[row.RowKey] = new TableEntity(row))
-            .ReturnsAsync(Mock.Of<Response>());
+            .ReturnsAsync(TableMocks.Written);
+        // #46: an Event PUT is a conditional update of an existing row, no longer an upsert.
+        table.Setup(t => t.UpdateEntityAsync(It.IsAny<TableEntity>(), It.IsAny<ETag>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
+            .Returns((TableEntity row, ETag _, TableUpdateMode _, CancellationToken _) =>
+            {
+                if (!rows.ContainsKey(row.RowKey)) throw new RequestFailedException(404, "Missing", "ResourceNotFound", null);
+                rows[row.RowKey] = new TableEntity(row);
+                return Task.FromResult(TableMocks.Written());
+            });
         table.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
             .Returns(async (TableEntity row, CancellationToken _) =>
             {
@@ -40,7 +48,7 @@ public class SingleActivityApiTests
                 if (!rows.TryAdd(row.RowKey, new TableEntity(row)))
                     throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
                 if (failAfterInsert) throw new RequestFailedException(503, "Insert response lost");
-                return Mock.Of<Response>();
+                return TableMocks.Written();
             });
         table.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, string id, IEnumerable<string> _, CancellationToken _) => Response.FromValue(rows[id], Mock.Of<Response>()));

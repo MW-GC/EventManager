@@ -42,7 +42,7 @@ internal sealed class ThemeFunctions
 
         entity.Id = Guid.NewGuid();
         await _store.UpsertAsync(entity, ct);
-        return new CreatedResult($"/api/themes/{entity.Id}", entity);
+        return EntityResults.Created(req, $"/api/themes/{entity.Id}", entity);
     });
 
     [Function("UpdateTheme")]
@@ -59,8 +59,7 @@ internal sealed class ThemeFunctions
         if (ThemeValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = id;
-        await _store.UpsertAsync(entity, ct);
-        return new OkObjectResult(entity);
+        return await EntityResults.UpdateAsync(_store, req, entity, ct);
     });
 
     [Function("DeleteTheme")]
@@ -75,8 +74,7 @@ internal sealed class ThemeFunctions
         var inUse = (await _activities.GetAllAsync(ct)).Count(a => a.ThemeIds.Contains(id));
         if (inUse > 0) return new ConflictObjectResult(InUseMessage(inUse));
 
-        await _store.DeleteAsync(id, ct);
-        return new NoContentResult();
+        return await EntityResults.DeleteAsync(_store, req, id, ct);
     });
 
     internal static string InUseMessage(int activities) => activities == 1

@@ -42,7 +42,7 @@ internal sealed class EventFunctions
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetEvent", ct, async () =>
     {
         var evt = await _store.GetAsync(id, ct);
-        return evt is null ? new NotFoundResult() : new OkObjectResult(evt);
+        return evt is null ? new NotFoundResult() : EntityResults.Ok(req, evt);
     });
 
     [Function("SaveCustomizedEvent")]
@@ -67,10 +67,10 @@ internal sealed class EventFunctions
         {
             var existing = await _store.GetAsync(createId, ct);
             if (existing is not null && CreateDetails(existing) == CreateDetails(entity))
-                return new OkObjectResult(existing);
+                return EntityResults.Ok(req, existing);
             return new ConflictObjectResult("This create key already exists with different details. Reload the event list and edit the saved event; do not start another create to retry this save.");
         }
-        return new CreatedResult($"/api/events/{entity.Id}", entity);
+        return EntityResults.Created(req, $"/api/events/{entity.Id}", entity);
     });
 
     // Compare normalized domain data, not row keys, timestamps or ETags. Never overwrite
@@ -95,8 +95,7 @@ internal sealed class EventFunctions
 
         entity.Id = id;
         entity.NormalizeWinner();
-        await _store.UpsertAsync(entity, ct);
-        return new OkObjectResult(entity);
+        return await EntityResults.UpdateAsync(_store, req, entity, ct);
     });
 
     [Function("DeleteEvent")]
@@ -104,7 +103,6 @@ internal sealed class EventFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "events/{id:guid}")] HttpRequest req,
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteEvent", ct, async () =>
     {
-        await _store.DeleteAsync(id, ct);
-        return new NoContentResult();
+        return await EntityResults.DeleteAsync(_store, req, id, ct);
     });
 }

@@ -44,11 +44,30 @@ A Game, Theme or Holiday that Activities still use cannot be deleted. The route 
 
 The count and the delete are two separate storage calls with no lock, so an Activity created between them can still end up pointing at a deleted row. That race is accepted. A storage failure while counting goes through the failure mapping below like any other route (for example a 503 for an outage), and nothing is deleted. Saved Events are unaffected: they keep their own copies of the Game and Activity they selected.
 
+## Conflict-safe writes (ETags and If-Match)
+
+Every Game, Theme, Holiday, Activity and Event carries its Table Storage ETag as the string property `eTag` in the JSON body (lists included), and every single-entity response (GET one, POST, PUT, the comments `PATCH`) also sends it as the HTTP `ETag` header. A client may echo it as `If-Match` on `PUT`, `DELETE` and `PATCH /api/activities/{id}/comments`; the value is passed to storage as given. If-Match is optional, and only the header counts: an `eTag` in a request body is ignored.
+
+| Request | Status |
+| --- | --- |
+| `PUT` with a current `If-Match`, or with none, or with `If-Match: *` | 200, with the new ETag |
+| `PUT` or comments `PATCH` with a stale `If-Match` | 409 `The request conflicts with the stored data. Reload and try again.`; the row is unchanged |
+| `PUT` for a row that was deleted, even between the existence check and the write, with or without `If-Match` | 404; the row is not recreated (updates are never upserts) |
+| `DELETE` with a stale `If-Match` | 409; nothing is deleted |
+| `DELETE` of a row that does not exist | 204 (idempotent, as before) |
+
+The comments `PATCH` reads the row and writes it back with the ETag it just read, so a write that lands in between makes the `PATCH` a 409 instead of being overwritten. It does not retry.
+
+## Long values (chunked properties)
+
+Table Storage limits one string property to 64 KiB of UTF-16, which is 32,768 characters. A complex property (an Event's `Selections`, an Activity's `ThemeIds`/`HolidayIds`) is stored as compact JSON, with non-ASCII text kept as the character rather than a `\uXXXX` escape. When that JSON is longer than 30,000 characters it is split over `Selections`, `Selections__1`, `Selections__2` ... and joined again on read. Five Selections with every field at its cap are about 70,000 characters, so three chunks. The API contract does not change, and a row written before chunking (one property) reads back unchanged.
+
 ## Failures after validation (every route)
 
 | Failure | Status | Body | Logged as |
 | --- | --- | --- | --- |
-| Table Storage conflict (409), other than the event-create idempotency path that the route handles itself | 409 | `The request conflicts with the stored data. Reload and try again.` | Warning |
+| Table Storage conflict (409) or failed `If-Match` precondition (412), other than the event-create idempotency path that the route handles itself | 409 | `The request conflicts with the stored data. Reload and try again.` | Warning |
+| A complex property (for example an Event's `Selections`) that would push the row past Table Storage's 1 MiB entity limit or 252 custom properties, even split into chunks; refused before anything is written | 413 | `<Field> is too large to store.` (for example `Selections is too large to store.`) | Warning |
 | Entity or property too large for Table Storage (`EntityTooLarge`, `PropertyValueTooLarge`, `RequestBodyTooLarge`, or a 413) | 413 | `The item is too large to store.` | Warning |
 | Storage outage or timeout: a `RequestFailedException` with status 500 or above, or status 0 (transport); an `HttpRequestException`; a `TaskCanceledException` that is not the caller's own cancellation; an `AggregateException` made only of these | 503 | `Storage is temporarily unavailable. Try again shortly.` | Error |
 | Anything else | 500 | `An unexpected error occurred.` | Error |
@@ -59,4 +78,4 @@ Every failure is logged through `ILogger<T>` in the Functions class, with the ex
 
 ## Test coverage
 
-`RequestBodyGuardTests` calls the guard directly, with no Functions host. `EntityValidatorTests` covers each validator. `ApiValidationRouteTests` drives every body-reading route through the real Functions classes and `TableStore` over in-memory mocked tables, and checks that rejected requests write nothing. `StorageFailureTests` covers the failure mapping and logging with a mocked `TableClient`, because a running instance cannot simulate a storage outage. `DeleteInUseRefusalTests` covers the delete refusal for all three entities, an Event keeping its snapshot after a Game delete, and a failure while counting.
+`RequestBodyGuardTests` calls the guard directly, with no Functions host. `EntityValidatorTests` covers each validator. `ApiValidationRouteTests` drives every body-reading route through the real Functions classes and `TableStore` over in-memory mocked tables, and checks that rejected requests write nothing. `StorageFailureTests` covers the failure mapping and logging with a mocked `TableClient`, because a running instance cannot simulate a storage outage. `DeleteInUseRefusalTests` covers the delete refusal for all three entities, an Event keeping its snapshot after a Game delete, and a failure while counting. `ConditionalWriteTests` covers If-Match on every `PUT`, `DELETE` and the comments `PATCH`, the update-that-races-a-delete 404, and the ETag header and body. `PropertyLimitTests` covers chunking a five-Selection Event at every cap, old-shape rows, the row-limit 413 and the 412 mapping.

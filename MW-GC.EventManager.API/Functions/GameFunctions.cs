@@ -36,7 +36,7 @@ internal sealed class GameFunctions
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetGame", ct, async () =>
     {
         var game = await _store.GetAsync(id, ct);
-        return game is null ? new NotFoundResult() : new OkObjectResult(game);
+        return game is null ? new NotFoundResult() : EntityResults.Ok(req, game);
     });
 
     [Function("CreateGame")]
@@ -51,7 +51,7 @@ internal sealed class GameFunctions
 
         entity.Id = Guid.NewGuid();
         await _store.UpsertAsync(entity, ct);
-        return new CreatedResult($"/api/games/{entity.Id}", entity);
+        return EntityResults.Created(req, $"/api/games/{entity.Id}", entity);
     });
 
     [Function("UpdateGame")]
@@ -68,8 +68,7 @@ internal sealed class GameFunctions
         if (GameValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = id;
-        await _store.UpsertAsync(entity, ct);
-        return new OkObjectResult(entity);
+        return await EntityResults.UpdateAsync(_store, req, entity, ct);
     });
 
     [Function("DeleteGame")]
@@ -84,8 +83,7 @@ internal sealed class GameFunctions
         var inUse = (await _activities.GetAllAsync(ct)).Count(a => a.GameId == id);
         if (inUse > 0) return new ConflictObjectResult(InUseMessage(inUse));
 
-        await _store.DeleteAsync(id, ct);
-        return new NoContentResult();
+        return await EntityResults.DeleteAsync(_store, req, id, ct);
     });
 
     internal static string InUseMessage(int activities) => activities == 1

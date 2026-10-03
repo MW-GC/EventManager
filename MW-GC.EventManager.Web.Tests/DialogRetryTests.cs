@@ -39,11 +39,19 @@ public class DialogRetryTests
         var table = new Mock<TableClient>();
         table.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
             .Returns((TableEntity row, CancellationToken _) => rows.TryAdd(row.RowKey, new TableEntity(row))
-                ? Task.FromResult(Mock.Of<Response>())
+                ? Task.FromResult(Written())
                 : Task.FromException<Response>(new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null)));
         table.Setup(t => t.UpsertEntityAsync(It.IsAny<TableEntity>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
             .Callback<TableEntity, TableUpdateMode, CancellationToken>((row, _, _) => rows[row.RowKey] = new TableEntity(row))
-            .ReturnsAsync(Mock.Of<Response>());
+            .ReturnsAsync(Written());
+        // Event updates are conditional replaces (#46): a missing row is 404 and is never recreated.
+        table.Setup(t => t.UpdateEntityAsync(It.IsAny<TableEntity>(), It.IsAny<ETag>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
+            .Returns((TableEntity row, ETag _, TableUpdateMode _, CancellationToken _) =>
+            {
+                if (!rows.ContainsKey(row.RowKey)) return Task.FromException<Response>(new RequestFailedException(404, "Missing", "ResourceNotFound", null));
+                rows[row.RowKey] = new TableEntity(row);
+                return Task.FromResult(Written());
+            });
         table.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, string id, IEnumerable<string> _, CancellationToken _) => rows.TryGetValue(id, out var row)
                 ? Response.FromValue(row, Mock.Of<Response>()) : throw new RequestFailedException(404, "Missing"));
@@ -156,6 +164,9 @@ public class DialogRetryTests
             return new((HttpStatusCode)result.StatusCode!) { Content = JsonContent.Create(result.Value) };
         }
     }
+
+    // A write response whose headers can be read (TableStore takes the new ETag from them); it has none.
+    private static Response Written() => new Mock<Response> { CallBase = true }.Object;
 
     private static HttpRequest Request(EventEntity entity, string? key = null)
     {

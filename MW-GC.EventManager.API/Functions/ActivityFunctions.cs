@@ -1,3 +1,4 @@
+using Azure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
@@ -36,7 +37,7 @@ internal sealed class ActivityFunctions
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetActivity", ct, async () =>
     {
         var activity = await _store.GetAsync(id, ct);
-        return activity is null ? new NotFoundResult() : new OkObjectResult(activity);
+        return activity is null ? new NotFoundResult() : EntityResults.Ok(req, activity);
     });
 
     [Function("CreateActivity")]
@@ -51,7 +52,7 @@ internal sealed class ActivityFunctions
 
         entity.Id = Guid.NewGuid();
         await _store.UpsertAsync(entity, ct);
-        return new CreatedResult($"/api/activities/{entity.Id}", entity);
+        return EntityResults.Created(req, $"/api/activities/{entity.Id}", entity);
     });
 
     [Function("UpdateActivity")]
@@ -68,8 +69,7 @@ internal sealed class ActivityFunctions
         if (await ValidateAsync(entity, ct) is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = id;
-        await _store.UpsertAsync(entity, ct);
-        return new OkObjectResult(entity);
+        return await EntityResults.UpdateAsync(_store, req, entity, ct);
     });
 
     // The shared rules, then the one rule that needs storage: the Game must exist.
@@ -84,8 +84,7 @@ internal sealed class ActivityFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "activities/{id:guid}")] HttpRequest req,
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteActivity", ct, async () =>
     {
-        await _store.DeleteAsync(id, ct);
-        return new NoContentResult();
+        return await EntityResults.DeleteAsync(_store, req, id, ct);
     });
 
     [Function("DuplicateActivity")]
@@ -110,7 +109,7 @@ internal sealed class ActivityFunctions
         };
 
         await _store.UpsertAsync(duplicate, ct);
-        return new CreatedResult($"/api/activities/{duplicate.Id}", duplicate);
+        return EntityResults.Created(req, $"/api/activities/{duplicate.Id}", duplicate);
     });
 
     [Function("UpdateActivityComments")]
@@ -125,9 +124,12 @@ internal sealed class ActivityFunctions
         if (!body.Ok) return body.Error;
         if (ActivityValidator.ValidateComments(body.Value.Comments) is { } error) return new BadRequestObjectResult(error);
 
+        // Write back with the ETag just read (or the caller's own If-Match), so a write that lands
+        // between the read and this write makes the PATCH a 409 instead of being overwritten.
+        var ifMatch = EntityResults.IfMatch(req);
+        if (ifMatch == default || ifMatch == ETag.All) ifMatch = existing.ETag;
         existing.Comments = body.Value.Comments;
-        await _store.UpsertAsync(existing, ct);
-        return new OkObjectResult(existing);
+        return await EntityResults.UpdateAsync(_store, req, existing, ct, ifMatch);
     });
 
     private record CommentsPayload(string? Comments);
