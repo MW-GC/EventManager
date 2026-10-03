@@ -2,6 +2,7 @@ using Azure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using MW_GC.EventManager.API.Services;
 
 namespace MW_GC.EventManager.API.Validation;
 
@@ -33,10 +34,17 @@ internal static class RouteFailures
             // The caller went away; there is nobody to answer and nothing failed on our side.
             throw;
         }
-        catch (RequestFailedException ex) when (ex.Status == StatusCodes.Status409Conflict)
+        // Storage answers a failed If-Match with 412; to the caller that is the same stale-data 409.
+        catch (RequestFailedException ex) when (ex.Status is StatusCodes.Status409Conflict or StatusCodes.Status412PreconditionFailed)
         {
             logger.LogWarning(ex, "{Operation} hit a storage conflict ({ErrorCode}).", operation, ex.ErrorCode);
             return Result(StatusCodes.Status409Conflict, ConflictMessage);
+        }
+        catch (StoredValueTooLargeException ex)
+        {
+            // Refused before any write: the row would pass Table Storage's 1 MiB or 252-property limit.
+            logger.LogWarning(ex, "{Operation} was refused as too large to store ({Property}).", operation, ex.Property);
+            return Result(StatusCodes.Status413PayloadTooLarge, ex.Message);
         }
         catch (RequestFailedException ex) when (IsTooLarge(ex))
         {

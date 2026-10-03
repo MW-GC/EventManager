@@ -36,11 +36,19 @@ public class IdempotentCreateTests
             {
                 if (beforeInsert is not null) await beforeInsert();
                 if (!rows.TryAdd(row.RowKey, new TableEntity(row))) throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
-                return Mock.Of<Response>();
+                return TableMocks.Written();
             });
         table.Setup(t => t.UpsertEntityAsync(It.IsAny<TableEntity>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
             .Callback<TableEntity, TableUpdateMode, CancellationToken>((row, _, _) => rows[row.RowKey] = new TableEntity(row))
-            .ReturnsAsync(Mock.Of<Response>());
+            .ReturnsAsync(TableMocks.Written);
+        // #46: an Event PUT is a conditional update of an existing row, no longer an upsert.
+        table.Setup(t => t.UpdateEntityAsync(It.IsAny<TableEntity>(), It.IsAny<ETag>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
+            .Returns((TableEntity row, ETag _, TableUpdateMode _, CancellationToken _) =>
+            {
+                if (!rows.ContainsKey(row.RowKey)) throw new RequestFailedException(404, "Missing", "ResourceNotFound", null);
+                rows[row.RowKey] = new TableEntity(row);
+                return Task.FromResult(TableMocks.Written());
+            });
         table.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, string id, IEnumerable<string> _, CancellationToken _) => rows.TryGetValue(id, out var row)
                 ? Response.FromValue(row, Mock.Of<Response>()) : throw new RequestFailedException(404, "Missing"));

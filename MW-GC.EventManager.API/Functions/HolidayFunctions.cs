@@ -42,7 +42,7 @@ internal sealed class HolidayFunctions
 
         entity.Id = Guid.NewGuid();
         await _store.UpsertAsync(entity, ct);
-        return new CreatedResult($"/api/holidays/{entity.Id}", entity);
+        return EntityResults.Created(req, $"/api/holidays/{entity.Id}", entity);
     });
 
     [Function("UpdateHoliday")]
@@ -59,8 +59,7 @@ internal sealed class HolidayFunctions
         if (HolidayValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = id;
-        await _store.UpsertAsync(entity, ct);
-        return new OkObjectResult(entity);
+        return await EntityResults.UpdateAsync(_store, req, entity, ct);
     });
 
     [Function("DeleteHoliday")]
@@ -75,8 +74,7 @@ internal sealed class HolidayFunctions
         var inUse = (await _activities.GetAllAsync(ct)).Count(a => a.HolidayIds.Contains(id));
         if (inUse > 0) return new ConflictObjectResult(InUseMessage(inUse));
 
-        await _store.DeleteAsync(id, ct);
-        return new NoContentResult();
+        return await EntityResults.DeleteAsync(_store, req, id, ct);
     });
 
     internal static string InUseMessage(int activities) => activities == 1

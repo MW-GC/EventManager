@@ -71,3 +71,15 @@ Themes or Holidays, and Themed activities only.
   **Game** and one of its **Activities**.
 - An **Event** has zero or one **Winner**, which is one of its **Selections**.
 - Each **slot** becomes one **Selection** when the **Event** is saved.
+
+## Storage
+
+Two admins editing the same Game, Activity, Theme, Holiday or Event cannot silently
+overwrite each other: every item carries an `eTag`, and a save or delete that sends it
+back as `If-Match` after someone else saved is refused with 409. An edit never brings
+back an item that was deleted in the meantime (404). See `docs/api-validation.md`.
+
+An Event keeps its Selections as one JSON value. When that value is too long for a
+single Table Storage property it is stored in numbered chunks (`Selections`,
+`Selections__1`, ...) and joined again on read; older Events stored in one piece
+read back unchanged.
