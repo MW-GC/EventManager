@@ -30,6 +30,20 @@ The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/them
 
 `POST /api/events/generate` keeps its own rules unchanged: `Count` from 1 to 5, non-null filter lists, `UtcOffsetMinutes` from -840 to 840. The event-create idempotency flow is unchanged too: 201 on first insert, 200 on a matching replay, 409 when the details differ, and 400 for a bad `Idempotency-Key` (see `idempotent-event-creates.md`).
 
+## Delete refusal (Games, Themes, Holidays)
+
+A Game, Theme or Holiday that Activities still use cannot be deleted. The route reads every Activity (they all share one partition), counts the ones that use the id, and when that count is above zero answers 409 and deletes nothing. Nothing is cascaded and no id is stripped from an Activity.
+
+| Request | Uses counted | Status | Body |
+| --- | --- | --- | --- |
+| `DELETE /api/games/{id}` | Activities whose `GameId` is the id | 409 | `This game is used by N activities. Delete or move them first.` (`1 activity`, `that activity` for one) |
+| `DELETE /api/themes/{id}` | Activities whose `ThemeIds` contain the id | 409 | `This theme is used by N activities. Remove it from them first.` (`1 activity`, `that activity` for one) |
+| `DELETE /api/holidays/{id}` | Activities whose `HolidayIds` contain the id | 409 | `This holiday is used by N activities. Remove it from them first.` (`1 activity`, `that activity` for one) |
+| Any of the three, row not used by any Activity | | 204 | |
+| Any of the three, id that does not exist | | 204 | (idempotent, as before) |
+
+The count and the delete are two separate storage calls with no lock, so an Activity created between them can still end up pointing at a deleted row. That race is accepted. A storage failure while counting goes through the failure mapping below like any other route (for example a 503 for an outage), and nothing is deleted. Saved Events are unaffected: they keep their own copies of the Game and Activity they selected.
+
 ## Failures after validation (every route)
 
 | Failure | Status | Body | Logged as |
@@ -45,4 +59,4 @@ Every failure is logged through `ILogger<T>` in the Functions class, with the ex
 
 ## Test coverage
 
-`RequestBodyGuardTests` calls the guard directly, with no Functions host. `EntityValidatorTests` covers each validator. `ApiValidationRouteTests` drives every body-reading route through the real Functions classes and `TableStore` over in-memory mocked tables, and checks that rejected requests write nothing. `StorageFailureTests` covers the failure mapping and logging with a mocked `TableClient`, because a running instance cannot simulate a storage outage.
+`RequestBodyGuardTests` calls the guard directly, with no Functions host. `EntityValidatorTests` covers each validator. `ApiValidationRouteTests` drives every body-reading route through the real Functions classes and `TableStore` over in-memory mocked tables, and checks that rejected requests write nothing. `StorageFailureTests` covers the failure mapping and logging with a mocked `TableClient`, because a running instance cannot simulate a storage outage. `DeleteInUseRefusalTests` covers the delete refusal for all three entities, an Event keeping its snapshot after a Game delete, and a failure while counting.

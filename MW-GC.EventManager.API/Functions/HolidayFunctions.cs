@@ -11,11 +11,13 @@ namespace MW_GC.EventManager.API.Functions;
 internal sealed class HolidayFunctions
 {
     private readonly TableStore<HolidayEntity> _store;
+    private readonly TableStore<ActivityEntity> _activities;
     private readonly ILogger<HolidayFunctions> _logger;
 
-    public HolidayFunctions(TableStore<HolidayEntity> store, ILogger<HolidayFunctions> logger)
+    public HolidayFunctions(TableStore<HolidayEntity> store, TableStore<ActivityEntity> activities, ILogger<HolidayFunctions> logger)
     {
         _store = store;
+        _activities = activities;
         _logger = logger;
     }
 
@@ -66,7 +68,18 @@ internal sealed class HolidayFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "holidays/{id:guid}")] HttpRequest req,
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteHoliday", ct, async () =>
     {
+        // A missing Holiday stays an idempotent 204. A Holiday that Activities still list is
+        // refused (409) and nothing is deleted, so no Activity is left with an id that names nothing.
+        if (await _store.GetAsync(id, ct) is null) return new NoContentResult();
+
+        var inUse = (await _activities.GetAllAsync(ct)).Count(a => a.HolidayIds.Contains(id));
+        if (inUse > 0) return new ConflictObjectResult(InUseMessage(inUse));
+
         await _store.DeleteAsync(id, ct);
         return new NoContentResult();
     });
+
+    internal static string InUseMessage(int activities) => activities == 1
+        ? "This holiday is used by 1 activity. Remove it from that activity first."
+        : $"This holiday is used by {activities} activities. Remove it from them first.";
 }

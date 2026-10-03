@@ -11,11 +11,13 @@ namespace MW_GC.EventManager.API.Functions;
 internal sealed class ThemeFunctions
 {
     private readonly TableStore<ThemeEntity> _store;
+    private readonly TableStore<ActivityEntity> _activities;
     private readonly ILogger<ThemeFunctions> _logger;
 
-    public ThemeFunctions(TableStore<ThemeEntity> store, ILogger<ThemeFunctions> logger)
+    public ThemeFunctions(TableStore<ThemeEntity> store, TableStore<ActivityEntity> activities, ILogger<ThemeFunctions> logger)
     {
         _store = store;
+        _activities = activities;
         _logger = logger;
     }
 
@@ -66,7 +68,18 @@ internal sealed class ThemeFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "themes/{id:guid}")] HttpRequest req,
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteTheme", ct, async () =>
     {
+        // A missing Theme stays an idempotent 204. A Theme that Activities still list is refused
+        // (409) and nothing is deleted, so no Activity is left with an id that names nothing.
+        if (await _store.GetAsync(id, ct) is null) return new NoContentResult();
+
+        var inUse = (await _activities.GetAllAsync(ct)).Count(a => a.ThemeIds.Contains(id));
+        if (inUse > 0) return new ConflictObjectResult(InUseMessage(inUse));
+
         await _store.DeleteAsync(id, ct);
         return new NoContentResult();
     });
+
+    internal static string InUseMessage(int activities) => activities == 1
+        ? "This theme is used by 1 activity. Remove it from that activity first."
+        : $"This theme is used by {activities} activities. Remove it from them first.";
 }

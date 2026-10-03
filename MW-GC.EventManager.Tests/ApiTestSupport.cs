@@ -113,9 +113,9 @@ internal sealed class LibraryHarness
 
         var games = new TableStore<GameEntity>(service.Object, "Games", "Game");
         var activities = new TableStore<ActivityEntity>(service.Object, "Activities", "Activity");
-        GameApi = new GameFunctions(games, GameLog);
-        ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, "Themes", "Theme"), ThemeLog);
-        HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), HolidayLog);
+        GameApi = new GameFunctions(games, activities, GameLog);
+        ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, "Themes", "Theme"), activities, ThemeLog);
+        HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), activities, HolidayLog);
         ActivityApi = new ActivityFunctions(activities, games, ActivityLog);
         EventApi = new EventFunctions(new TableStore<EventEntity>(service.Object, "Events", "Event"), games, activities, new EventGenerator(), EventLog);
     }

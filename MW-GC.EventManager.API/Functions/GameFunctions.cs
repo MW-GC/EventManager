@@ -11,11 +11,13 @@ namespace MW_GC.EventManager.API.Functions;
 internal sealed class GameFunctions
 {
     private readonly TableStore<GameEntity> _store;
+    private readonly TableStore<ActivityEntity> _activities;
     private readonly ILogger<GameFunctions> _logger;
 
-    public GameFunctions(TableStore<GameEntity> store, ILogger<GameFunctions> logger)
+    public GameFunctions(TableStore<GameEntity> store, TableStore<ActivityEntity> activities, ILogger<GameFunctions> logger)
     {
         _store = store;
+        _activities = activities;
         _logger = logger;
     }
 
@@ -75,7 +77,18 @@ internal sealed class GameFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "games/{id:guid}")] HttpRequest req,
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteGame", ct, async () =>
     {
+        // A missing Game stays an idempotent 204. A Game that Activities still use is refused
+        // (409) and nothing is deleted, so no Activity is left pointing at a Game that is gone.
+        if (await _store.GetAsync(id, ct) is null) return new NoContentResult();
+
+        var inUse = (await _activities.GetAllAsync(ct)).Count(a => a.GameId == id);
+        if (inUse > 0) return new ConflictObjectResult(InUseMessage(inUse));
+
         await _store.DeleteAsync(id, ct);
         return new NoContentResult();
     });
+
+    internal static string InUseMessage(int activities) => activities == 1
+        ? "This game is used by 1 activity. Delete or move that activity first."
+        : $"This game is used by {activities} activities. Delete or move them first.";
 }
