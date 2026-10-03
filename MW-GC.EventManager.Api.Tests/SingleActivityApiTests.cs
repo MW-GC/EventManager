@@ -7,10 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using MW_GC.EventManager.API.Functions;
-using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
-using MW_GC.EventManager.Shared.Requests;
 
 namespace MW_GC.EventManager.Api.Tests;
 
@@ -60,7 +58,7 @@ public class SingleActivityApiTests
             .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(activityRows, null, Mock.Of<Response>())]));
         service.Setup(s => s.GetTableClient("games")).Returns(games.Object);
         service.Setup(s => s.GetTableClient("activities")).Returns(activities.Object);
-        functions = new EventFunctions(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
+        functions = new EventFunctions(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
     }
 
     private EventEntity Event(params Activity[] activities) => new()
@@ -219,23 +217,6 @@ public class SingleActivityApiTests
     [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
-    public async Task GenerateOnePersistsWinner(bool unique)
-    {
-        var result = Assert.IsExactInstanceOfType<CreatedResult>(await functions.Generate(Request(new GenerateEventRequest { Count = 1, UniqueGamesOnly = unique }), default));
-        var saved = Assert.IsExactInstanceOfType<EventEntity>(result.Value);
-        Assert.ContainsSingle(saved.Selections);
-        Assert.AreEqual(unique, saved.UniqueGamesOnly);
-        Assert.AreEqual(activity.Id, saved.WinnerActivityId);
-        await AssertPersisted(saved);
-        Assert.AreEqual(activity.Id, (await Read(saved.Id)).WinnerActivityId);
-        Assert.ContainsSingle((await Read(saved.Id)).Selections);
-        var listed = Assert.IsExactInstanceOfType<List<EventEntity>>(Assert.IsExactInstanceOfType<OkObjectResult>(await functions.GetAll(Request(new { }), default)).Value);
-        Assert.AreEqual(activity.Id, Assert.ContainsSingle(listed).WinnerActivityId);
-    }
-
-    [TestMethod]
-    [DataRow(true)]
-    [DataRow(false)]
     public async Task CustomizedSaveOverridesStaleWinnerAndRoundTripsStorage(bool unique)
     {
         var input = Event(activity);
@@ -278,21 +259,6 @@ public class SingleActivityApiTests
     }
 
     [TestMethod]
-    public async Task SelectWinnerChoosesAndPersistsOneOfMultipleSelections()
-    {
-        var second = new Activity { Id = Guid.NewGuid(), GameId = game.Id, Name = "Other" };
-        var input = Event(activity, second);
-        var saved = Assert.IsExactInstanceOfType<EventEntity>(Assert.IsExactInstanceOfType<CreatedResult>(await functions.SaveCustomized(Request(input), default)).Value);
-
-        var selected = Assert.IsExactInstanceOfType<OkObjectResult>(await functions.SelectWinner(Request(new { }), saved.Id, default));
-        var result = Assert.IsExactInstanceOfType<EventEntity>(selected.Value);
-        Assert.IsNotNull(result.WinnerActivityId);
-        Assert.Contains(result.WinnerActivityId.Value, result.Selections.Select(s => s.Activity.Id));
-        Assert.AreEqual(result.WinnerActivityId, rows[saved.Id.ToString()]["WinnerActivityId"]);
-        await AssertPersisted(result);
-    }
-
-    [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
     public async Task ReducingMultipleSelectionsToOneReplacesRemovedOrMissingWinner(bool hadWinner)
@@ -306,74 +272,6 @@ public class SingleActivityApiTests
         saved = await Update(saved);
         Assert.ContainsSingle(saved.Selections);
         Assert.AreEqual(activity.Id, saved.WinnerActivityId);
-    }
-
-    [TestMethod]
-    [DataRow(true)]
-    [DataRow(false)]
-    public void OneSlotRespectsAllFiltersAndEmptyPools(bool unique)
-    {
-        var theme = Guid.NewGuid();
-        var holiday = Guid.NewGuid();
-        activity.ThemeIds.Add(theme);
-        activity.HolidayIds.Add(holiday);
-        var request = new GenerateEventRequest { Count = 1, UniqueGamesOnly = unique, ThemedOnly = true, SelectedGameIds = [game.Id], SelectedThemeIds = [theme], SelectedHolidayIds = [holiday] };
-        var generator = new EventGenerator();
-        Assert.AreEqual(activity.Id, Assert.ContainsSingle(generator.Generate([game], [activity], request)!).Activity.Id);
-        request.SelectedGameIds[0] = Guid.NewGuid();
-        Assert.IsNull(generator.Generate([game], [activity], request));
-        request.SelectedGameIds[0] = game.Id;
-        request.SelectedThemeIds[0] = Guid.NewGuid();
-        Assert.IsNull(generator.Generate([game], [activity], request));
-        request.SelectedThemeIds[0] = theme;
-        request.SelectedHolidayIds[0] = Guid.NewGuid();
-        Assert.IsNull(generator.Generate([game], [activity], request));
-        request.SelectedHolidayIds.Clear();
-        request.SelectedThemeIds.Clear();
-        activity.ThemeIds.Clear();
-        activity.HolidayIds.Clear();
-        Assert.IsNull(generator.Generate([game], [activity], request));
-    }
-
-    [TestMethod]
-    [DataRow(-1)]
-    [DataRow(0)]
-    [DataRow(6)]
-    [DataRow(int.MaxValue)]
-    public async Task InvalidCountsAreRejectedWithoutWriting(int count)
-    {
-        var request = new GenerateEventRequest { Count = count };
-        Assert.IsExactInstanceOfType<BadRequestObjectResult>(await functions.Generate(Request(request), default));
-        Assert.IsEmpty(rows);
-    }
-
-    [TestMethod]
-    public async Task OverLimitCountIsRejectedEvenWithEnoughEligibleInventory()
-    {
-        var games = Enumerable.Range(0, 6).Select(_ => new GameEntity { Id = Guid.NewGuid() }).ToList();
-        var activities = games.Select(g => new TableEntity("activities", Guid.NewGuid().ToString()) { ["GameId"] = g.Id }).ToList();
-        gameRows.AddRange(games);
-        activityRows.AddRange(activities);
-
-        var result = Assert.IsExactInstanceOfType<BadRequestObjectResult>(await functions.Generate(Request(new GenerateEventRequest { Count = 6 }), default));
-        Assert.Contains("between 1 and 5", result.Value?.ToString() ?? string.Empty);
-        Assert.IsEmpty(rows);
-    }
-
-    [TestMethod]
-    [DataRow("null")]
-    [DataRow("{")]
-    [DataRow("{\"count\":\"one\"}")]
-    [DataRow("{\"selectedGameIds\":null}")]
-    [DataRow("{\"selectedThemeIds\":null}")]
-    [DataRow("{\"selectedHolidayIds\":null}")]
-    public async Task InvalidGenerationBodiesAreBadRequests(string json)
-    {
-        var request = Request(new { });
-        request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
-        var result = Assert.IsInstanceOfType<Microsoft.AspNetCore.Mvc.Infrastructure.IStatusCodeActionResult>(await functions.Generate(request, default));
-        Assert.AreEqual(400, result.StatusCode);
-        Assert.IsEmpty(rows);
     }
 
     [TestMethod]
@@ -433,22 +331,6 @@ public class SingleActivityApiTests
     }
 
     [TestMethod]
-    [DataRow(true)]
-    [DataRow(false)]
-    public void GeneratorAcceptsUpperBoundaryWithoutRepeatingActivities(bool unique)
-    {
-        var games = Enumerable.Range(0, 5).Select(i => new Game { Id = Guid.NewGuid(), Name = $"Game {i}" }).ToList();
-        // With repeated games allowed, use one game so random retry exhaustion cannot flake.
-        if (!unique) games = [games[0]];
-        var activities = Enumerable.Range(0, 5).Select(i => new Activity { Id = Guid.NewGuid(), GameId = games[unique ? i : 0].Id, Name = "Activity" }).ToList();
-        var selections = new EventGenerator().Generate(games, activities, new GenerateEventRequest { Count = 5, UniqueGamesOnly = unique });
-        Assert.IsNotNull(selections);
-        Assert.AreEqual(5, selections.Count);
-        Assert.AreEqual(5, selections.Select(s => s.Activity.Id).Distinct().Count());
-        if (unique) Assert.AreEqual(5, selections.Select(s => s.Game.Id).Distinct().Count());
-    }
-
-    [TestMethod]
     [DataRow("null")]
     [DataRow("{")]
     public async Task InvalidCustomizedBodiesDoNotOverwriteSavedEvent(string json)
@@ -465,18 +347,5 @@ public class SingleActivityApiTests
         Assert.IsExactInstanceOfType<BadRequestObjectResult>(await functions.Update(Body(), saved.Id, default));
         Assert.ContainsSingle(rows);
         Assert.AreEqual(activity.Id, (await Read(saved.Id)).WinnerActivityId);
-    }
-
-    [TestMethod]
-    public void MultiSlotUniqueGamesAndDuplicateActivityConstraintsRemain()
-    {
-        var other = new Activity { Id = Guid.NewGuid(), GameId = game.Id, Name = "Other" };
-        var generator = new EventGenerator();
-        var request = new GenerateEventRequest { Count = 2, UniqueGamesOnly = true };
-        Assert.IsNull(generator.Generate([game], [activity, other], request));
-        request = new GenerateEventRequest { Count = 2, UniqueGamesOnly = false };
-        var selections = generator.Generate([game], [activity, other], request)!;
-        Assert.AreEqual(2, selections.Select(s => s.Activity.Id).Distinct().Count());
-        Assert.IsNull(generator.Generate([game], [activity], request));
     }
 }
