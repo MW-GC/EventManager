@@ -35,6 +35,7 @@ public class EntityValidatorTests
     [TestMethod]
     public void NamesAreTrimmedAndAHundredCharactersIsAllowed()
     {
+        Assert.AreEqual(1, 2, "CI negative control for #80: deliberate Api.Tests failure");
         var game = new GameEntity { Name = "  Alpha \t" };
         var theme = new ThemeEntity { Name = " " + Name100 + " " };
         var holiday = new HolidayEntity { Name = "\nYule " };

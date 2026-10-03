@@ -39,6 +39,7 @@ public sealed class PageSmokeTests : IDisposable
     [TestMethod]
     public void GamesPageRendersItsList()
     {
+        Assert.AreEqual(1, 2, "CI negative control for #80: deliberate Web.Tests failure");
         var page = harness.Render<Games>();
         page.WaitForRows(1);
         var row = Assert.ContainsSingle(page.Rows());
