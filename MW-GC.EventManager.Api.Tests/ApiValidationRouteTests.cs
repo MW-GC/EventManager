@@ -4,27 +4,27 @@ using Microsoft.AspNetCore.Mvc;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
-using Xunit;
 
-namespace MW_GC.EventManager.Tests;
+namespace MW_GC.EventManager.Api.Tests;
 
 /// <summary>
 /// Every body-reading route (#45) through the real Functions classes over in-memory tables:
 /// bad bodies are 400, non-JSON is 415, the shared validators run on create AND update, and a
 /// rejected request stores nothing.
 /// </summary>
+[TestClass]
 public class ApiValidationRouteTests
 {
     private readonly LibraryHarness h = new();
 
     // One entry per body-reading route. Updates and the comments PATCH target a stored row,
     // so the 400/415 comes from the body and not from a 404.
-    public static TheoryData<string> BodyRoutes => new()
-    {
-        "CreateGame", "UpdateGame", "CreateTheme", "UpdateTheme", "CreateHoliday", "UpdateHoliday",
-        "CreateActivity", "UpdateActivity", "UpdateActivityComments",
-        "GenerateEvent", "SaveCustomizedEvent", "UpdateEvent",
-    };
+    public static IEnumerable<object?[]> BodyRoutes =>
+    [
+        ["CreateGame"], ["UpdateGame"], ["CreateTheme"], ["UpdateTheme"], ["CreateHoliday"], ["UpdateHoliday"],
+        ["CreateActivity"], ["UpdateActivity"], ["UpdateActivityComments"],
+        ["GenerateEvent"], ["SaveCustomizedEvent"], ["UpdateEvent"],
+    ];
 
     private Task<IActionResult> Call(string route, HttpRequest req)
     {
@@ -62,59 +62,59 @@ public class ApiValidationRouteTests
         };
     }
 
-    [Theory]
-    [MemberData(nameof(BodyRoutes))]
+    [TestMethod]
+    [DynamicData(nameof(BodyRoutes))]
     public async Task TruncatedJsonIs400OnEveryRouteAndWritesNothing(string route)
     {
         var result = await Call(route, TestRequests.Raw("{\"name\":"));
 
-        Assert.Equal(StatusCodes.Status400BadRequest, ApiResults.Status(result));
-        Assert.Equal(RequestBody.InvalidJsonMessage, ApiResults.Message(result));
-        Assert.Equal(0, h.Writes());
+        Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(result));
+        Assert.AreEqual(RequestBody.InvalidJsonMessage, ApiResults.Message(result));
+        Assert.AreEqual(0, h.Writes());
     }
 
-    [Theory]
-    [MemberData(nameof(BodyRoutes))]
+    [TestMethod]
+    [DynamicData(nameof(BodyRoutes))]
     public async Task ValidBodySentAsTextPlainIs415OnEveryRouteAndWritesNothing(string route)
     {
         var result = await Call(route, TestRequests.Raw("{\"name\":\"Valid\",\"count\":1}", "text/plain"));
 
-        Assert.Equal(StatusCodes.Status415UnsupportedMediaType, ApiResults.Status(result));
-        Assert.Equal(RequestBody.UnsupportedMediaTypeMessage, ApiResults.Message(result));
-        Assert.Equal(0, h.Writes());
+        Assert.AreEqual(StatusCodes.Status415UnsupportedMediaType, ApiResults.Status(result));
+        Assert.AreEqual(RequestBody.UnsupportedMediaTypeMessage, ApiResults.Message(result));
+        Assert.AreEqual(0, h.Writes());
     }
 
-    [Theory]
-    [MemberData(nameof(BodyRoutes))]
+    [TestMethod]
+    [DynamicData(nameof(BodyRoutes))]
     public async Task JsonNullBodyIs400OnEveryRouteAndWritesNothing(string route)
     {
         var result = await Call(route, TestRequests.Raw("null"));
 
-        Assert.Equal(StatusCodes.Status400BadRequest, ApiResults.Status(result));
-        Assert.Equal(RequestBody.NullBodyMessage, ApiResults.Message(result));
-        Assert.Equal(0, h.Writes());
+        Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(result));
+        Assert.AreEqual(RequestBody.NullBodyMessage, ApiResults.Message(result));
+        Assert.AreEqual(0, h.Writes());
     }
 
     // ---- Names on Games, Themes and Holidays: create and update share one rule.
 
-    [Theory]
-    [InlineData("{}")]
-    [InlineData("{\"name\":\" \"}")]
-    [InlineData("{\"name\":\"\"}")]
-    [InlineData("{\"name\":null}")]
+    [TestMethod]
+    [DataRow("{}")]
+    [DataRow("{\"name\":\" \"}")]
+    [DataRow("{\"name\":\"\"}")]
+    [DataRow("{\"name\":null}")]
     public async Task BlankNamesAre400AndNothingIsStored(string body)
     {
-        Assert.Equal("Name is required.", ApiResults.Message(await h.GameApi.Create(TestRequests.Raw(body), default)));
-        Assert.Equal("Name is required.", ApiResults.Message(await h.ThemeApi.Create(TestRequests.Raw(body), default)));
-        Assert.Equal("Name is required.", ApiResults.Message(await h.HolidayApi.Create(TestRequests.Raw(body), default)));
+        Assert.AreEqual("Name is required.", ApiResults.Message(await h.GameApi.Create(TestRequests.Raw(body), default)));
+        Assert.AreEqual("Name is required.", ApiResults.Message(await h.ThemeApi.Create(TestRequests.Raw(body), default)));
+        Assert.AreEqual("Name is required.", ApiResults.Message(await h.HolidayApi.Create(TestRequests.Raw(body), default)));
 
-        Assert.Empty(h.Games);
-        Assert.Empty(h.Themes);
-        Assert.Empty(h.Holidays);
-        Assert.Equal(0, h.Writes());
+        Assert.IsEmpty(h.Games);
+        Assert.IsEmpty(h.Themes);
+        Assert.IsEmpty(h.Holidays);
+        Assert.AreEqual(0, h.Writes());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task UpdatesUseTheSameNameRuleAndLeaveTheRowAlone()
     {
         var game = h.SeedGame("Alpha");
@@ -124,71 +124,71 @@ public class ApiValidationRouteTests
         h.Holidays[holiday.RowKey] = holiday;
         var longName = new string('x', 101);
 
-        Assert.Equal("Name is required.", ApiResults.Message(await h.GameApi.Update(TestRequests.Raw("{\"name\":\"  \"}"), game.Id, default)));
-        Assert.Equal("Name must be 100 characters or fewer.", ApiResults.Message(await h.ThemeApi.Update(TestRequests.Json(new { name = longName }), theme.Id, default)));
-        Assert.Equal("Name is required.", ApiResults.Message(await h.HolidayApi.Update(TestRequests.Raw("{}"), holiday.Id, default)));
+        Assert.AreEqual("Name is required.", ApiResults.Message(await h.GameApi.Update(TestRequests.Raw("{\"name\":\"  \"}"), game.Id, default)));
+        Assert.AreEqual("Name must be 100 characters or fewer.", ApiResults.Message(await h.ThemeApi.Update(TestRequests.Json(new { name = longName }), theme.Id, default)));
+        Assert.AreEqual("Name is required.", ApiResults.Message(await h.HolidayApi.Update(TestRequests.Raw("{}"), holiday.Id, default)));
 
-        Assert.Equal("Alpha", h.Games[game.RowKey].Name);
-        Assert.Equal("Spooky", h.Themes[theme.RowKey].Name);
-        Assert.Equal("Yule", h.Holidays[holiday.RowKey].Name);
-        Assert.Equal(0, h.Writes());
+        Assert.AreEqual("Alpha", h.Games[game.RowKey].Name);
+        Assert.AreEqual("Spooky", h.Themes[theme.RowKey].Name);
+        Assert.AreEqual("Yule", h.Holidays[holiday.RowKey].Name);
+        Assert.AreEqual(0, h.Writes());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OverLongNameIs400NamingTheFieldOnEveryEntity()
     {
         var game = h.SeedGame();
         var name = new string('x', 101);
         const string expected = "Name must be 100 characters or fewer.";
 
-        Assert.Equal(expected, ApiResults.Message(await h.GameApi.Create(TestRequests.Json(new { name }), default)));
-        Assert.Equal(expected, ApiResults.Message(await h.ThemeApi.Create(TestRequests.Json(new { name }), default)));
-        Assert.Equal(expected, ApiResults.Message(await h.HolidayApi.Create(TestRequests.Json(new { name }), default)));
-        Assert.Equal(expected, ApiResults.Message(await h.ActivityApi.Create(TestRequests.Json(new { name, gameId = game.Id }), default)));
-        Assert.Equal(expected, ApiResults.Message(await h.EventApi.SaveCustomized(TestRequests.Json(EventBody(name, game)), default)));
+        Assert.AreEqual(expected, ApiResults.Message(await h.GameApi.Create(TestRequests.Json(new { name }), default)));
+        Assert.AreEqual(expected, ApiResults.Message(await h.ThemeApi.Create(TestRequests.Json(new { name }), default)));
+        Assert.AreEqual(expected, ApiResults.Message(await h.HolidayApi.Create(TestRequests.Json(new { name }), default)));
+        Assert.AreEqual(expected, ApiResults.Message(await h.ActivityApi.Create(TestRequests.Json(new { name, gameId = game.Id }), default)));
+        Assert.AreEqual(expected, ApiResults.Message(await h.EventApi.SaveCustomized(TestRequests.Json(EventBody(name, game)), default)));
 
-        Assert.Single(h.Games);
-        Assert.Empty(h.Themes);
-        Assert.Empty(h.Holidays);
-        Assert.Empty(h.Activities);
-        Assert.Empty(h.Events);
-        Assert.Equal(0, h.Writes());
+        Assert.ContainsSingle(h.Games);
+        Assert.IsEmpty(h.Themes);
+        Assert.IsEmpty(h.Holidays);
+        Assert.IsEmpty(h.Activities);
+        Assert.IsEmpty(h.Events);
+        Assert.AreEqual(0, h.Writes());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CreateAndUpdateStoreTheTrimmedName()
     {
         var created = ApiResults.Value<GameEntity>(await h.GameApi.Create(TestRequests.Json(new { name = "  Alpha  ", website = "https://a.test" }), default));
-        Assert.Equal("Alpha", created.Name);
-        Assert.Equal("Alpha", h.Games[created.RowKey].Name);
+        Assert.AreEqual("Alpha", created.Name);
+        Assert.AreEqual("Alpha", h.Games[created.RowKey].Name);
 
         var updated = ApiResults.Value<GameEntity>(await h.GameApi.Update(TestRequests.Json(new { name = "\tBeta " }), created.Id, default));
-        Assert.Equal("Beta", updated.Name);
-        Assert.Equal("Beta", h.Games[created.RowKey].Name);
+        Assert.AreEqual("Beta", updated.Name);
+        Assert.AreEqual("Beta", h.Games[created.RowKey].Name);
 
         var theme = ApiResults.Value<ThemeEntity>(await h.ThemeApi.Create(TestRequests.Json(new { name = " Spooky " }), default));
-        Assert.Equal("Spooky", h.Themes[theme.RowKey].Name);
+        Assert.AreEqual("Spooky", h.Themes[theme.RowKey].Name);
         var holiday = ApiResults.Value<HolidayEntity>(await h.HolidayApi.Create(TestRequests.Json(new { name = " Yule " }), default));
-        Assert.Equal("Yule", h.Holidays[holiday.RowKey].Name);
+        Assert.AreEqual("Yule", h.Holidays[holiday.RowKey].Name);
     }
 
-    [Theory]
-    [InlineData("website", "Website")]
-    [InlineData("imageUrl", "ImageUrl")]
-    [InlineData("iconUrl", "IconUrl")]
+    [TestMethod]
+    [DataRow("website", "Website")]
+    [DataRow("imageUrl", "ImageUrl")]
+    [DataRow("iconUrl", "IconUrl")]
     public async Task OverLongGameUrlIs400NamingTheField(string json, string field)
     {
         var body = new Dictionary<string, string> { ["name"] = "Alpha", [json] = new string('u', 2049) };
 
         var result = await h.GameApi.Create(TestRequests.Json(body), default);
 
-        Assert.Equal($"{field} must be 2048 characters or fewer.", ApiResults.Message(result));
-        Assert.Empty(h.Games);
+        Assert.AreEqual($"{field} must be 2048 characters or fewer.", ApiResults.Message(result));
+        Assert.IsEmpty(h.Games);
     }
 
     // ---- Activities: GameId, id lists, text caps, the comments PATCH.
 
-    [Fact]
+    [TestMethod]
     public async Task ActivityWithNullThemeIdsIsStoredWithEmptyLists()
     {
         var game = h.SeedGame();
@@ -196,20 +196,20 @@ public class ApiValidationRouteTests
         var result = await h.ActivityApi.Create(
             TestRequests.Raw($"{{\"gameId\":\"{game.Id}\",\"name\":\"Act\",\"themeIds\":null,\"holidayIds\":null}}"), default);
 
-        Assert.Equal(StatusCodes.Status201Created, ApiResults.Status(result));
+        Assert.AreEqual(StatusCodes.Status201Created, ApiResults.Status(result));
         var created = ApiResults.Value<ActivityEntity>(result);
-        Assert.Empty(created.ThemeIds);
-        Assert.Empty(created.HolidayIds);
-        Assert.Equal("[]", h.Activities[created.Id.ToString("D")].GetString("ThemeIds"));
-        Assert.Equal("[]", h.Activities[created.Id.ToString("D")].GetString("HolidayIds"));
+        Assert.IsEmpty(created.ThemeIds);
+        Assert.IsEmpty(created.HolidayIds);
+        Assert.AreEqual("[]", h.Activities[created.Id.ToString("D")].GetString("ThemeIds"));
+        Assert.AreEqual("[]", h.Activities[created.Id.ToString("D")].GetString("HolidayIds"));
         var stored = ApiResults.Value<ActivityEntity>(await h.ActivityApi.Get(TestRequests.Empty(), created.Id, default));
-        Assert.NotNull(stored.ThemeIds);
-        Assert.Empty(stored.ThemeIds);
-        Assert.NotNull(stored.HolidayIds);
-        Assert.Empty(stored.HolidayIds);
+        Assert.IsNotNull(stored.ThemeIds);
+        Assert.IsEmpty(stored.ThemeIds);
+        Assert.IsNotNull(stored.HolidayIds);
+        Assert.IsEmpty(stored.HolidayIds);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ActivityIdListsAreDeduplicatedOnCreateAndUpdate()
     {
         var game = h.SeedGame();
@@ -217,30 +217,30 @@ public class ApiValidationRouteTests
         var body = new { gameId = game.Id, name = "Act", themeIds = new[] { theme, theme }, holidayIds = Array.Empty<Guid>() };
 
         var created = ApiResults.Value<ActivityEntity>(await h.ActivityApi.Create(TestRequests.Json(body), default));
-        Assert.Equal(new[] { theme }, created.ThemeIds);
+        Assert.AreSequenceEqual(new[] { theme }, created.ThemeIds);
 
         var updated = ApiResults.Value<ActivityEntity>(await h.ActivityApi.Update(
             TestRequests.Raw($"{{\"gameId\":\"{game.Id}\",\"name\":\"Act\",\"themeIds\":[\"{theme}\",\"{theme}\"],\"holidayIds\":null}}"), created.Id, default));
-        Assert.Equal(new[] { theme }, updated.ThemeIds);
-        Assert.Empty(updated.HolidayIds);
+        Assert.AreSequenceEqual(new[] { theme }, updated.ThemeIds);
+        Assert.IsEmpty(updated.HolidayIds);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ActivityWithEmptyOrUnknownGameIdIs400()
     {
         var missing = await h.ActivityApi.Create(TestRequests.Json(new { name = "Act" }), default);
         var empty = await h.ActivityApi.Create(TestRequests.Json(new { name = "Act", gameId = Guid.Empty }), default);
         var unknown = await h.ActivityApi.Create(TestRequests.Json(new { name = "Act", gameId = Guid.NewGuid() }), default);
 
-        Assert.Equal("GameId is required.", ApiResults.Message(missing));
-        Assert.Equal("GameId is required.", ApiResults.Message(empty));
-        Assert.IsType<BadRequestObjectResult>(unknown);
-        Assert.Equal(ActivityValidator.GameNotFoundMessage, ApiResults.Message(unknown));
-        Assert.Empty(h.Activities);
-        Assert.Equal(0, h.Writes());
+        Assert.AreEqual("GameId is required.", ApiResults.Message(missing));
+        Assert.AreEqual("GameId is required.", ApiResults.Message(empty));
+        Assert.IsExactInstanceOfType<BadRequestObjectResult>(unknown);
+        Assert.AreEqual(ActivityValidator.GameNotFoundMessage, ApiResults.Message(unknown));
+        Assert.IsEmpty(h.Activities);
+        Assert.AreEqual(0, h.Writes());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ActivityUpdateAlsoChecksTheGameExists()
     {
         var game = h.SeedGame();
@@ -248,16 +248,16 @@ public class ApiValidationRouteTests
 
         var result = await h.ActivityApi.Update(TestRequests.Json(new { gameId = Guid.NewGuid(), name = "Moved" }), created.Id, default);
 
-        Assert.Equal(ActivityValidator.GameNotFoundMessage, ApiResults.Message(result));
-        Assert.Equal("Act", h.Activities[created.Id.ToString("D")].GetString("Name"));
-        Assert.Equal(game.Id, h.Activities[created.Id.ToString("D")].GetGuid("GameId"));
+        Assert.AreEqual(ActivityValidator.GameNotFoundMessage, ApiResults.Message(result));
+        Assert.AreEqual("Act", h.Activities[created.Id.ToString("D")].GetString("Name"));
+        Assert.AreEqual(game.Id, h.Activities[created.Id.ToString("D")].GetGuid("GameId"));
     }
 
-    [Theory]
-    [InlineData("description", "Description")]
-    [InlineData("rules", "Rules")]
-    [InlineData("setupRequirements", "SetupRequirements")]
-    [InlineData("comments", "Comments")]
+    [TestMethod]
+    [DataRow("description", "Description")]
+    [DataRow("rules", "Rules")]
+    [DataRow("setupRequirements", "SetupRequirements")]
+    [DataRow("comments", "Comments")]
     public async Task OverLongActivityTextIs400NamingTheField(string json, string field)
     {
         var game = h.SeedGame();
@@ -265,31 +265,31 @@ public class ApiValidationRouteTests
 
         var result = await h.ActivityApi.Create(TestRequests.Json(body), default);
 
-        Assert.Equal($"{field} must be 2000 characters or fewer.", ApiResults.Message(result));
-        Assert.Empty(h.Activities);
+        Assert.AreEqual($"{field} must be 2000 characters or fewer.", ApiResults.Message(result));
+        Assert.IsEmpty(h.Activities);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CommentsPatchIsCappedLikeTheActivity()
     {
         var game = h.SeedGame();
         var created = ApiResults.Value<ActivityEntity>(await h.ActivityApi.Create(TestRequests.Json(new { gameId = game.Id, name = "Act" }), default));
 
         var tooLong = await h.ActivityApi.UpdateComments(TestRequests.Json(new { comments = new string('c', 2001) }), created.Id, default);
-        Assert.Equal("Comments must be 2000 characters or fewer.", ApiResults.Message(tooLong));
-        Assert.Null(h.Activities[created.Id.ToString("D")].GetString("Comments"));
+        Assert.AreEqual("Comments must be 2000 characters or fewer.", ApiResults.Message(tooLong));
+        Assert.IsNull(h.Activities[created.Id.ToString("D")].GetString("Comments"));
 
         var ok = await h.ActivityApi.UpdateComments(TestRequests.Json(new { comments = "Bring snacks" }), created.Id, default);
-        Assert.Equal("Bring snacks", ApiResults.Value<ActivityEntity>(ok).Comments);
-        Assert.Equal("Bring snacks", h.Activities[created.Id.ToString("D")].GetString("Comments"));
+        Assert.AreEqual("Bring snacks", ApiResults.Value<ActivityEntity>(ok).Comments);
+        Assert.AreEqual("Bring snacks", h.Activities[created.Id.ToString("D")].GetString("Comments"));
     }
 
     // ---- Events: the name rule on create and update, the rest unchanged.
 
-    [Theory]
-    [InlineData(" ")]
-    [InlineData("")]
-    [InlineData(null)]
+    [TestMethod]
+    [DataRow(" ")]
+    [DataRow("")]
+    [DataRow(null)]
     public async Task EventWithBlankNameIs400OnCreateAndUpdate(string? name)
     {
         var game = h.SeedGame();
@@ -298,29 +298,29 @@ public class ApiValidationRouteTests
         var create = await h.EventApi.SaveCustomized(TestRequests.Json(EventBody(name, game)), default);
         var update = await h.EventApi.Update(TestRequests.Json(EventBody(name, game)), saved.Id, default);
 
-        Assert.Equal("Name is required.", ApiResults.Message(create));
-        Assert.Equal("Name is required.", ApiResults.Message(update));
-        Assert.Equal("Friday", Assert.Single(h.Events).Value.GetString("Name"));
+        Assert.AreEqual("Name is required.", ApiResults.Message(create));
+        Assert.AreEqual("Name is required.", ApiResults.Message(update));
+        Assert.AreEqual("Friday", Assert.ContainsSingle(h.Events).Value.GetString("Name"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task EventNameIsStoredTrimmed()
     {
         var game = h.SeedGame();
 
         var saved = ApiResults.Value<EventEntity>(await h.EventApi.SaveCustomized(TestRequests.Json(EventBody("  Friday  ", game)), default));
 
-        Assert.Equal("Friday", saved.Name);
-        Assert.Equal("Friday", h.Events[saved.Id.ToString("D")].GetString("Name"));
+        Assert.AreEqual("Friday", saved.Name);
+        Assert.AreEqual("Friday", h.Events[saved.Id.ToString("D")].GetString("Name"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task UnknownIdsStill404BeforeTheBodyIsRead()
     {
         // A missing row is a 404 even when the body is also bad: the lookup comes first, as before.
-        Assert.IsType<NotFoundResult>(await h.GameApi.Update(TestRequests.Raw("{"), Guid.NewGuid(), default));
-        Assert.IsType<NotFoundResult>(await h.ActivityApi.UpdateComments(TestRequests.Raw("{", "text/plain"), Guid.NewGuid(), default));
-        Assert.IsType<NotFoundResult>(await h.EventApi.Update(TestRequests.Raw("null"), Guid.NewGuid(), default));
+        Assert.IsExactInstanceOfType<NotFoundResult>(await h.GameApi.Update(TestRequests.Raw("{"), Guid.NewGuid(), default));
+        Assert.IsExactInstanceOfType<NotFoundResult>(await h.ActivityApi.UpdateComments(TestRequests.Raw("{", "text/plain"), Guid.NewGuid(), default));
+        Assert.IsExactInstanceOfType<NotFoundResult>(await h.EventApi.Update(TestRequests.Raw("null"), Guid.NewGuid(), default));
     }
 
     private static EventEntity EventBody(string? name, GameEntity game)

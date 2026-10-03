@@ -11,9 +11,8 @@ using Moq;
 using MW_GC.EventManager.API.Functions;
 using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.Shared.Entities;
-using Xunit;
 
-namespace MW_GC.EventManager.Tests;
+namespace MW_GC.EventManager.Api.Tests;
 
 /// <summary>Records every log entry so a test can assert what was logged, at which level, with which exception.</summary>
 internal sealed class ListLogger<T> : ILogger<T>
@@ -137,11 +136,11 @@ internal static class ApiResults
 {
     // -1 when the result carries no status code, so any status assertion fails loudly.
     public static int Status(IActionResult result) =>
-        Assert.IsAssignableFrom<Microsoft.AspNetCore.Mvc.Infrastructure.IStatusCodeActionResult>(result).StatusCode ?? -1;
+        Assert.IsInstanceOfType<Microsoft.AspNetCore.Mvc.Infrastructure.IStatusCodeActionResult>(result).StatusCode ?? -1;
 
     public static string Message(IActionResult result) =>
-        Assert.IsType<string>(Assert.IsAssignableFrom<ObjectResult>(result).Value);
+        Assert.IsExactInstanceOfType<string>(Assert.IsInstanceOfType<ObjectResult>(result).Value);
 
     public static T Value<T>(IActionResult result) =>
-        Assert.IsType<T>(Assert.IsAssignableFrom<ObjectResult>(result).Value);
+        Assert.IsExactInstanceOfType<T>(Assert.IsInstanceOfType<ObjectResult>(result).Value);
 }

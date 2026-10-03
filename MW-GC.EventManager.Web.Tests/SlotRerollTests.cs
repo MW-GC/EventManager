@@ -2,11 +2,11 @@ using System.Collections;
 using System.Reflection;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
-using Xunit;
 
-namespace MW_GC.EventManager.Tests;
+namespace MW_GC.EventManager.Web.Tests;
 
 // Exercise the actual page handlers without a renderer or network services.
+[TestClass]
 public class SlotRerollTests
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -32,7 +32,7 @@ public class SlotRerollTests
         AddSlot(other);
     }
 
-    [Fact]
+    [TestMethod]
     public void RerollChangesOnlyTargetAndPreservesMetadata()
     {
         Set("_custName", "Keep this name");
@@ -40,24 +40,24 @@ public class SlotRerollTests
         Set("_custDate", date);
         var originalOther = Slots[1];
         Call("RerollSlot", 0);
-        Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
-        Assert.Equal(gameA, Id(Slots[0]!, "GameId"));
-        Assert.Same(originalOther, Slots[1]);
-        Assert.Equal(2, Slots.Count);
-        Assert.Equal("Keep this name", Get("_custName"));
-        Assert.Equal(date, Get("_custDate"));
+        Assert.AreEqual(replacement.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.AreEqual(gameA, Id(Slots[0]!, "GameId"));
+        Assert.AreSame(originalOther, Slots[1]);
+        Assert.AreEqual(2, Slots.Count);
+        Assert.AreEqual("Keep this name", Get("_custName"));
+        Assert.AreEqual(date, Get("_custDate"));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void NeverDuplicatesActivitiesOrReturnsCurrent(bool unique)
     {
         Set("_custUniqueGames", unique);
-        Assert.Equal(new[] { replacement.Id }, Candidates().Select(a => a.Id));
+        Assert.AreSequenceEqual(new[] { replacement.Id }, Candidates().Select(a => a.Id));
     }
 
-    [Fact]
+    [TestMethod]
     public void UniqueGamesExcludesGamesUsedByOtherSlots()
     {
         var alternative = Activity(gameB);
@@ -67,22 +67,22 @@ public class SlotRerollTests
         Assert.Contains(alternative, Candidates());
     }
 
-    [Theory]
-    [InlineData("_custGameIds")]
-    [InlineData("_custThemeIds")]
-    [InlineData("_custHolidayIds")]
+    [TestMethod]
+    [DataRow("_custGameIds")]
+    [DataRow("_custThemeIds")]
+    [DataRow("_custHolidayIds")]
     public void SelectedFiltersAreApplied(string field)
     {
         Set(field, new List<Guid> { field == "_custGameIds" ? gameA : field == "_custThemeIds" ? theme : holiday });
-        Assert.Single(Candidates());
+        Assert.ContainsSingle(Candidates());
         Set(field, new List<Guid> { Guid.NewGuid() });
-        Assert.Empty(Candidates());
+        Assert.IsEmpty(Candidates());
         var original = Slots[0];
         Call("RerollSlot", 0);
-        Assert.Same(original, Slots[0]);
+        Assert.AreSame(original, Slots[0]);
     }
 
-    [Fact]
+    [TestMethod]
     public void ThemedOnlyAcceptsThemeOrHolidayAndRejectsUntagged()
     {
         var untagged = Activity(gameA);
@@ -92,43 +92,43 @@ public class SlotRerollTests
         replacement.ThemeIds.Clear();
         Assert.Contains(replacement, Candidates());
         replacement.HolidayIds.Clear();
-        Assert.Empty(Candidates());
+        Assert.IsEmpty(Candidates());
     }
 
-    [Fact]
+    [TestMethod]
     public void FiltersCombineRatherThanOverrideEachOther()
     {
         Set("_custGameIds", new List<Guid> { gameA });
         Set("_custThemeIds", new List<Guid> { theme });
         Set("_custHolidayIds", new List<Guid> { holiday });
-        Assert.Single(Candidates());
+        Assert.ContainsSingle(Candidates());
         replacement.HolidayIds.Clear();
-        Assert.Empty(Candidates());
+        Assert.IsEmpty(Candidates());
     }
 
-    [Fact]
+    [TestMethod]
     public void ExhaustedPoolIsNoOpAndIgnoresOrphanedActivities()
     {
         Activities.Remove(replacement);
         Activities.Add(Activity(Guid.NewGuid()));
         var original = Slots[0];
-        Assert.Empty(Candidates());
+        Assert.IsEmpty(Candidates());
         Call("RerollSlot", 0);
-        Assert.Same(original, Slots[0]);
-        Assert.Equal(2, Slots.Count);
+        Assert.AreSame(original, Slots[0]);
+        Assert.AreEqual(2, Slots.Count);
     }
 
-    [Theory]
-    [InlineData(-1)]
-    [InlineData(2)]
+    [TestMethod]
+    [DataRow(-1)]
+    [DataRow(2)]
     public void InvalidIndexIsNoOp(int index)
     {
-        Assert.Empty((List<ActivityEntity>)Call("GetRerollCandidates", index)!);
+        Assert.IsEmpty((List<ActivityEntity>)Call("GetRerollCandidates", index)!);
         Call("RerollSlot", index);
-        Assert.Equal(current.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.AreEqual(current.Id, Id(Slots[0]!, "ActivityId"));
     }
 
-    [Fact]
+    [TestMethod]
     public void RepeatedRollsKeepOtherSlotsAndStayInEligiblePool()
     {
         Activities.Add(Activity(gameA));
@@ -139,32 +139,32 @@ public class SlotRerollTests
             var eligible = Candidates().Select(a => a.Id).ToList();
             Call("RerollSlot", 0);
             var after = Id(Slots[0]!, "ActivityId");
-            Assert.NotEqual(before, after);
+            Assert.AreNotEqual(before, after);
             Assert.Contains(after, eligible);
-            Assert.Same(originalOther, Slots[1]);
+            Assert.AreSame(originalOther, Slots[1]);
         }
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void RandomizeAllFillsSlotsAndRerollsKeepIdsUnique(bool unique)
     {
         Set("_custUniqueGames", unique);
         for (var i = 0; i < 100; i++)
         {
             Call("RandomizeAll");
-            Assert.Equal(2, Slots.Count);
-            Assert.Equal(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+            Assert.AreEqual(2, Slots.Count);
+            Assert.AreEqual(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
             var otherSlot = Slots[1];
             Call("RerollSlot", 0);
-            Assert.Same(otherSlot, Slots[1]);
-            Assert.Equal(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
-            Assert.Null(Get("_generationError"));
+            Assert.AreSame(otherSlot, Slots[1]);
+            Assert.AreEqual(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+            Assert.IsNull(Get("_generationError"));
         }
     }
 
-    [Fact]
+    [TestMethod]
     public void SameGameCanFillAllSlotsWithoutDuplicateIds()
     {
         Set("_custUniqueGames", false);
@@ -173,43 +173,43 @@ public class SlotRerollTests
         for (var i = 0; i < 100; i++)
         {
             Call("RandomizeAll");
-            Assert.Equal(2, Slots.Count);
-            Assert.All(Slots.Cast<object>(), s => Assert.Equal(gameA, Id(s, "GameId")));
-            Assert.Equal(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+            Assert.AreEqual(2, Slots.Count);
+            foreach (var s in Slots.Cast<object>()) Assert.AreEqual(gameA, Id(s, "GameId"));
+            Assert.AreEqual(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
         }
         Call("AddSlot");
-        Assert.Equal(2, Slots.Count);
+        Assert.AreEqual(2, Slots.Count);
     }
 
-    [Theory]
-    [InlineData("_custGameIds")]
-    [InlineData("_custThemeIds")]
-    [InlineData("_custHolidayIds")]
+    [TestMethod]
+    [DataRow("_custGameIds")]
+    [DataRow("_custThemeIds")]
+    [DataRow("_custHolidayIds")]
     public void ImpossibleRandomizePreservesSlotsAndReportsError(string filter)
     {
         var original = Slots;
         Set(filter, new List<Guid> { Guid.NewGuid() });
         Call("RandomizeAll");
-        Assert.Same(original, Slots);
-        Assert.Equal(2, Slots.Count);
-        Assert.False(string.IsNullOrWhiteSpace((string?)Get("_generationError")));
+        Assert.AreSame(original, Slots);
+        Assert.AreEqual(2, Slots.Count);
+        Assert.IsFalse(string.IsNullOrWhiteSpace((string?)Get("_generationError")));
         Set(filter, new List<Guid>());
         Call("RandomizeAll");
-        Assert.Null(Get("_generationError"));
+        Assert.IsNull(Get("_generationError"));
     }
 
-    [Fact]
+    [TestMethod]
     public void InitialImpossibleGenerationShowsErrorRatherThanSilentlyBlank()
     {
         Slots.Clear();
         Activities.Clear();
         Activities.Add(Activity(Guid.NewGuid()));
         Call("RandomizeAll");
-        Assert.Empty(Slots);
-        Assert.False(string.IsNullOrWhiteSpace((string?)Get("_generationError")));
+        Assert.IsEmpty(Slots);
+        Assert.IsFalse(string.IsNullOrWhiteSpace((string?)Get("_generationError")));
     }
 
-    [Fact]
+    [TestMethod]
     public void RandomizeAppliesAllFiltersTogether()
     {
         Set("_custUniqueGames", false);
@@ -221,26 +221,26 @@ public class SlotRerollTests
         Set("_custHolidayIds", new List<Guid> { holiday });
         Set("_custThemedOnly", true);
         Call("RandomizeAll");
-        Assert.Equal(2, Slots.Count);
-        Assert.All(Slots.Cast<object>(), s => Assert.Contains(Id(s, "ActivityId"), new[] { current.Id, replacement.Id }));
-        Assert.Equal(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
-        Assert.Null(Get("_generationError"));
+        Assert.AreEqual(2, Slots.Count);
+        foreach (var s in Slots.Cast<object>()) Assert.Contains(Id(s, "ActivityId"), new[] { current.Id, replacement.Id });
+        Assert.AreEqual(2, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+        Assert.IsNull(Get("_generationError"));
     }
 
-    [Fact]
+    [TestMethod]
     public void AddSlotSkipsExhaustedGames()
     {
         Set("_custUniqueGames", false);
         for (var i = 0; i < 100; i++)
         {
             Call("AddSlot");
-            Assert.Equal(3, Slots.Count);
-            Assert.Equal(replacement.Id, Id(Slots[2]!, "ActivityId"));
+            Assert.AreEqual(3, Slots.Count);
+            Assert.AreEqual(replacement.Id, Id(Slots[2]!, "ActivityId"));
             Slots.RemoveAt(2);
         }
     }
 
-    [Fact]
+    [TestMethod]
     public void UniqueRandomizeReassignsEarlierActivityInsteadOfFailing()
     {
         Set("_random", new FirstChoiceRandom());
@@ -253,16 +253,16 @@ public class SlotRerollTests
         for (var run = 0; run < 2; run++)
         {
             Call("RandomizeAll");
-            Assert.Null(Get("_generationError"));
-            Assert.Equal(2, Slots.Count);
+            Assert.IsNull(Get("_generationError"));
+            Assert.AreEqual(2, Slots.Count);
             var selections = Slots.Cast<object>().ToArray();
-            Assert.Equal(replacement.Id, Id(selections.Single(s => Id(s, "GameId") == gameA), "ActivityId"));
-            Assert.Equal(current.Id, Id(selections.Single(s => Id(s, "GameId") == gameB), "ActivityId"));
-            Assert.Equal(source, Activities.ToArray());
+            Assert.AreEqual(replacement.Id, Id(selections.Single(s => Id(s, "GameId") == gameA), "ActivityId"));
+            Assert.AreEqual(current.Id, Id(selections.Single(s => Id(s, "GameId") == gameB), "ActivityId"));
+            Assert.AreSequenceEqual(source, Activities.ToArray());
         }
     }
 
-    [Fact]
+    [TestMethod]
     public void UniqueRandomizeConsidersGamesBeyondAnUnmatchableInitialSubset()
     {
         var third = new GameEntity { Id = Guid.NewGuid() };
@@ -275,16 +275,16 @@ public class SlotRerollTests
 
         Call("RandomizeAll");
 
-        Assert.Null(Get("_generationError"));
-        Assert.Equal(2, Slots.Count);
+        Assert.IsNull(Get("_generationError"));
+        Assert.AreEqual(2, Slots.Count);
         var selections = Slots.Cast<object>().ToArray();
-        Assert.Equal(current.Id, Id(selections.Single(s => Id(s, "GameId") == gameA), "ActivityId"));
-        Assert.Equal(thirdActivity.Id, Id(selections.Single(s => Id(s, "GameId") == third.Id), "ActivityId"));
+        Assert.AreEqual(current.Id, Id(selections.Single(s => Id(s, "GameId") == gameA), "ActivityId"));
+        Assert.AreEqual(thirdActivity.Id, Id(selections.Single(s => Id(s, "GameId") == third.Id), "ActivityId"));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void ExhaustedGameIsUnavailableAndChoosingItPreservesSlotsAndError(bool unique)
     {
         Set("_custUniqueGames", unique);
@@ -297,32 +297,32 @@ public class SlotRerollTests
         var originalSlots = Slots.Cast<object>().ToArray();
 
         var available = (List<GameEntity>)Call("GetAvailableGames", 0)!;
-        Assert.DoesNotContain(available, g => g.Id == exhausted.Id);
-        Assert.Contains(available, g => g.Id == gameA);
-        Assert.DoesNotContain(Candidates(), a => a.GameId == exhausted.Id);
+        Assert.DoesNotContain(g => g.Id == exhausted.Id, available);
+        Assert.Contains(g => g.Id == gameA, available);
+        Assert.DoesNotContain(a => a.GameId == exhausted.Id, Candidates());
 
         // Defend against a stale dropdown callback as well as filtering options.
         Call("ChangeSlotGame", 0, exhausted);
-        Assert.Same(original, Slots);
-        Assert.Same(originalSlots[0], Slots[0]);
-        Assert.Same(originalSlots[1], Slots[1]);
-        Assert.Equal(error, Get("_generationError"));
+        Assert.AreSame(original, Slots);
+        Assert.AreSame(originalSlots[0], Slots[0]);
+        Assert.AreSame(originalSlots[1], Slots[1]);
+        Assert.AreEqual(error, Get("_generationError"));
 
         // Once a real assignment is available, change only this slot and clear the error.
         var unused = Activity(exhausted.Id);
         Activities.Add(unused);
-        Assert.Contains((List<GameEntity>)Call("GetAvailableGames", 0)!, g => g.Id == exhausted.Id);
+        Assert.Contains(g => g.Id == exhausted.Id, (List<GameEntity>)Call("GetAvailableGames", 0)!);
         Call("ChangeSlotGame", 0, exhausted);
-        Assert.Equal(exhausted.Id, Id(Slots[0]!, "GameId"));
-        Assert.Equal(unused.Id, Id(Slots[0]!, "ActivityId"));
-        Assert.Same(originalSlots[1], Slots[1]);
-        Assert.Equal(2, Slots.Count);
-        Assert.Null(Get("_generationError"));
+        Assert.AreEqual(exhausted.Id, Id(Slots[0]!, "GameId"));
+        Assert.AreEqual(unused.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.AreSame(originalSlots[1], Slots[1]);
+        Assert.AreEqual(2, Slots.Count);
+        Assert.IsNull(Get("_generationError"));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void RerollWithOnlyExhaustedGamesPreservesSlotsAndError(bool unique)
     {
         Set("_custUniqueGames", unique);
@@ -335,17 +335,17 @@ public class SlotRerollTests
         var original = Slots;
         var originalSlots = Slots.Cast<object>().ToArray();
 
-        Assert.Empty(Candidates());
+        Assert.IsEmpty(Candidates());
         Call("RerollSlot", 0);
 
-        Assert.Same(original, Slots);
-        Assert.Same(originalSlots[0], Slots[0]);
-        Assert.Same(originalSlots[1], Slots[1]);
-        Assert.Equal(2, Slots.Count);
-        Assert.Equal(error, Get("_generationError"));
+        Assert.AreSame(original, Slots);
+        Assert.AreSame(originalSlots[0], Slots[0]);
+        Assert.AreSame(originalSlots[1], Slots[1]);
+        Assert.AreEqual(2, Slots.Count);
+        Assert.AreEqual(error, Get("_generationError"));
     }
 
-    [Fact]
+    [TestMethod]
     public void UniqueRandomizeMatchesSmallGraphFeasibility()
     {
         var games = Enumerable.Range(1, 3).Select(_ => new GameEntity { Id = Guid.NewGuid() }).ToList();
@@ -368,18 +368,18 @@ public class SlotRerollTests
                 Set("_random", new Random(mask));
                 Call("RandomizeAll");
                 var feasible = count <= Capacity(0, 0);
-                Assert.True(feasible == (Get("_generationError") is null), $"Graph {mask}, count {count}");
+                Assert.IsTrue(feasible == (Get("_generationError") is null), $"Graph {mask}, count {count}");
                 if (!feasible)
                 {
-                    Assert.Same(original, Slots);
+                    Assert.AreSame(original, Slots);
                     continue;
                 }
                 var selections = Slots.Cast<object>().ToArray();
-                Assert.Equal(count, selections.Length);
-                Assert.Equal(count, selections.Select(s => Id(s, "GameId")).Distinct().Count());
-                Assert.Equal(count, selections.Select(s => Id(s, "ActivityId")).Distinct().Count());
+                Assert.AreEqual(count, selections.Length);
+                Assert.AreEqual(count, selections.Select(s => Id(s, "GameId")).Distinct().Count());
+                Assert.AreEqual(count, selections.Select(s => Id(s, "ActivityId")).Distinct().Count());
                 foreach (var slot in selections)
-                    Assert.Contains(activities, a => a.GameId == Id(slot, "GameId") && a.Id == Id(slot, "ActivityId"));
+                    Assert.Contains(a => a.GameId == Id(slot, "GameId") && a.Id == Id(slot, "ActivityId"), activities);
             }
 
             // Independent exhaustive oracle: skip a game or use an unclaimed ID.
@@ -395,7 +395,7 @@ public class SlotRerollTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public void UniqueRandomizeRepairsMultiHopChain()
     {
         var games = Enumerable.Range(1, 4).Select(_ => new GameEntity { Id = Guid.NewGuid() }).ToList();
@@ -413,22 +413,22 @@ public class SlotRerollTests
         Slots.Clear();
         foreach (var game in games) AddSlot(Activity(game.Id));
         Call("RandomizeAll");
-        Assert.Null(Get("_generationError"));
-        Assert.Equal(4, Slots.Count);
+        Assert.IsNull(Get("_generationError"));
+        Assert.AreEqual(4, Slots.Count);
         for (var i = 0; i < 4; i++)
-            Assert.Equal(ids[(i + 1) % 4], Id(Slots.Cast<object>().Single(s => Id(s, "GameId") == games[i].Id), "ActivityId"));
+            Assert.AreEqual(ids[(i + 1) % 4], Id(Slots.Cast<object>().Single(s => Id(s, "GameId") == games[i].Id), "ActivityId"));
     }
 
-    [Theory]
-    [InlineData("RandomizeAll", true)]
-    [InlineData("RandomizeAll", false)]
-    [InlineData("RerollSlot", true)]
-    [InlineData("ChangeSlotGame", true)]
-    [InlineData("ChangeSlotActivity", true)]
-    [InlineData("AddSlot", false)]
-    [InlineData("RemoveSlot", true)]
-    [InlineData("ShowEditEvent", true)]
-    [InlineData("ShowCustomize", true)]
+    [TestMethod]
+    [DataRow("RandomizeAll", true)]
+    [DataRow("RandomizeAll", false)]
+    [DataRow("RerollSlot", true)]
+    [DataRow("ChangeSlotGame", true)]
+    [DataRow("ChangeSlotActivity", true)]
+    [DataRow("AddSlot", false)]
+    [DataRow("RemoveSlot", true)]
+    [DataRow("ShowEditEvent", true)]
+    [DataRow("ShowCustomize", true)]
     public void SuccessfulSelectionMutationClearsStaleGenerationError(string handler, bool unique)
     {
         Set("_custUniqueGames", unique);
@@ -446,7 +446,7 @@ public class SlotRerollTests
         {
             case "RerollSlot":
                 Call(handler, 0);
-                Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
+                Assert.AreEqual(replacement.Id, Id(Slots[0]!, "ActivityId"));
                 break;
             case "ChangeSlotGame":
                 var newGame = new GameEntity { Id = Guid.NewGuid() };
@@ -454,34 +454,34 @@ public class SlotRerollTests
                 ((List<GameEntity>)Get("_games")!).Add(newGame);
                 Activities.Add(newActivity);
                 Call(handler, 0, newGame);
-                Assert.Equal(newGame.Id, Id(Slots[0]!, "GameId"));
-                Assert.Equal(newActivity.Id, Id(Slots[0]!, "ActivityId"));
+                Assert.AreEqual(newGame.Id, Id(Slots[0]!, "GameId"));
+                Assert.AreEqual(newActivity.Id, Id(Slots[0]!, "ActivityId"));
                 break;
             case "ChangeSlotActivity":
                 Call(handler, 0, replacement);
-                Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
+                Assert.AreEqual(replacement.Id, Id(Slots[0]!, "ActivityId"));
                 break;
             case "ShowEditEvent":
                 Call(handler, new EventEntity { Name = "Existing event", Selections = [] });
-                Assert.Empty(Slots);
+                Assert.IsEmpty(Slots);
                 break;
             default:
                 if (handler == "RemoveSlot") Call(handler, 2);
                 else Call(handler);
-                Assert.Equal(handler is "AddSlot" or "ShowCustomize" ? 3 : 2, Slots.Count);
+                Assert.AreEqual(handler is "AddSlot" or "ShowCustomize" ? 3 : 2, Slots.Count);
                 break;
         }
-        Assert.Null(Get("_generationError"));
+        Assert.IsNull(Get("_generationError"));
     }
 
-    [Theory]
-    [InlineData("RerollSlot")]
-    [InlineData("InvalidReroll")]
-    [InlineData("ChangeSlotGame")]
-    [InlineData("ChangeSlotActivity")]
-    [InlineData("AddSlot")]
-    [InlineData("FullAddSlot")]
-    [InlineData("RemoveSlot")]
+    [TestMethod]
+    [DataRow("RerollSlot")]
+    [DataRow("InvalidReroll")]
+    [DataRow("ChangeSlotGame")]
+    [DataRow("ChangeSlotActivity")]
+    [DataRow("AddSlot")]
+    [DataRow("FullAddSlot")]
+    [DataRow("RemoveSlot")]
     public void UnchangedSelectionsKeepGenerationError(string handler)
     {
         const string error = "Previous generation failure";
@@ -504,14 +504,14 @@ public class SlotRerollTests
             default: Call("AddSlot"); break;
         }
 
-        Assert.Equal(error, Get("_generationError"));
-        Assert.Same(original, Slots);
-        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.AreEqual(error, Get("_generationError"));
+        Assert.AreSame(original, Slots);
+        Assert.AreSequenceEqual(originalSlots, Slots.Cast<object>().ToArray());
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void FailedRandomizeKeepsSelectionsAndErrorUntilSuccessfulRetry(bool unique)
     {
         Set("_custUniqueGames", unique);
@@ -521,32 +521,32 @@ public class SlotRerollTests
         var originalSlots = Slots.Cast<object>().ToArray();
         Call("RandomizeAll");
         var error = Get("_generationError");
-        Assert.NotNull(error);
+        Assert.IsNotNull(error);
         Call("RandomizeAll");
-        Assert.Equal(error, Get("_generationError"));
-        Assert.Same(original, Slots);
-        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.AreEqual(error, Get("_generationError"));
+        Assert.AreSame(original, Slots);
+        Assert.AreSequenceEqual(originalSlots, Slots.Cast<object>().ToArray());
 
         Set("_custGameIds", new List<Guid>());
         Call("RandomizeAll");
-        Assert.Null(Get("_generationError"));
-        Assert.Equal(2, Slots.Count);
+        Assert.IsNull(Get("_generationError"));
+        Assert.AreEqual(2, Slots.Count);
     }
 
-    [Fact]
+    [TestMethod]
     public void FailedCustomizeGenerationRetainsError()
     {
         Activities.Clear();
         Set("_generationError", "Previous failure");
         Call("ShowCustomize");
-        Assert.NotNull(Get("_generationError"));
-        Assert.Empty(Slots);
-        Assert.Equal(true, Get("_showCustomize"));
+        Assert.IsNotNull(Get("_generationError"));
+        Assert.IsEmpty(Slots);
+        Assert.AreEqual(true, Get("_showCustomize"));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task FailedSaveKeepsGenerationErrorAndSelections(bool editing)
     {
         const string error = "Previous generation failure";
@@ -562,13 +562,13 @@ public class SlotRerollTests
 
         await (Task)Call("SaveCustomizedEvent")!;
 
-        Assert.NotNull(Get("_customizeError"));
-        Assert.Equal(error, Get("_generationError"));
-        Assert.Same(original, Slots);
-        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
-        Assert.Equal("Keep this name", Get("_custName"));
-        Assert.Equal(true, Get("_showCustomize"));
-        Assert.Equal(false, Get("_generating"));
+        Assert.IsNotNull(Get("_customizeError"));
+        Assert.AreEqual(error, Get("_generationError"));
+        Assert.AreSame(original, Slots);
+        Assert.AreSequenceEqual(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.AreEqual("Keep this name", Get("_custName"));
+        Assert.AreEqual(true, Get("_showCustomize"));
+        Assert.AreEqual(false, Get("_generating"));
     }
 
     private sealed class FailedSaveHandler : HttpMessageHandler
@@ -586,17 +586,17 @@ public class SlotRerollTests
 
     private static ActivityEntity Activity(Guid game) => new() { Id = Guid.NewGuid(), GameId = game };
 
-    [Fact]
+    [TestMethod]
     public void RemoveAllowsOneSlotButNeverRemovesLastSlot()
     {
         Call("RemoveSlot", 1);
-        Assert.Single(Slots.Cast<object>());
+        Assert.ContainsSingle(Slots.Cast<object>());
         Call("RemoveSlot", 0);
-        Assert.Single(Slots.Cast<object>());
-        Assert.Equal(current.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.ContainsSingle(Slots.Cast<object>());
+        Assert.AreEqual(current.Id, Id(Slots[0]!, "ActivityId"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OneSlotCreateAndEditSendAutomaticWinnerAndReload()
     {
         Call("RemoveSlot", 1);
@@ -605,25 +605,25 @@ public class SlotRerollTests
         var service = new MW_GC.EventManager.Web.Services.EventService(new HttpClient(handler) { BaseAddress = new Uri("https://example.test") });
         typeof(Events).GetProperty("EventSvc", Private)!.SetValue(page, service);
         await (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
-        Assert.Equal(HttpMethod.Post, handler.LastWrite);
-        Assert.Equal(current.Id, handler.Saved!.WinnerActivityId);
-        Assert.Equal(current.Id, Assert.Single((List<EventEntity>)Get("_events")!).WinnerActivityId);
+        Assert.AreEqual(HttpMethod.Post, handler.LastWrite);
+        Assert.AreEqual(current.Id, handler.Saved!.WinnerActivityId);
+        Assert.AreEqual(current.Id, Assert.ContainsSingle((List<EventEntity>)Get("_events")!).WinnerActivityId);
 
         typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
-        Assert.Single(Slots.Cast<object>());
+        Assert.ContainsSingle(Slots.Cast<object>());
         Set("_custGameIds", new List<Guid> { gameA });
-        Assert.Equal(replacement.Id, Assert.Single(Candidates()).Id);
+        Assert.AreEqual(replacement.Id, Assert.ContainsSingle(Candidates()).Id);
         Call("RerollSlot", 0);
         var replacementId = Id(Slots[0]!, "ActivityId");
         await (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
-        Assert.Equal(HttpMethod.Put, handler.LastWrite);
-        Assert.Equal(replacementId, handler.Saved!.WinnerActivityId);
-        Assert.Equal("One activity", handler.Saved.Name);
+        Assert.AreEqual(HttpMethod.Put, handler.LastWrite);
+        Assert.AreEqual(replacementId, handler.Saved!.WinnerActivityId);
+        Assert.AreEqual("One activity", handler.Saved.Name);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void OneSlotRandomizationAndRerollRespectFilters(bool unique)
     {
         Call("RemoveSlot", 1);
@@ -633,14 +633,14 @@ public class SlotRerollTests
         Set("_custHolidayIds", new List<Guid> { holiday });
         Set("_custThemedOnly", true);
         typeof(Events).GetMethod("RandomizeAll", Private)!.Invoke(page, null);
-        Assert.Single(Slots.Cast<object>());
-        Assert.Equal(replacement.Id, Id(Slots[0]!, "ActivityId"));
-        Assert.Empty(Candidates());
+        Assert.ContainsSingle(Slots.Cast<object>());
+        Assert.AreEqual(replacement.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.IsEmpty(Candidates());
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(6)]
+    [TestMethod]
+    [DataRow(0)]
+    [DataRow(6)]
     public async Task InvalidSlotCountDoesNotSendRequest(int count)
     {
         Slots.Clear();
@@ -654,26 +654,26 @@ public class SlotRerollTests
         }
         var handler = ConfigureSave();
         await Save();
-        Assert.Null(handler.LastWrite);
+        Assert.IsNull(handler.LastWrite);
         Assert.Contains("Select 1–5", (string)Get("_customizeError")!);
-        Assert.Equal(true, Get("_showCustomize"));
-        Assert.Equal(false, Get("_generating"));
+        Assert.AreEqual(true, Get("_showCustomize"));
+        Assert.AreEqual(false, Get("_generating"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IncompleteSlotIsNotSilentlyDroppedIntoAnAutomaticWinner()
     {
         Slots[1]!.GetType().GetProperty("ActivityId")!.SetValue(Slots[1], Guid.Empty);
         var handler = ConfigureSave();
         await Save();
-        Assert.Null(handler.LastWrite);
+        Assert.IsNull(handler.LastWrite);
         Assert.Contains("every slot", (string)Get("_customizeError")!);
-        Assert.Equal(2, Slots.Count);
+        Assert.AreEqual(2, Slots.Count);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task SaveFailureKeepsDialogAndSelectionsForRetry(bool networkFailure)
     {
         Call("RemoveSlot", 1);
@@ -681,55 +681,55 @@ public class SlotRerollTests
         handler.Fail = true;
         handler.NetworkFailure = networkFailure;
         await Save();
-        Assert.Equal(true, Get("_showCustomize"));
-        Assert.Equal(false, Get("_generating"));
-        Assert.NotNull(Get("_customizeError"));
-        Assert.Equal(0, handler.Reads);
-        Assert.Equal(current.Id, Id(Slots[0]!, "ActivityId"));
+        Assert.AreEqual(true, Get("_showCustomize"));
+        Assert.AreEqual(false, Get("_generating"));
+        Assert.IsNotNull(Get("_customizeError"));
+        Assert.AreEqual(0, handler.Reads);
+        Assert.AreEqual(current.Id, Id(Slots[0]!, "ActivityId"));
         handler.Fail = false;
         handler.NetworkFailure = false;
         await Save();
-        Assert.Null(Get("_customizeError"));
-        Assert.Equal(false, Get("_showCustomize"));
-        Assert.Equal(1, handler.Reads);
+        Assert.IsNull(Get("_customizeError"));
+        Assert.AreEqual(false, Get("_showCustomize"));
+        Assert.AreEqual(1, handler.Reads);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task MultiSelectionEditPreservesOnlyAnExistingWinner(bool replaceWinner)
     {
         var handler = ConfigureSave();
         await Save();
-        Assert.Null(handler.Saved!.WinnerActivityId);
+        Assert.IsNull(handler.Saved!.WinnerActivityId);
         handler.Saved.WinnerActivityId = current.Id;
         typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
         if (replaceWinner) Call("RerollSlot", 0);
         await Save();
-        Assert.Equal(HttpMethod.Put, handler.LastWrite);
-        Assert.Equal(2, handler.Saved!.Selections.Count);
-        Assert.Equal(replaceWinner ? (Guid?)null : current.Id, handler.Saved.WinnerActivityId);
+        Assert.AreEqual(HttpMethod.Put, handler.LastWrite);
+        Assert.AreEqual(2, handler.Saved!.Selections.Count);
+        Assert.AreEqual(replaceWinner ? (Guid?)null : current.Id, handler.Saved.WinnerActivityId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SavedSoleWinnerIsReadBackForListAndDetails()
     {
         Call("RemoveSlot", 1);
         var handler = ConfigureSave();
         await Save();
-        var persisted = Assert.Single((List<EventEntity>)Get("_events")!);
-        Assert.NotSame(handler.Saved, persisted);
+        var persisted = Assert.ContainsSingle((List<EventEntity>)Get("_events")!);
+        Assert.AreNotSame(handler.Saved, persisted);
         typeof(Events).GetMethod("ShowDetails", Private)!.Invoke(page, [persisted]);
         var detail = (EventEntity)Get("_detailEvent")!;
-        Assert.Equal(Assert.Single(detail.Selections).Activity.Id, detail.WinnerActivityId);
-        Assert.Same(persisted, detail);
-        Assert.Equal(1, handler.Reads);
+        Assert.AreEqual(Assert.ContainsSingle(detail.Selections).Activity.Id, detail.WinnerActivityId);
+        Assert.AreSame(persisted, detail);
+        Assert.AreEqual(1, handler.Reads);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("{")]
-    [InlineData("[{\"id\":\"not-a-guid\"}]")]
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow("{")]
+    [DataRow("[{\"id\":\"not-a-guid\"}]")]
     public async Task SuccessfulSaveWithFailedReadBackDoesNotOfferCreateRetry(string? readJson)
     {
         Call("RemoveSlot", 1);
@@ -737,16 +737,16 @@ public class SlotRerollTests
         handler.FailRead = readJson is null;
         handler.ReadJson = readJson;
         await Save();
-        Assert.Equal(current.Id, handler.Saved!.WinnerActivityId);
-        Assert.Equal(false, Get("_showCustomize"));
-        Assert.Null(Get("_customizeError"));
+        Assert.AreEqual(current.Id, handler.Saved!.WinnerActivityId);
+        Assert.AreEqual(false, Get("_showCustomize"));
+        Assert.IsNull(Get("_customizeError"));
         Assert.Contains("event was saved", (string)Get("_pageError")!);
-        Assert.Equal(false, Get("_generating"));
+        Assert.AreEqual(false, Get("_generating"));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public async Task SameGameSelectionsRequireUniqueGamesToBeDisabled(bool unique)
     {
         Slots.Clear();
@@ -757,20 +757,20 @@ public class SlotRerollTests
         await Save();
         if (unique)
         {
-            Assert.Null(handler.Saved);
+            Assert.IsNull(handler.Saved);
             Assert.Contains("distinct", (string)Get("_customizeError")!);
         }
         else
         {
-            Assert.Equal(2, handler.Saved!.Selections.Count);
-            Assert.False(handler.Saved.UniqueGamesOnly);
-            Assert.Null(handler.Saved.WinnerActivityId);
+            Assert.AreEqual(2, handler.Saved!.Selections.Count);
+            Assert.IsFalse(handler.Saved.UniqueGamesOnly);
+            Assert.IsNull(handler.Saved.WinnerActivityId);
         }
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public async Task DuplicateActivityIsRejectedEvenWhenRepeatedGamesAreAllowed(bool unique)
     {
         Slots.Clear();
@@ -779,37 +779,37 @@ public class SlotRerollTests
         Set("_custUniqueGames", unique);
         var handler = ConfigureSave();
         await Save();
-        Assert.Null(handler.LastWrite);
-        Assert.Null(handler.Saved);
-        Assert.Equal(0, handler.Reads);
+        Assert.IsNull(handler.LastWrite);
+        Assert.IsNull(handler.Saved);
+        Assert.AreEqual(0, handler.Reads);
         Assert.Contains("distinct", (string)Get("_customizeError")!);
-        Assert.Equal(true, Get("_showCustomize"));
+        Assert.AreEqual(true, Get("_showCustomize"));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public async Task MultiSlotEditReducedToOneReloadsAutomaticWinner(bool hadWinner)
     {
         var handler = ConfigureSave();
         await Save();
-        Assert.NotNull(handler.Saved);
+        Assert.IsNotNull(handler.Saved);
         handler.Saved.WinnerActivityId = hadWinner ? other.Id : null;
         typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
         Call("RemoveSlot", 1);
         await Save();
-        Assert.Null(Get("_customizeError"));
-        Assert.Equal(HttpMethod.Put, handler.LastWrite);
-        Assert.Equal(current.Id, Assert.Single(handler.Saved.Selections).Activity.Id);
-        Assert.Equal(current.Id, handler.Saved.WinnerActivityId);
-        var listed = Assert.Single((List<EventEntity>)Get("_events")!);
+        Assert.IsNull(Get("_customizeError"));
+        Assert.AreEqual(HttpMethod.Put, handler.LastWrite);
+        Assert.AreEqual(current.Id, Assert.ContainsSingle(handler.Saved.Selections).Activity.Id);
+        Assert.AreEqual(current.Id, handler.Saved.WinnerActivityId);
+        var listed = Assert.ContainsSingle((List<EventEntity>)Get("_events")!);
         typeof(Events).GetMethod("ShowDetails", Private)!.Invoke(page, [listed]);
-        Assert.Equal(current.Id, ((EventEntity)Get("_detailEvent")!).WinnerActivityId);
+        Assert.AreEqual(current.Id, ((EventEntity)Get("_detailEvent")!).WinnerActivityId);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task AmbiguousCreateRetryReusesKeyAndNewDialogGetsNewKey(bool timeout)
     {
         Call("RemoveSlot", 1);
@@ -817,21 +817,21 @@ public class SlotRerollTests
         handler.LoseWriteResponse = true;
         handler.Timeout = timeout;
         await Save();
-        Assert.Equal(true, Get("_showCustomize"));
-        Assert.NotNull(Get("_customizeError"));
-        var key = Assert.Single(handler.CreateKeys);
-        Assert.True(Guid.TryParse(key, out var id));
-        Assert.NotEqual(Guid.Empty, id);
+        Assert.AreEqual(true, Get("_showCustomize"));
+        Assert.IsNotNull(Get("_customizeError"));
+        var key = Assert.ContainsSingle(handler.CreateKeys);
+        Assert.IsTrue(Guid.TryParse(key, out var id));
+        Assert.AreNotEqual(Guid.Empty, id);
         var committedId = handler.Saved!.Id;
 
         handler.LoseWriteResponse = false;
         await Save();
-        Assert.Equal(new[] { key, key }, handler.CreateKeys);
-        Assert.Equal(committedId, handler.Saved.Id);
-        Assert.Single(handler.Created);
-        Assert.Equal(false, Get("_showCustomize"));
-        Assert.Null(Get("_customizeError"));
-        Assert.Equal(committedId, Assert.Single((List<EventEntity>)Get("_events")!).Id);
+        Assert.AreSequenceEqual(new[] { key, key }, handler.CreateKeys);
+        Assert.AreEqual(committedId, handler.Saved.Id);
+        Assert.ContainsSingle(handler.Created);
+        Assert.AreEqual(false, Get("_showCustomize"));
+        Assert.IsNull(Get("_customizeError"));
+        Assert.AreEqual(committedId, Assert.ContainsSingle((List<EventEntity>)Get("_events")!).Id);
 
         typeof(Events).GetMethod("ShowCustomize", Private)!.Invoke(page, null);
         // ShowCustomize fills as many slots as the two-game fixture allows (here two);
@@ -839,8 +839,8 @@ public class SlotRerollTests
         SetSlots(current);
         Set("_custName", "Another event");
         await Save();
-        Assert.NotEqual(key, handler.CreateKeys[2]);
-        Assert.Equal(2, handler.Created.Count);
+        Assert.AreNotEqual(key, handler.CreateKeys[2]);
+        Assert.AreEqual(2, handler.Created.Count);
     }
 
     private EventHttpHandler ConfigureSave()
@@ -891,7 +891,7 @@ public class SlotRerollTests
                 Saved = Created[Saved.Id];
             }
             else
-                Assert.False(request.Headers.Contains("Idempotency-Key"));
+                Assert.IsFalse(request.Headers.Contains("Idempotency-Key"));
             if (LoseWriteResponse)
             {
                 if (Timeout) throw new TaskCanceledException("Response timed out after commit");
@@ -950,34 +950,34 @@ public class SlotRerollTests
 
     private void AssertFilledSlots(int expected, bool distinctGames)
     {
-        Assert.Equal(expected, Slots.Count);
-        Assert.Null(Get("_generationError"));
+        Assert.AreEqual(expected, Slots.Count);
+        Assert.IsNull(Get("_generationError"));
         var slots = Slots.Cast<object>().ToArray();
-        Assert.Equal(expected, slots.Select(s => Id(s, "ActivityId")).Distinct().Count());
-        if (distinctGames) Assert.Equal(expected, slots.Select(s => Id(s, "GameId")).Distinct().Count());
+        Assert.AreEqual(expected, slots.Select(s => Id(s, "ActivityId")).Distinct().Count());
+        if (distinctGames) Assert.AreEqual(expected, slots.Select(s => Id(s, "GameId")).Distinct().Count());
     }
 
-    [Theory]
-    [InlineData(1, 1, 1)]
-    [InlineData(2, 1, 2)]
-    [InlineData(2, 2, 2)]
-    [InlineData(1, 2, 1)]
-    [InlineData(3, 1, 3)]
-    [InlineData(5, 1, 3)]
-    [InlineData(8, 2, 3)]
+    [TestMethod]
+    [DataRow(1, 1, 1)]
+    [DataRow(2, 1, 2)]
+    [DataRow(2, 2, 2)]
+    [DataRow(1, 2, 1)]
+    [DataRow(3, 1, 3)]
+    [DataRow(5, 1, 3)]
+    [DataRow(8, 2, 3)]
     public void FreshCustomizeSizesUniqueSlotsToTheGamesTheLibraryCanFill(int games, int activitiesPerGame, int expectedSlots)
     {
         UseLibrary(Enumerable.Repeat(activitiesPerGame, games).ToArray());
         Set("_generationError", "Previous failure");
         Call("ShowCustomize");
         AssertFilledSlots(expectedSlots, distinctGames: true);
-        Assert.Equal(true, Get("_showCustomize"));
+        Assert.AreEqual(true, Get("_showCustomize"));
     }
 
-    [Theory]
-    [InlineData(1, 1)]
-    [InlineData(2, 2)]
-    [InlineData(5, 3)]
+    [TestMethod]
+    [DataRow(1, 1)]
+    [DataRow(2, 2)]
+    [DataRow(5, 3)]
     public void FreshRandomizeWithRepeatedGamesAllowedSizesSlotsToTheActivities(int activities, int expectedSlots)
     {
         UseLibrary(activities);
@@ -987,24 +987,24 @@ public class SlotRerollTests
         AssertFilledSlots(expectedSlots, distinctGames: false);
     }
 
-    [Fact]
+    [TestMethod]
     public void FreshCustomizeWithNoActivitiesReportsNoMatchRatherThanKeptSelections()
     {
         UseLibrary(0, 0);
         Set("_generationError", "Previous failure");
         Call("ShowCustomize");
-        Assert.Empty(Slots);
-        Assert.Equal(NoMatchMessage, Get("_generationError"));
-        Assert.Equal(true, Get("_showCustomize"));
+        Assert.IsEmpty(Slots);
+        Assert.AreEqual(NoMatchMessage, Get("_generationError"));
+        Assert.AreEqual(true, Get("_showCustomize"));
     }
 
-    [Theory]
-    [InlineData("_custGameIds", true)]
-    [InlineData("_custGameIds", false)]
-    [InlineData("_custThemeIds", true)]
-    [InlineData("_custThemeIds", false)]
-    [InlineData("_custHolidayIds", true)]
-    [InlineData("_custHolidayIds", false)]
+    [TestMethod]
+    [DataRow("_custGameIds", true)]
+    [DataRow("_custGameIds", false)]
+    [DataRow("_custThemeIds", true)]
+    [DataRow("_custThemeIds", false)]
+    [DataRow("_custHolidayIds", true)]
+    [DataRow("_custHolidayIds", false)]
     public void FreshRandomizeWithFiltersExcludingEverythingReportsNoMatch(string filter, bool unique)
     {
         UseLibrary(1, 1, 1);
@@ -1012,13 +1012,13 @@ public class SlotRerollTests
         Set("_custUniqueGames", unique);
         Set(filter, new List<Guid> { Guid.NewGuid() });
         Call("RandomizeAll");
-        Assert.Empty(Slots);
-        Assert.Equal(NoMatchMessage, Get("_generationError"));
+        Assert.IsEmpty(Slots);
+        Assert.AreEqual(NoMatchMessage, Get("_generationError"));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void RandomizeAllWithExistingSelectionsKeepsThemAndSaysSo(bool unique)
     {
         var games = UseLibrary(1, 1, 1);
@@ -1028,8 +1028,8 @@ public class SlotRerollTests
         var original = Slots;
         var originalSlots = Slots.Cast<object>().ToArray();
         Call("RandomizeAll");
-        Assert.Same(original, Slots);
-        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.AreSame(original, Slots);
+        Assert.AreSequenceEqual(originalSlots, Slots.Cast<object>().ToArray());
         Assert.Contains("Existing selections were kept", (string)Get("_generationError")!);
     }
 
@@ -1045,19 +1045,19 @@ public class SlotRerollTests
         Set("_generationError", error);
         var original = Slots;
         var originalSlots = Slots.Cast<object>().ToArray();
-        Assert.Equal(expectedReason, AddSlotBlockedReason());
+        Assert.AreEqual(expectedReason, AddSlotBlockedReason());
 
         Call("AddSlot");
 
-        Assert.Same(original, Slots);
-        Assert.Equal(originalSlots, Slots.Cast<object>().ToArray());
-        Assert.Equal(expectedReason, Get("_addSlotError"));
-        Assert.Equal(error, Get("_generationError"));
+        Assert.AreSame(original, Slots);
+        Assert.AreSequenceEqual(originalSlots, Slots.Cast<object>().ToArray());
+        Assert.AreEqual(expectedReason, Get("_addSlotError"));
+        Assert.AreEqual(error, Get("_generationError"));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void AddSlotWithEveryActivityInASlotIsDisabledWithReason(bool unique)
     {
         // Three Games of one Activity each: Create Event fills all three and nothing is left.
@@ -1065,61 +1065,61 @@ public class SlotRerollTests
         Call("ShowCustomize");
         AssertFilledSlots(3, distinctGames: true);
         Set("_custUniqueGames", unique);
-        Assert.Empty(AddSlotCandidates());
+        Assert.IsEmpty(AddSlotCandidates());
         AssertAddSlotRefused(AddSlotNoMatchReason);
     }
 
-    [Fact]
+    [TestMethod]
     public void UniqueGamesBlocksAddWhenOnlyUsedGamesHaveFreeActivities()
     {
         var games = UseLibrary(2, 1, 1);
         var free = Activities[1];
         SetSlots(Activities[0], Activities[2], Activities[3]);
         Set("_custUniqueGames", true);
-        Assert.Empty(AddSlotCandidates());
+        Assert.IsEmpty(AddSlotCandidates());
         AssertAddSlotRefused("Every Game with an unused activity is already in a slot. Turn off Unique games only to repeat a Game.");
 
         Set("_custUniqueGames", false);
-        Assert.Null(AddSlotBlockedReason());
-        Assert.Equal(free.Id, Assert.Single(AddSlotCandidates()).Id);
+        Assert.IsNull(AddSlotBlockedReason());
+        Assert.AreEqual(free.Id, Assert.ContainsSingle(AddSlotCandidates()).Id);
         Call("AddSlot");
-        Assert.Equal(4, Slots.Count);
-        Assert.Equal(free.Id, Id(Slots[3]!, "ActivityId"));
-        Assert.Equal(games[0].Id, Id(Slots[3]!, "GameId"));
-        Assert.Null(Get("_addSlotError"));
-        Assert.Equal(4, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
+        Assert.AreEqual(4, Slots.Count);
+        Assert.AreEqual(free.Id, Id(Slots[3]!, "ActivityId"));
+        Assert.AreEqual(games[0].Id, Id(Slots[3]!, "GameId"));
+        Assert.IsNull(Get("_addSlotError"));
+        Assert.AreEqual(4, Slots.Cast<object>().Select(s => Id(s, "ActivityId")).Distinct().Count());
     }
 
-    [Theory]
-    [InlineData("_custGameIds", true)]
-    [InlineData("_custGameIds", false)]
-    [InlineData("_custThemeIds", true)]
-    [InlineData("_custThemeIds", false)]
-    [InlineData("_custHolidayIds", true)]
-    [InlineData("_custHolidayIds", false)]
+    [TestMethod]
+    [DataRow("_custGameIds", true)]
+    [DataRow("_custGameIds", false)]
+    [DataRow("_custThemeIds", true)]
+    [DataRow("_custThemeIds", false)]
+    [DataRow("_custHolidayIds", true)]
+    [DataRow("_custHolidayIds", false)]
     public void FiltersExcludingEveryUnusedActivityDisableAddWithReason(string filter, bool unique)
     {
         var games = UseLibrary(1, 1, 1, 1);
         SetSlots(Activities[0], Activities[1], Activities[2]);
         Set("_custUniqueGames", unique);
         Set(filter, new List<Guid> { Guid.NewGuid() });
-        Assert.Empty(AddSlotCandidates());
+        Assert.IsEmpty(AddSlotCandidates());
         AssertAddSlotRefused(AddSlotNoMatchReason);
 
         // Clearing the filter frees the fourth Game: one click adds exactly that one slot.
         Set(filter, new List<Guid>());
-        Assert.Null(AddSlotBlockedReason());
+        Assert.IsNull(AddSlotBlockedReason());
         Call("AddSlot");
-        Assert.Equal(4, Slots.Count);
-        Assert.Equal(Activities[3].Id, Id(Slots[3]!, "ActivityId"));
-        Assert.Equal(games[3].Id, Id(Slots[3]!, "GameId"));
-        Assert.Null(Get("_addSlotError"));
-        Assert.Null(Get("_generationError"));
+        Assert.AreEqual(4, Slots.Count);
+        Assert.AreEqual(Activities[3].Id, Id(Slots[3]!, "ActivityId"));
+        Assert.AreEqual(games[3].Id, Id(Slots[3]!, "GameId"));
+        Assert.IsNull(Get("_addSlotError"));
+        Assert.IsNull(Get("_generationError"));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public void AddSlotAddsExactlyOneUniqueSlotPerClickUntilTheLimit(bool unique)
     {
         UseLibrary(2, 2, 2, 2, 2, 2);
@@ -1129,19 +1129,19 @@ public class SlotRerollTests
             SetSlots(Activities[0]);
             for (var expected = 2; expected <= EventEntity.MaximumSelections; expected++)
             {
-                Assert.Null(AddSlotBlockedReason());
+                Assert.IsNull(AddSlotBlockedReason());
                 Call("AddSlot");
-                Assert.Equal(expected, Slots.Count);
+                Assert.AreEqual(expected, Slots.Count);
                 var slots = Slots.Cast<object>().ToArray();
-                Assert.Equal(expected, slots.Select(s => Id(s, "ActivityId")).Distinct().Count());
-                if (unique) Assert.Equal(expected, slots.Select(s => Id(s, "GameId")).Distinct().Count());
-                Assert.All(slots, s => Assert.Contains(Activities, a => a.Id == Id(s, "ActivityId") && a.GameId == Id(s, "GameId")));
+                Assert.AreEqual(expected, slots.Select(s => Id(s, "ActivityId")).Distinct().Count());
+                if (unique) Assert.AreEqual(expected, slots.Select(s => Id(s, "GameId")).Distinct().Count());
+                foreach (var s in slots) Assert.Contains(a => a.Id == Id(s, "ActivityId") && a.GameId == Id(s, "GameId"), Activities);
             }
             AssertAddSlotRefused("An Event holds at most 5 activities.");
         }
     }
 
-    [Fact]
+    [TestMethod]
     public void RerollAndAddSlotShareOneCandidatePool()
     {
         // Same filters, same used Activities, same Unique games rule: the slot being re-rolled
@@ -1158,7 +1158,7 @@ public class SlotRerollTests
             var addPool = AddSlotCandidates().Select(a => a.Id).ToHashSet();
             Slots.Insert(0, removed);
             addPool.Remove(current.Id);
-            Assert.Equal(addPool, rerollPool);
+            CollectionAssert.AreEquivalent(addPool.ToList(), rerollPool.ToList());
         }
     }
 
@@ -1193,33 +1193,33 @@ public class SlotRerollTests
     private bool DetailCommentDirty(Guid id) => (bool)Call("IsDetailCommentDirty", id)!;
     private Task SaveComment(Guid id) => (Task)Call("SaveDetailComment", id)!;
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("Old note")]
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow("Old note")]
     public async Task SavedCommentStaysVisibleAfterSaveAndReopen(string? stored)
     {
         var (ev, handler) = OpenWinnerDetails(stored);
-        Assert.Equal(stored ?? string.Empty, DetailComment(current.Id));
+        Assert.AreEqual(stored ?? string.Empty, DetailComment(current.Id));
         Call("SetDetailComment", current.Id, "Ran long; start earlier");
-        Assert.True(DetailCommentDirty(current.Id));
+        Assert.IsTrue(DetailCommentDirty(current.Id));
 
         await SaveComment(current.Id);
 
-        Assert.Equal(HttpMethod.Patch, handler.LastMethod);
-        Assert.Equal($"/api/activities/{current.Id}/comments", handler.LastPath);
+        Assert.AreEqual(HttpMethod.Patch, handler.LastMethod);
+        Assert.AreEqual($"/api/activities/{current.Id}/comments", handler.LastPath);
         Assert.Contains("Ran long; start earlier", handler.LastBody);
-        Assert.Null(Get("_detailCommentError"));
-        Assert.Equal("Ran long; start earlier", DetailComment(current.Id));
-        Assert.False(DetailCommentDirty(current.Id));
+        Assert.IsNull(Get("_detailCommentError"));
+        Assert.AreEqual("Ran long; start earlier", DetailComment(current.Id));
+        Assert.IsFalse(DetailCommentDirty(current.Id));
         // Both in-memory copies carry the saved text: the Activity list and the Event's snapshot.
-        Assert.Equal("Ran long; start earlier", current.Comments);
-        Assert.Equal("Ran long; start earlier", ev.Selections[0].Activity.Comments);
-        Assert.Null(ev.Selections[1].Activity.Comments);
+        Assert.AreEqual("Ran long; start earlier", current.Comments);
+        Assert.AreEqual("Ran long; start earlier", ev.Selections[0].Activity.Comments);
+        Assert.IsNull(ev.Selections[1].Activity.Comments);
 
         Set("_detailEvent", null!);
-        Call("ShowDetails", Assert.Single((List<EventEntity>)Get("_events")!));
-        Assert.Equal("Ran long; start earlier", DetailComment(current.Id));
-        Assert.False(DetailCommentDirty(current.Id));
+        Call("ShowDetails", Assert.ContainsSingle((List<EventEntity>)Get("_events")!));
+        Assert.AreEqual("Ran long; start earlier", DetailComment(current.Id));
+        Assert.IsFalse(DetailCommentDirty(current.Id));
 
         // A list reload returns the Event as stored, whose snapshot still holds the old text;
         // the box follows the Activity, where the comment is actually saved.
@@ -1231,13 +1231,13 @@ public class SlotRerollTests
             WinnerActivityId = current.Id
         };
         Call("ShowDetails", reloaded);
-        Assert.Equal("Ran long; start earlier", DetailComment(current.Id));
-        Assert.False(DetailCommentDirty(current.Id));
+        Assert.AreEqual("Ran long; start earlier", DetailComment(current.Id));
+        Assert.IsFalse(DetailCommentDirty(current.Id));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task FailedCommentSaveKeepsTypedTextAndShowsError(bool networkFailure)
     {
         var (ev, handler) = OpenWinnerDetails("Old note");
@@ -1247,20 +1247,20 @@ public class SlotRerollTests
 
         await SaveComment(current.Id);
 
-        Assert.False(string.IsNullOrWhiteSpace((string?)Get("_detailCommentError")));
-        Assert.Equal("Typed but not saved", DetailComment(current.Id));
-        Assert.True(DetailCommentDirty(current.Id));
-        Assert.Equal("Old note", current.Comments);
-        Assert.Equal("Old note", ev.Selections[0].Activity.Comments);
+        Assert.IsFalse(string.IsNullOrWhiteSpace((string?)Get("_detailCommentError")));
+        Assert.AreEqual("Typed but not saved", DetailComment(current.Id));
+        Assert.IsTrue(DetailCommentDirty(current.Id));
+        Assert.AreEqual("Old note", current.Comments);
+        Assert.AreEqual("Old note", ev.Selections[0].Activity.Comments);
 
         // A retry that succeeds clears the error and keeps the text.
         handler.Fail = false;
         handler.NetworkFailure = false;
         await SaveComment(current.Id);
-        Assert.Null(Get("_detailCommentError"));
-        Assert.Equal("Typed but not saved", DetailComment(current.Id));
-        Assert.False(DetailCommentDirty(current.Id));
-        Assert.Equal("Typed but not saved", ev.Selections[0].Activity.Comments);
+        Assert.IsNull(Get("_detailCommentError"));
+        Assert.AreEqual("Typed but not saved", DetailComment(current.Id));
+        Assert.IsFalse(DetailCommentDirty(current.Id));
+        Assert.AreEqual("Typed but not saved", ev.Selections[0].Activity.Comments);
     }
 
     private sealed class CommentHttpHandler : HttpMessageHandler

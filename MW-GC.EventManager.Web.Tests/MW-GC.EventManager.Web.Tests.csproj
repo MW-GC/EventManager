@@ -18,10 +18,11 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" PrivateAssets="all" />
-    <ProjectReference Include="../MW-GC.EventManager.Web/MW-GC.EventManager.Web.csproj" />
-    <ProjectReference Include="../MW-GC.EventManager.API/MW-GC.EventManager.API.csproj" />
+    <PackageReference Include="MSTest" Version="4.4.1" />
+    <PackageReference Include="bunit" Version="2.11.3" />
     <PackageReference Include="Moq" Version="4.21.0" />
+    <ProjectReference Include="../MW-GC.EventManager.Web/MW-GC.EventManager.Web.csproj" />
+    <!-- DialogRetryTests drives the Events page against the real API handlers in process. -->
+    <ProjectReference Include="../MW-GC.EventManager.API/MW-GC.EventManager.API.csproj" />
   </ItemGroup>
 </Project>

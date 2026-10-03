@@ -10,8 +10,9 @@ select winners.
 - **API** — .NET 10 Azure Functions v4 isolated worker; handles CRUD and event
   generation, backed by Azure Table Storage.
 - **Shared** — models, storage entities and request contracts used by both.
-- **Tests** — currently a combined xUnit project; separate MSTest API/Web
-  projects are planned in the companion test migration.
+- **Tests** — two MSTest projects: `MW-GC.EventManager.Api.Tests` for the API
+  logic and `MW-GC.EventManager.Web.Tests` for the Web UI, which renders pages
+  with bUnit.
 
 Production deployment uses Azure Static Web Apps and Azure Functions. The
 [Web routing configuration](MW-GC.EventManager.Web/staticwebapp.config.json)
@@ -85,28 +86,23 @@ CORS configuration. Never put secrets in browser configuration.
 
 ## Build and test
 
-Run from the repository root. **Current commands on `dev`:**
+Run from the repository root:
 
 ```sh
 dotnet build MW-GC.EventManager.slnx
 dotnet test MW-GC.EventManager.slnx
-
-# Current combined xUnit test project
-dotnet test MW-GC.EventManager.Tests/MW-GC.EventManager.Tests.csproj
 ```
 
-**After the companion MSTest migration lands**, the separate projects replace
-the combined project. These paths do not exist on this branch yet:
+The solution-wide commands are the entry point. To run one test project:
 
 ```sh
-# Future API logic tests
+# API logic tests (MSTest)
 dotnet test MW-GC.EventManager.Api.Tests/MW-GC.EventManager.Api.Tests.csproj
 
-# Future Web UI tests
+# Web UI tests (MSTest + bUnit)
 dotnet test MW-GC.EventManager.Web.Tests/MW-GC.EventManager.Web.Tests.csproj
 ```
 
-The solution-wide build/test commands remain the entry point after migration.
 Package restore requires access to NuGet or a populated local package cache.
 
 ## Contributing
