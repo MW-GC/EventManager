@@ -1,0 +1,37 @@
+@* A yes/no question over the page, such as "Delete game" or "Discard changes?". Built on the plain
+   FluentDialog every page dialog uses, so the planned Fluent UI v5 migration (#81) moves them all the
+   same way. Overlay click and Escape answer Cancel. *@
+
+<FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 420px;" Class="confirm-dialog"
+              AriaLabel="@Title" @ondialogdismiss="@((DialogEventArgs _) => Answer(false))">
+    <FluentDialogBody>
+        <FluentLabel Typo="Typography.H4" Style="margin-bottom: 12px;">@Title</FluentLabel>
+        <FluentLabel Class="confirm-message">@Message</FluentLabel>
+        <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 20px;">
+            <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Answer(false))">@CancelText</FluentButton>
+            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => Answer(true))"
+                          BackgroundColor="@(Destructive ? "var(--error)" : null)" Color="@(Destructive ? "#fff" : null)">@ConfirmText</FluentButton>
+        </FluentStack>
+    </FluentDialogBody>
+</FluentDialog>
+
+@code {
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Message { get; set; } = string.Empty;
+    [Parameter] public string ConfirmText { get; set; } = "OK";
+    [Parameter] public string CancelText { get; set; } = "Cancel";
+    // Paints the confirm button in the error colour, for answers that lose data.
+    [Parameter] public bool Destructive { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    // A fast double click lands before the page removes this dialog; only the first answer counts.
+    private bool _answered;
+
+    private Task Answer(bool confirmed)
+    {
+        if (_answered) return Task.CompletedTask;
+        _answered = true;
+        return confirmed ? OnConfirm.InvokeAsync() : OnCancel.InvokeAsync();
+    }
+}

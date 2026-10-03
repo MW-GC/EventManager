@@ -145,6 +145,7 @@ public sealed class EventsErrorStateTests : IDisposable
         var reads = api.Count(HttpMethod.Get, "/api/events");
 
         await page.Find("fluent-button[title=Delete]").ClickAsync(new());
+        await page.ConfirmAsync();
 
         Assert.AreEqual(1, api.Count(HttpMethod.Delete, $"/api/events/{ev.Id}"));
         Assert.Contains("Game night", Assert.ContainsSingle(page.Rows()));

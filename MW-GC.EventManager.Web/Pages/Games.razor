@@ -77,10 +77,10 @@
                     </TemplateColumn>
                     <TemplateColumn Title="Actions">
                         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" OnClick="@(() => ShowEdit(context))">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
                                 <FluentIcon Value="@(new Size16.Edit())" />
                             </FluentButton>
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" OnClick="@(() => Delete(context.Id))">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
                                 <FluentIcon Value="@(new Size16.Delete())" />
                             </FluentButton>
                         </FluentStack>
@@ -122,8 +122,8 @@
                                     }
 
                                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Style="margin-top: auto;">
-                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => ShowEdit(game))" IconStart="@(new Size16.Edit())">Edit</FluentButton>
-                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => Delete(game.Id))" IconStart="@(new Size16.Delete())">Delete</FluentButton>
+                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_rows.IsBusy(game.Id)" OnClick="@(() => ShowEdit(game))" IconStart="@(new Size16.Edit())">Edit</FluentButton>
+                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_rows.Running" OnClick="@(() => AskDelete(game))" IconStart="@(new Size16.Delete())">Delete</FluentButton>
                                     </FluentStack>
                                 </FluentStack>
                             </FluentCard>
@@ -138,7 +138,7 @@
 @* Add Game dialog — simple Name + Website like the original *@
 @if (_showCreate)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 480px;" OnDismiss="@((DialogEventArgs _) => HideCreate())">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 480px;" @ondialogdismiss="@((DialogEventArgs _) => DismissCreate())">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Add Game</FluentLabel>
             <EditForm Model="@_create" OnValidSubmit="CreateGame">
@@ -153,7 +153,7 @@
                     </div>
                     <ApiErrorBar Message="@_dialogError" />
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
-                        <FluentButton Appearance="Appearance.Neutral" OnClick="HideCreate">Cancel</FluentButton>
+                        <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelCreate">Cancel</FluentButton>
                         <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Add())">Add Game</FluentButton>
                     </FluentStack>
                 </FluentStack>
@@ -165,9 +165,9 @@
 @* Edit Game dialog — shows activities for this game when editing *@
 @if (_editingId != Guid.Empty)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true"
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true"
                   Style="@(_editActivities.Count > 0 ? "--dialog-width: 720px;" : "--dialog-width: 480px;")"
-                  OnDismiss="@((DialogEventArgs _) => CancelEdit())">
+                  @ondialogdismiss="@((DialogEventArgs _) => DismissEdit())">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Game</FluentLabel>
             <EditForm Model="@_edit" OnValidSubmit="SaveEdit">
@@ -182,7 +182,7 @@
                     </div>
                     <ApiErrorBar Message="@_dialogError" />
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
-                        <FluentButton Appearance="Appearance.Neutral" OnClick="CancelEdit">Cancel</FluentButton>
+                        <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelEdit">Cancel</FluentButton>
                         <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Save())">Save Changes</FluentButton>
                     </FluentStack>
                 </FluentStack>
@@ -215,6 +215,13 @@
     </FluentDialog>
 }
 
+@if (_confirm is { } confirm)
+{
+    <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
+                   CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => _confirm = null)" />
+}
+
 @code {
     private List<GameEntity>? _games;
     private List<ActivityEntity>? _activities;
@@ -225,7 +232,14 @@
     private List<ActivityEntity> _editActivities = [];
     private Guid _editingId;
     private bool _showCreate;
+    // Set by the save that runs; only that save clears it, never a dismiss.
     private bool _saving;
+    // The open Add or Edit dialog: a save only closes the dialog it started from.
+    private readonly DialogSession _form = new();
+    // The row whose Delete is running.
+    private readonly RowAction _rows = new();
+    // The open question (delete or discard), if any.
+    private ConfirmRequest? _confirm;
     private string _search = string.Empty;
     private ViewMode _viewMode = ViewMode.Table;
 
@@ -267,18 +281,37 @@
         _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
         _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []));
 
-    private void ShowCreate() { _create = new GameEntity { Name = string.Empty }; _dialogError = null; _showCreate = true; }
-    private void HideCreate() { _showCreate = false; _dialogError = null; }
+    private void ShowCreate()
+    {
+        _create = new GameEntity { Name = string.Empty };
+        _dialogError = null;
+        _showCreate = true;
+        _form.Open(() => new { _create.Name, _create.Website });
+    }
+
+    // The Cancel button closes at once without asking, but never while the save runs.
+    private void CancelCreate() { if (!_saving) CloseCreate(); }
+    private void CloseCreate() { _showCreate = false; _dialogError = null; _form.Close(); }
+    // Overlay click or Escape.
+    private void DismissCreate() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseCreate);
 
     private async Task CreateGame()
     {
         if (_saving) return;
         _saving = true;
+        var token = _form.Current;
+        var game = _create;
         try
         {
-            _dialogError = await ApiResult.SendAsync(() => GameSvc.CreateAsync(_create));
-            if (_dialogError is not null) return;
-            _showCreate = false;
+            var error = await ApiResult.SendAsync(() => GameSvc.CreateAsync(game));
+            var current = _form.IsCurrent(token);
+            if (error is not null)
+            {
+                if (current) _dialogError = error;
+                else _actionError = $"The game was not saved. {error}";
+                return;
+            }
+            if (current) CloseCreate();
             await Reload();
         }
         finally { _saving = false; }
@@ -297,22 +330,53 @@
             IconUrl = g.IconUrl
         };
         _editActivities = _activities?.Where(a => a.GameId == g.Id).ToList() ?? [];
+        _form.Open(() => new { _edit.Name, _edit.Website });
     }
 
-    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; _editActivities = []; _dialogError = null; }
+    // The Cancel button closes at once without asking, but never while the save runs.
+    private void CancelEdit() { if (!_saving) CloseEdit(); }
+    private void CloseEdit() { _editingId = Guid.Empty; _editActivities = []; _dialogError = null; _form.Close(); }
+    // Overlay click or Escape.
+    private void DismissEdit() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseEdit);
 
     private async Task SaveEdit()
     {
         if (_saving) return;
         _saving = true;
+        var token = _form.Current;
+        var game = _edit;
         try
         {
-            _dialogError = await ApiResult.SendAsync(() => GameSvc.UpdateAsync(_edit));
-            if (_dialogError is not null) return;
-            CancelEdit();
+            var error = await ApiResult.SendAsync(() => GameSvc.UpdateAsync(game));
+            var current = _form.IsCurrent(token);
+            if (error is not null)
+            {
+                if (current) _dialogError = error;
+                else _actionError = $"The game was not saved. {error}";
+                return;
+            }
+            if (current) CloseEdit();
             await Reload();
         }
         finally { _saving = false; }
+    }
+
+    // Names the game; a game that activities still use is refused by the server (409), so say so.
+    private void AskDelete(GameEntity g)
+    {
+        if (_rows.BusyId is not null) return;
+        var count = GetActivityCount(g.Id);
+        var message = count == 0
+            ? $"Delete {g.Name}? This cannot be undone."
+            : $"{g.Name} has {count} {(count == 1 ? "activity" : "activities")}. The server refuses to delete a game that activities still use, so delete or move them first.";
+        _confirm = ConfirmRequest.Delete("Delete game", message, () => _rows.RunAsync(g.Id, () => Delete(g.Id)));
+    }
+
+    private async Task Confirmed(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        await confirm.OnConfirm();
     }
 
     private async Task Delete(Guid id)
