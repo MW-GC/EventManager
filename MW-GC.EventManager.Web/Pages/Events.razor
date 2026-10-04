@@ -581,9 +581,15 @@
 
     // Everything the customize dialog binds, compared to tell unsaved changes. Slots count by their
     // Game and Activity ids only, so an untouched edit of an Event whose Activity was deleted is clean.
+    // Date and time count as the parts BuildEventDate saves: the picked day (not the DateTime's Kind,
+    // which differs between DateTime.Today and a picked day) and the time of day (a time typed after
+    // clearing the box sits on another date).
     private object CustomizeFields() => new
     {
-        _custName, _custDate, _custTime, _custThemedOnly, _custUniqueGames,
+        _custName,
+        Date = _custDate is { } date ? DateOnly.FromDateTime(date) : (DateOnly?)null,
+        Time = _custTime?.TimeOfDay,
+        _custThemedOnly, _custUniqueGames,
         _custGameIds, _custThemeIds, _custHolidayIds,
         Slots = _custSelections.Select(s => new { s.GameId, s.ActivityId })
     };

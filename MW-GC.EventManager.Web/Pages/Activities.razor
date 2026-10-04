@@ -340,9 +340,10 @@
         _form.Open(() => FormFields(_create));
     }
 
-    // The bound fields of the Add or Edit dialog, compared to tell unsaved changes.
+    // The bound fields of the Add or Edit dialog, compared to tell unsaved changes. Theme and Holiday
+    // ids count as sets: unticking a box and ticking it again moves its id to the end of the list.
     private static object FormFields(ActivityEntity a) =>
-        new { a.GameId, a.Name, a.Description, a.Rules, a.SetupRequirements, a.ThemeIds, a.HolidayIds };
+        new { a.GameId, a.Name, a.Description, a.Rules, a.SetupRequirements, ThemeIds = a.ThemeIds.Order(), HolidayIds = a.HolidayIds.Order() };
 
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelForm() { if (!_saving) CloseForm(); }
