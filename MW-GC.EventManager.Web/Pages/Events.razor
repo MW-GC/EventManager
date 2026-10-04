@@ -104,13 +104,13 @@
                 @* Event name and date *@
                 <FluentGrid Spacing="3">
                     <FluentGridItem xs="12" sm="6">
-                        <FluentTextField @bind-Value="_custName" Label="Event Name" Style="width: 100%;" Placeholder="Enter event name..." />
+                        <FluentTextField @bind-Value="_custName" Immediate="true" Label="Event Name" Style="width: 100%;" Placeholder="Enter event name..." />
                     </FluentGridItem>
                     <FluentGridItem xs="12" sm="3">
                         <FluentDatePicker @bind-Value="_custDate" Label="Event Date" Style="width: 100%;" />
                     </FluentGridItem>
                     <FluentGridItem xs="12" sm="3">
-                        <FluentTimePicker @bind-Value="_custTime" Label="Event Time" Style="width: 100%;" />
+                        <FluentTimePicker @bind-Value="_custTime" Immediate="true" Label="Event Time" Style="width: 100%;" />
                     </FluentGridItem>
                 </FluentGrid>
 
@@ -405,7 +405,7 @@
                                     <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-bottom: 4px;">
                                         Stored on the activity, not on this Event: every Event that uses this activity, and the Activities page, show the same note.
                                     </FluentLabel>
-                                    <FluentTextArea Value="@GetDetailComment(selection.Activity.Id)"
+                                    <FluentTextArea Value="@GetDetailComment(selection.Activity.Id)" Immediate="true"
                                                     ValueChanged="@(v => SetDetailComment(selection.Activity.Id, v))"
                                                     Style="width: 100%;" Rows="3"
                                                     Placeholder="Add notes about this activity's success, challenges, or improvements..." />

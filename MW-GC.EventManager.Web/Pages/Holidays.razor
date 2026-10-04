@@ -84,7 +84,7 @@
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Add Holiday</FluentLabel>
             <EditForm Model="@_create" OnValidSubmit="Create">
                 <DataAnnotationsValidator />
-                <FluentTextField @bind-Value="_create.Name" Label="Name" Required Style="width: 100%;" Placeholder="Enter holiday name..." />
+                <FluentTextField @bind-Value="_create.Name" Immediate="true" Label="Name" Required Style="width: 100%;" Placeholder="Enter holiday name..." />
                 <ApiErrorBar Message="@_dialogError" />
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
                     <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelCreate">Cancel</FluentButton>
@@ -102,7 +102,7 @@
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Holiday</FluentLabel>
             <EditForm Model="@_edit" OnValidSubmit="SaveEdit">
                 <DataAnnotationsValidator />
-                <FluentTextField @bind-Value="_edit.Name" Label="Name" Required Style="width: 100%;" />
+                <FluentTextField @bind-Value="_edit.Name" Immediate="true" Label="Name" Required Style="width: 100%;" />
                 <ApiErrorBar Message="@_dialogError" />
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
                     <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelEdit">Cancel</FluentButton>

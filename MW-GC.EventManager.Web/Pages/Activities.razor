@@ -150,7 +150,7 @@
                 <div>
                     <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments</FluentLabel>
                     <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px;">Track notes about this activity's performance in events</FluentLabel>
-                    <FluentTextArea @bind-Value="_detailComments" @bind-Value:after="OnDetailCommentsChanged" Style="width: 100%;" Rows="4"
+                    <FluentTextArea @bind-Value="_detailComments" @bind-Value:after="OnDetailCommentsChanged" Immediate="true" Style="width: 100%;" Rows="4"
                                     Placeholder="Add notes about success, challenges, or improvements..." />
                     @if (_commentsError is not null)
                     {
@@ -194,13 +194,13 @@
                                   Disabled="@isEdit"
                                   Style="width: 100%;" />
 
-                    <FluentTextField @bind-Value="model.Name" Label="Activity Name" Required Style="width: 100%;" Placeholder="Enter activity name..." />
+                    <FluentTextField @bind-Value="model.Name" Immediate="true" Label="Activity Name" Required Style="width: 100%;" Placeholder="Enter activity name..." />
 
-                    <FluentTextArea @bind-Value="model.Description" Label="Description" Style="width: 100%;" Rows="3" Placeholder="Brief description of the activity..." />
+                    <FluentTextArea @bind-Value="model.Description" Immediate="true" Label="Description" Style="width: 100%;" Rows="3" Placeholder="Brief description of the activity..." />
 
-                    <FluentTextArea @bind-Value="model.Rules" Label="Rules" Style="width: 100%;" Rows="4" Placeholder="Rules for this activity..." />
+                    <FluentTextArea @bind-Value="model.Rules" Immediate="true" Label="Rules" Style="width: 100%;" Rows="4" Placeholder="Rules for this activity..." />
 
-                    <FluentTextArea @bind-Value="model.SetupRequirements" Label="Setup Requirements" Style="width: 100%;" Rows="3" Placeholder="What's needed to set up this activity..." />
+                    <FluentTextArea @bind-Value="model.SetupRequirements" Immediate="true" Label="Setup Requirements" Style="width: 100%;" Rows="3" Placeholder="What's needed to set up this activity..." />
 
                     @* Side-by-side theme/holiday multi-select *@
                     <FluentGrid Spacing="3">

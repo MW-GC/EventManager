@@ -350,6 +350,85 @@ public sealed class DialogSafetyTests : IDisposable
         Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
     }
 
+    // Escape pressed while the cursor is still in a field: the browser has raised "input" for every
+    // keystroke but no "change" yet (that only comes when the field loses focus). So these tests type
+    // with InputAsync, never ChangeAsync, and the typed text must already count as a change.
+    [TestMethod]
+    [DataRow("games-create")]
+    [DataRow("games-edit")]
+    [DataRow("themes-create")]
+    [DataRow("themes-edit")]
+    [DataRow("holidays-create")]
+    [DataRow("holidays-edit")]
+    [DataRow("activities-create")]
+    [DataRow("activities-edit")]
+    [DataRow("activities-details")]
+    [DataRow("events-create")]
+    [DataRow("events-edit")]
+    [DataRow("events-details")]
+    public async Task Dismiss_RightAfterTyping_BeforeFieldLosesFocus_AsksToDiscard(string form)
+    {
+        var (page, _) = await OpenForm(form, change: false);
+        const string typed = "Typed, cursor still in the field";
+
+        await TextInputs(page)[0].InputAsync(new ChangeEventArgs { Value = typed });
+        await Dismiss(page);
+
+        Assert.IsTrue(page.HasFormDialog(), $"{form}: Escape right after typing closed the dialog and lost the text");
+        Assert.IsTrue(page.HasConfirmation(), $"{form}: Escape right after typing did not ask");
+        Assert.AreEqual("Discard changes?", Heading(page.Confirmation()));
+        await page.Confirmation().Button("Keep editing").ClickAsync(new());
+        Assert.IsTrue(page.HasFormDialog());
+        Assert.AreEqual(typed, TextInputs(page)[0].GetAttribute("value"));
+
+        await Dismiss(page);
+        await page.ConfirmAsync("Discard");
+        Assert.IsFalse(page.HasFormDialog());
+        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
+    }
+
+    // Every text field of the dialogs with more than one counts while it is being typed in.
+    [TestMethod]
+    [DataRow("games-create", 2)]
+    [DataRow("games-edit", 2)]
+    [DataRow("activities-create", 4)]
+    [DataRow("activities-edit", 4)]
+    public async Task Dismiss_RightAfterTypingInAnyTextField_AsksToDiscard(string form, int fields)
+    {
+        for (var i = 0; i < fields; i++)
+        {
+            var (page, _) = await OpenForm(form, change: false);
+            Assert.HasCount(fields, TextInputs(page));
+
+            await TextInputs(page)[i].InputAsync(new ChangeEventArgs { Value = $"Typed in field {i}" });
+            await Dismiss(page);
+
+            Assert.IsTrue(page.HasConfirmation(), $"{form}: typing in text field {i} did not count as a change");
+            await page.ConfirmAsync("Discard");
+            Assert.IsFalse(page.HasFormDialog());
+        }
+        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
+    }
+
+    // The Event Time picker is typed into too; its input event must count before it loses focus.
+    [TestMethod]
+    [DataRow("events-create")]
+    [DataRow("events-edit")]
+    public async Task Dismiss_RightAfterTypingEventTime_AsksToDiscard(string form)
+    {
+        var (page, _) = await OpenForm(form, change: false);
+        var time = page.FormDialog().QuerySelector("fluent-text-field.fluent-timepicker")!;
+        var typed = time.GetAttribute("current-value") == "06:15" ? "06:45" : "06:15";
+
+        await time.InputAsync(new ChangeEventArgs { Value = typed });
+        await Dismiss(page);
+
+        Assert.IsTrue(page.HasConfirmation(), $"{form}: Escape right after typing a time did not ask");
+        await page.ConfirmAsync("Discard");
+        Assert.IsFalse(page.HasFormDialog());
+        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
+    }
+
     [TestMethod]
     [DynamicData(nameof(UntouchedForms))]
     public async Task Dismiss_WithNoChanges_ClosesImmediately(string form)
@@ -538,6 +617,11 @@ public sealed class DialogSafetyTests : IDisposable
 
     private static IElement TextField(IRenderedComponent<IComponent> page) =>
         page.FormDialog().QuerySelector("fluent-text-field")!;
+
+    // The dialog's free-text fields in page order. The date and time pickers also render as
+    // fluent-text-field, but they are not typed into as free text, so they are left out.
+    private static List<IElement> TextInputs(IRenderedComponent<IComponent> page) =>
+        page.FormDialog().QuerySelectorAll("fluent-text-field:not(.fluent-datepicker):not(.fluent-timepicker), fluent-text-area").ToList();
 
     private static IElement EventName(IRenderedComponent<IComponent> page) =>
         page.FormDialog().QuerySelector("fluent-text-field[placeholder='Enter event name...']")!;
