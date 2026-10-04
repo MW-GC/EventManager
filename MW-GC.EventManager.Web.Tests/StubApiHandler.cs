@@ -7,7 +7,7 @@ namespace MW_GC.EventManager.Web.Tests;
 // return JSON. Unrouted requests answer 404. Every request is recorded with its body.
 internal sealed class StubApiHandler : HttpMessageHandler
 {
-    private readonly List<(HttpMethod Method, string Path, Func<HttpResponseMessage> Respond)> _routes = [];
+    private readonly List<(HttpMethod Method, string Path, Func<Task<HttpResponseMessage>> Respond)> _routes = [];
 
     public List<(HttpMethod Method, string Path, string? Body)> Requests { get; } = [];
 
@@ -25,8 +25,17 @@ internal sealed class StubApiHandler : HttpMessageHandler
     // Later routes win, so a test can replace an earlier answer (for example a retry after a fix).
     public StubApiHandler On(HttpMethod method, string path, Func<HttpResponseMessage> respond)
     {
-        _routes.Insert(0, (method, path, respond));
+        _routes.Insert(0, (method, path, () => Task.FromResult(respond())));
         return this;
+    }
+
+    // Holds every request to the route until the returned gate is released, then answers with
+    // respond: a slow network, so a test can act while the call is still in flight.
+    public TaskCompletionSource Hold(HttpMethod method, string path, Func<HttpResponseMessage> respond)
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _routes.Insert(0, (method, path, async () => { await gate.Task; return respond(); }));
+        return gate;
     }
 
     public int Count(HttpMethod method, string path) => Requests.Count(r => r.Method == method && r.Path == path);
@@ -42,7 +51,7 @@ internal sealed class StubApiHandler : HttpMessageHandler
         Requests.Add((request.Method, path, body));
         foreach (var route in _routes)
             if (route.Method == request.Method && route.Path == path)
-                return route.Respond();
+                return await route.Respond();
         return new HttpResponseMessage(HttpStatusCode.NotFound);
     }
 }

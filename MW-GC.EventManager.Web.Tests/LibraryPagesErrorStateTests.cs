@@ -122,6 +122,7 @@ public sealed class LibraryPagesErrorStateTests : IDisposable
         var reads = api.Count(HttpMethod.Get, $"/api/{route}");
 
         await page.Find("fluent-button[title=Delete]").ClickAsync(new());
+        await page.ConfirmAsync();
 
         Assert.AreEqual(1, api.Count(HttpMethod.Delete, $"/api/{route}/{existing.Id}"));
         Assert.ContainsSingle(page.Rows());
@@ -217,6 +218,7 @@ public sealed class LibraryPagesErrorStateTests : IDisposable
         var reads = api.Count(HttpMethod.Get, "/api/activities");
 
         await page.Find($"fluent-button[title={handler}]").ClickAsync(new());
+        if (handler == "Delete") await page.ConfirmAsync();
 
         Assert.AreEqual(1, api.Count(method, path));
         Assert.Contains("Race", Assert.ContainsSingle(page.Rows()));

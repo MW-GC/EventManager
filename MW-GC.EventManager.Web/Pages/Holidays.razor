@@ -45,10 +45,10 @@
                     <PropertyColumn Property="@(h => h.Name)" Title="Name" Sortable="true" />
                     <TemplateColumn Title="Actions">
                         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" OnClick="@(() => ShowEdit(context))">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
                                 <FluentIcon Value="@(new Size16.Edit())" />
                             </FluentButton>
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" OnClick="@(() => Delete(context.Id))">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
                                 <FluentIcon Value="@(new Size16.Delete())" />
                             </FluentButton>
                         </FluentStack>
@@ -65,8 +65,8 @@
                                 <FluentIcon Value="@(new Size24.CalendarStar())" Color="Color.Accent" Style="margin-bottom: 8px;" />
                                 <FluentLabel Weight="FontWeight.Bold">@holiday.Name</FluentLabel>
                                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.Center" HorizontalGap="4" Style="margin-top: 8px;">
-                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => ShowEdit(holiday))" IconStart="@(new Size16.Edit())" />
-                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="@(() => Delete(holiday.Id))" IconStart="@(new Size16.Delete())" />
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_rows.IsBusy(holiday.Id)" OnClick="@(() => ShowEdit(holiday))" IconStart="@(new Size16.Edit())" />
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_rows.Running" OnClick="@(() => AskDelete(holiday))" IconStart="@(new Size16.Delete())" />
                                 </FluentStack>
                             </FluentCard>
                         </FluentGridItem>
@@ -79,15 +79,15 @@
 
 @if (_showCreate)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 400px;" OnDismiss="@((DialogEventArgs _) => HideCreate())">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 400px;" @ondialogdismiss="@((DialogEventArgs _) => DismissCreate())">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Add Holiday</FluentLabel>
             <EditForm Model="@_create" OnValidSubmit="Create">
                 <DataAnnotationsValidator />
-                <FluentTextField @bind-Value="_create.Name" Label="Name" Required Style="width: 100%;" Placeholder="Enter holiday name..." />
+                <FluentTextField @bind-Value="_create.Name" Immediate="true" Label="Name" Required Style="width: 100%;" Placeholder="Enter holiday name..." />
                 <ApiErrorBar Message="@_dialogError" />
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
-                    <FluentButton Appearance="Appearance.Neutral" OnClick="HideCreate">Cancel</FluentButton>
+                    <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelCreate">Cancel</FluentButton>
                     <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Add())">Add Holiday</FluentButton>
                 </FluentStack>
             </EditForm>
@@ -97,20 +97,27 @@
 
 @if (_editingId != Guid.Empty)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 400px;" OnDismiss="@((DialogEventArgs _) => CancelEdit())">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 400px;" @ondialogdismiss="@((DialogEventArgs _) => DismissEdit())">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Holiday</FluentLabel>
             <EditForm Model="@_edit" OnValidSubmit="SaveEdit">
                 <DataAnnotationsValidator />
-                <FluentTextField @bind-Value="_edit.Name" Label="Name" Required Style="width: 100%;" />
+                <FluentTextField @bind-Value="_edit.Name" Immediate="true" Label="Name" Required Style="width: 100%;" />
                 <ApiErrorBar Message="@_dialogError" />
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
-                    <FluentButton Appearance="Appearance.Neutral" OnClick="CancelEdit">Cancel</FluentButton>
+                    <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelEdit">Cancel</FluentButton>
                     <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Save())">Save</FluentButton>
                 </FluentStack>
             </EditForm>
         </FluentDialogBody>
     </FluentDialog>
+}
+
+@if (_confirm is { } confirm)
+{
+    <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
+                   CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => _confirm = null)" />
 }
 
 @code {
@@ -119,7 +126,14 @@
     private HolidayEntity _edit = new() { Name = string.Empty };
     private Guid _editingId;
     private bool _showCreate;
+    // Set by the save that runs; only that save clears it, never a dismiss.
     private bool _saving;
+    // The open Add or Edit dialog: a save only closes the dialog it started from.
+    private readonly DialogSession _form = new();
+    // The row whose Delete is running.
+    private readonly RowAction _rows = new();
+    // The open question (delete or discard), if any.
+    private ConfirmRequest? _confirm;
     private string _search = string.Empty;
     private ViewMode _viewMode = ViewMode.Table;
 
@@ -140,38 +154,89 @@
     protected override async Task OnInitializedAsync() => await Reload();
     private Task Reload() => _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []);
 
-    private void ShowCreate() { _create = new HolidayEntity { Name = string.Empty }; _dialogError = null; _showCreate = true; }
-    private void HideCreate() { _showCreate = false; _dialogError = null; }
+    private void ShowCreate()
+    {
+        _create = new HolidayEntity { Name = string.Empty };
+        _dialogError = null;
+        _showCreate = true;
+        _form.Open(() => new { _create.Name });
+    }
+
+    // The Cancel button closes at once without asking, but never while the save runs.
+    private void CancelCreate() { if (!_saving) CloseCreate(); }
+    private void CloseCreate() { _showCreate = false; _dialogError = null; _form.Close(); }
+    // Overlay click or Escape.
+    private void DismissCreate() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseCreate);
 
     private async Task Create()
     {
         if (_saving) return;
         _saving = true;
+        var token = _form.Current;
+        var item = _create;
         try
         {
-            _dialogError = await ApiResult.SendAsync(() => HolidaySvc.CreateAsync(_create));
-            if (_dialogError is not null) return;
-            _showCreate = false;
+            var error = await ApiResult.SendAsync(() => HolidaySvc.CreateAsync(item));
+            var current = _form.IsCurrent(token);
+            if (error is not null)
+            {
+                if (current) _dialogError = error;
+                else _actionError = $"The holiday was not saved. {error}";
+                return;
+            }
+            if (current) CloseCreate();
             await Reload();
         }
         finally { _saving = false; }
     }
 
-    private void ShowEdit(HolidayEntity h) { _dialogError = null; _editingId = h.Id; _edit = new HolidayEntity { Id = h.Id, Name = h.Name }; }
-    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; _dialogError = null; }
+    private void ShowEdit(HolidayEntity t)
+    {
+        _dialogError = null;
+        _editingId = t.Id;
+        _edit = new HolidayEntity { Id = t.Id, Name = t.Name };
+        _form.Open(() => new { _edit.Name });
+    }
+
+    // The Cancel button closes at once without asking, but never while the save runs.
+    private void CancelEdit() { if (!_saving) CloseEdit(); }
+    private void CloseEdit() { _editingId = Guid.Empty; _dialogError = null; _form.Close(); }
+    // Overlay click or Escape.
+    private void DismissEdit() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseEdit);
 
     private async Task SaveEdit()
     {
         if (_saving) return;
         _saving = true;
+        var token = _form.Current;
+        var item = _edit;
         try
         {
-            _dialogError = await ApiResult.SendAsync(() => HolidaySvc.UpdateAsync(_edit));
-            if (_dialogError is not null) return;
-            CancelEdit();
+            var error = await ApiResult.SendAsync(() => HolidaySvc.UpdateAsync(item));
+            var current = _form.IsCurrent(token);
+            if (error is not null)
+            {
+                if (current) _dialogError = error;
+                else _actionError = $"The holiday was not saved. {error}";
+                return;
+            }
+            if (current) CloseEdit();
             await Reload();
         }
         finally { _saving = false; }
+    }
+
+    private void AskDelete(HolidayEntity t)
+    {
+        if (_rows.BusyId is not null) return;
+        _confirm = ConfirmRequest.Delete("Delete holiday", $"Delete {t.Name}? This cannot be undone.", () => _rows.RunAsync(t.Id, () => Delete(t.Id)));
+    }
+
+    private async Task Confirmed(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        await confirm.OnConfirm();
     }
 
     private async Task Delete(Guid id)

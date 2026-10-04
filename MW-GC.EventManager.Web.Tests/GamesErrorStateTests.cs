@@ -125,6 +125,7 @@ public sealed class GamesErrorStateTests : IDisposable
         var readsBefore = api.Count(HttpMethod.Get, "/api/games");
 
         await page.Find("fluent-button[title=Delete]").ClickAsync(new());
+        await page.ConfirmAsync();
 
         Assert.AreEqual(1, api.Count(HttpMethod.Delete, $"/api/games/{existing.Id}"));
         Assert.Contains("Existing game", Assert.ContainsSingle(page.Rows()));

@@ -70,13 +70,13 @@
                         <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" OnClick="@(() => ShowDetails(context))">
                             <FluentIcon Value="@(new Size16.Eye())" />
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" OnClick="@(() => ShowEdit(context))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
                             <FluentIcon Value="@(new Size16.Edit())" />
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Duplicate" OnClick="@(() => Duplicate(context.Id))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Duplicate" Disabled="@_rows.Running" OnClick="@(() => _rows.RunAsync(context.Id, () => Duplicate(context.Id)))">
                             <FluentIcon Value="@(new Size16.Copy())" />
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" OnClick="@(() => Delete(context.Id))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
                             <FluentIcon Value="@(new Size16.Delete())" />
                         </FluentButton>
                     </FluentStack>
@@ -89,11 +89,11 @@
 @* Details dialog — sectioned like the original with editable comments *@
 @if (_detailActivity is not null)
 {
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 680px;" OnDismiss="@((DialogEventArgs _) => CloseDetails())">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 680px;" @ondialogdismiss="@((DialogEventArgs _) => DismissDetails())">
         <FluentDialogBody>
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween" VerticalAlignment="VerticalAlignment.Top" Style="margin-bottom: 4px;">
                 <FluentLabel Typo="Typography.H3">@_detailActivity.Name</FluentLabel>
-                <FluentButton Appearance="Appearance.Stealth" Title="Close" OnClick="CloseDetails">
+                <FluentButton Appearance="Appearance.Stealth" Title="Close" Disabled="@_savingComments" OnClick="CancelDetails">
                     <FluentIcon Value="@(new Size20.Dismiss())" />
                 </FluentButton>
             </FluentStack>
@@ -150,7 +150,7 @@
                 <div>
                     <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments</FluentLabel>
                     <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px;">Track notes about this activity's performance in events</FluentLabel>
-                    <FluentTextArea @bind-Value="_detailComments" @bind-Value:after="OnDetailCommentsChanged" Style="width: 100%;" Rows="4"
+                    <FluentTextArea @bind-Value="_detailComments" @bind-Value:after="OnDetailCommentsChanged" Immediate="true" Style="width: 100%;" Rows="4"
                                     Placeholder="Add notes about success, challenges, or improvements..." />
                     @if (_commentsError is not null)
                     {
@@ -165,7 +165,7 @@
             </FluentStack>
 
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" Style="margin-top: 24px;">
-                <FluentButton Appearance="Appearance.Neutral" OnClick="CloseDetails">Close</FluentButton>
+                <FluentButton Appearance="Appearance.Neutral" Disabled="@_savingComments" OnClick="CancelDetails">Close</FluentButton>
             </FluentStack>
         </FluentDialogBody>
     </FluentDialog>
@@ -177,8 +177,8 @@
     var isEdit = _editingId != Guid.Empty;
     var model = isEdit ? _edit : _create;
 
-    <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 680px;"
-                  OnDismiss="@((DialogEventArgs _) => { if (isEdit) CancelEdit(); else HideCreate(); })">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 680px;"
+                  @ondialogdismiss="@((DialogEventArgs _) => DismissForm())">
         <FluentDialogBody>
             <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">@(isEdit ? "Edit Activity" : "Add Activity")</FluentLabel>
             <EditForm Model="@model" OnValidSubmit="@(isEdit ? SaveEdit : CreateActivity)">
@@ -194,13 +194,13 @@
                                   Disabled="@isEdit"
                                   Style="width: 100%;" />
 
-                    <FluentTextField @bind-Value="model.Name" Label="Activity Name" Required Style="width: 100%;" Placeholder="Enter activity name..." />
+                    <FluentTextField @bind-Value="model.Name" Immediate="true" Label="Activity Name" Required Style="width: 100%;" Placeholder="Enter activity name..." />
 
-                    <FluentTextArea @bind-Value="model.Description" Label="Description" Style="width: 100%;" Rows="3" Placeholder="Brief description of the activity..." />
+                    <FluentTextArea @bind-Value="model.Description" Immediate="true" Label="Description" Style="width: 100%;" Rows="3" Placeholder="Brief description of the activity..." />
 
-                    <FluentTextArea @bind-Value="model.Rules" Label="Rules" Style="width: 100%;" Rows="4" Placeholder="Rules for this activity..." />
+                    <FluentTextArea @bind-Value="model.Rules" Immediate="true" Label="Rules" Style="width: 100%;" Rows="4" Placeholder="Rules for this activity..." />
 
-                    <FluentTextArea @bind-Value="model.SetupRequirements" Label="Setup Requirements" Style="width: 100%;" Rows="3" Placeholder="What's needed to set up this activity..." />
+                    <FluentTextArea @bind-Value="model.SetupRequirements" Immediate="true" Label="Setup Requirements" Style="width: 100%;" Rows="3" Placeholder="What's needed to set up this activity..." />
 
                     @* Side-by-side theme/holiday multi-select *@
                     <FluentGrid Spacing="3">
@@ -238,7 +238,7 @@
 
                     <ApiErrorBar Message="@_dialogError" />
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
-                        <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => { if (isEdit) CancelEdit(); else HideCreate(); })">Cancel</FluentButton>
+                        <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelForm">Cancel</FluentButton>
                         <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving"
                                       IconStart="@(isEdit ? new Size16.Save() : (Icon)new Size16.Add())">
                             @(isEdit ? "Save Changes" : "Add Activity")
@@ -250,6 +250,13 @@
     </FluentDialog>
 }
 
+@if (_confirm is { } confirm)
+{
+    <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
+                   CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => _confirm = null)" />
+}
+
 @code {
     private List<ActivityEntity>? _activities;
     private List<GameEntity>? _games;
@@ -259,8 +266,16 @@
     private ActivityEntity _edit = NewActivity();
     private Guid _editingId;
     private bool _showCreate;
+    // Set by the save that runs; only that save clears it, never a dismiss.
     private bool _saving;
     private bool _savingComments;
+    // The open Add or Edit dialog, and the open details dialog: a save only touches the dialog it started from.
+    private readonly DialogSession _form = new();
+    private readonly DialogSession _details = new();
+    // The row whose Duplicate or Delete is running.
+    private readonly RowAction _rows = new();
+    // The open question (delete or discard), if any.
+    private ConfirmRequest? _confirm;
     private string _search = string.Empty;
     private GameEntity? _filterGame;
     private ActivityEntity? _detailActivity;
@@ -317,22 +332,25 @@
 
     private static ActivityEntity NewActivity() => new() { Name = string.Empty };
 
-    private void ShowCreate() { _create = NewActivity(); _dialogError = null; _showCreate = true; }
-    private void HideCreate() { _showCreate = false; _dialogError = null; }
-
-    private async Task CreateActivity()
+    private void ShowCreate()
     {
-        if (_saving) return;
-        _saving = true;
-        try
-        {
-            _dialogError = await ApiResult.SendAsync(() => ActivitySvc.CreateAsync(_create));
-            if (_dialogError is not null) return;
-            _showCreate = false;
-            await Reload();
-        }
-        finally { _saving = false; }
+        _create = NewActivity();
+        _dialogError = null;
+        _showCreate = true;
+        _form.Open(() => FormFields(_create));
     }
+
+    // The bound fields of the Add or Edit dialog, compared to tell unsaved changes.
+    private static object FormFields(ActivityEntity a) =>
+        new { a.GameId, a.Name, a.Description, a.Rules, a.SetupRequirements, a.ThemeIds, a.HolidayIds };
+
+    // The Cancel button closes at once without asking, but never while the save runs.
+    private void CancelForm() { if (!_saving) CloseForm(); }
+    private void CloseForm() { _showCreate = false; _editingId = Guid.Empty; _dialogError = null; _form.Close(); }
+    // Overlay click or Escape.
+    private void DismissForm() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseForm);
+
+    private Task CreateActivity() => SaveForm(_create, ActivitySvc.CreateAsync);
 
     private void ShowEdit(ActivityEntity a)
     {
@@ -344,19 +362,27 @@
             Rules = a.Rules, ThemeIds = [.. a.ThemeIds], HolidayIds = [.. a.HolidayIds],
             SetupRequirements = a.SetupRequirements, Comments = a.Comments
         };
+        _form.Open(() => FormFields(_edit));
     }
 
-    private void CancelEdit() { _editingId = Guid.Empty; _saving = false; _dialogError = null; }
+    private Task SaveEdit() => SaveForm(_edit, ActivitySvc.UpdateAsync);
 
-    private async Task SaveEdit()
+    private async Task SaveForm(ActivityEntity activity, Func<ActivityEntity, Task<HttpResponseMessage>> send)
     {
         if (_saving) return;
         _saving = true;
+        var token = _form.Current;
         try
         {
-            _dialogError = await ApiResult.SendAsync(() => ActivitySvc.UpdateAsync(_edit));
-            if (_dialogError is not null) return;
-            CancelEdit();
+            var error = await ApiResult.SendAsync(() => send(activity));
+            var current = _form.IsCurrent(token);
+            if (error is not null)
+            {
+                if (current) _dialogError = error;
+                else _actionError = $"The activity was not saved. {error}";
+                return;
+            }
+            if (current) CloseForm();
             await Reload();
         }
         finally { _saving = false; }
@@ -368,7 +394,11 @@
         _detailComments = a.Comments ?? string.Empty;
         _detailCommentsDirty = false;
         _commentsError = null;
+        _details.Open();
     }
+
+    // The Close buttons close at once without asking, but never while the comment save runs.
+    private void CancelDetails() { if (!_savingComments) CloseDetails(); }
 
     private void CloseDetails()
     {
@@ -376,7 +406,11 @@
         _detailComments = string.Empty;
         _detailCommentsDirty = false;
         _commentsError = null;
+        _details.Close();
     }
+
+    // Overlay click or Escape: unsaved comment text asks first.
+    private void DismissDetails() => _confirm = ConfirmRequest.ForDismiss(_confirm, _savingComments, _detailCommentsDirty, CloseDetails);
 
     private void OnDetailCommentsChanged() =>
         _detailCommentsDirty = _detailComments != (_detailActivity?.Comments ?? string.Empty);
@@ -385,19 +419,26 @@
     {
         if (_detailActivity is null || _savingComments) return;
         _savingComments = true;
+        var token = _details.Current;
         try
         {
             var activity = _detailActivity;
-            var error = await ApiResult.SendAsync(() => ActivitySvc.UpdateCommentsAsync(activity.Id, _detailComments));
+            var text = _detailComments;
+            var error = await ApiResult.SendAsync(() => ActivitySvc.UpdateCommentsAsync(activity.Id, text));
+            var current = _details.IsCurrent(token);
             if (error is not null)
             {
                 // Keep the typed text and the dirty flag so Save stays enabled for a retry.
-                _commentsError = ApiResult.CommentsNotSaved(error);
+                if (current) _commentsError = ApiResult.CommentsNotSaved(error);
+                else _actionError = ApiResult.CommentsNotSaved(error);
                 return;
             }
-            _commentsError = null;
-            activity.Comments = _detailComments;
-            _detailCommentsDirty = false;
+            activity.Comments = text;
+            if (current)
+            {
+                _commentsError = null;
+                _detailCommentsDirty = _detailComments != text;
+            }
             await Reload();
         }
         finally { _savingComments = false; }
@@ -411,6 +452,19 @@
         await Reload();
     }
 
+    private void AskDelete(ActivityEntity a)
+    {
+        if (_rows.BusyId is not null) return;
+        _confirm = ConfirmRequest.Delete("Delete activity", $"Delete {a.Name}? This cannot be undone.", () => _rows.RunAsync(a.Id, () => Delete(a.Id)));
+    }
+
+    private async Task Confirmed(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        await confirm.OnConfirm();
+    }
+
     private async Task Delete(Guid id)
     {
         var error = await ApiResult.SendAsync(() => ActivitySvc.DeleteAsync(id));
@@ -419,4 +473,3 @@
         await Reload();
     }
 }
-
