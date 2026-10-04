@@ -124,6 +124,20 @@ internal static class TableMocks
         return table;
     }
 
+    /// <summary>
+    /// <see cref="Table{T}"/>, except that a query evaluates the filter it is given, as storage does,
+    /// instead of answering with every row. For tests that put rows of several partitions in one
+    /// table. Rows are still keyed by RowKey alone, so give every row its own RowKey.
+    /// </summary>
+    public static Mock<TableClient> FilteringTable<T>(ConcurrentDictionary<string, T> rows) where T : class, ITableEntity, new()
+    {
+        var table = Table(rows);
+        table.Setup(t => t.QueryAsync(It.IsAny<Expression<Func<T, bool>>>(), It.IsAny<int?>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Returns((Expression<Func<T, bool>> filter, int? _, IEnumerable<string> _, CancellationToken _) =>
+                AsyncPageable<T>.FromPages([Page<T>.FromValues(rows.Values.Where(filter.Compile()).ToList(), null, Mock.Of<Response>())]));
+        return table;
+    }
+
     private static Response Store<T>(ConcurrentDictionary<string, T> rows, T row) where T : class, ITableEntity
     {
         row.ETag = NextETag();
