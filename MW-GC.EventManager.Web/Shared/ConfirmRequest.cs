@@ -27,15 +27,18 @@ public sealed class ConfirmRequest(string title, string message, string confirmT
     /// What overlay click or Escape on a form dialog does; returns the page's next open question.
     /// While a save runs, nothing. With unsaved changes, ask. Otherwise close at once.
     /// The Cancel button does not come here: it closes at once, because the user chose it.
+    /// A dialog that holds a select passes <paramref name="closeNow"/> for the clean case, so the
+    /// close can wait for the select to finish with the same Escape (see DialogSession.CloseAfterKeyAsync);
+    /// Discard still runs <paramref name="close"/>, since it is a click and no key on the select.
     /// </summary>
-    public static ConfirmRequest? ForDismiss(ConfirmRequest? pending, bool saving, bool dirty, Action close)
+    public static ConfirmRequest? ForDismiss(ConfirmRequest? pending, bool saving, bool dirty, Action close, Action? closeNow = null)
     {
         // Every open dialog listens for Escape and the form dialog, opened first, hears it first;
         // so an Escape while the question is open lands here and answers it with Keep editing.
         if (pending is not null) return null;
         if (saving) return null;
         if (dirty) return Discard(close);
-        close();
+        (closeNow ?? close)();
         return null;
     }
 }
