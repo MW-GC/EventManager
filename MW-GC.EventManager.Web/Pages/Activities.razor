@@ -348,8 +348,14 @@
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelForm() { if (!_saving) CloseForm(); }
     private void CloseForm() { _showCreate = false; _editingId = Guid.Empty; _dialogError = null; _form.Close(); }
-    // Overlay click or Escape.
-    private void DismissForm() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseForm);
+    // Overlay click or Escape. A clean form closes once the Game select is done with the same Escape (#105).
+    private Task DismissForm()
+    {
+        var closing = Task.CompletedTask;
+        _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseForm,
+            closeNow: () => closing = _form.CloseAfterKeyAsync(CloseForm));
+        return closing;
+    }
 
     private Task CreateActivity() => SaveForm(_create, ActivitySvc.CreateAsync);
 

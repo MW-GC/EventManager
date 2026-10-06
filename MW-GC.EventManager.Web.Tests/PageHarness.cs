@@ -31,6 +31,12 @@ internal sealed class PageHarness : IDisposable
     public IRenderedComponent<TComponent> Render<TComponent>(Action<ComponentParameterCollectionBuilder<TComponent>> parameters)
         where TComponent : IComponent => _context.Render(parameters);
 
+    // bUnit's JS interop, so a test can answer one JS call its own way.
+    public BunitJSInterop JSInterop => _context.JSInterop;
+
+    // Completes when a component throws and nothing catches it: in the app, the error boundary.
+    public Task<Exception> UnhandledException => _context.Renderer.UnhandledException;
+
     public void Dispose() => _context.Dispose();
 }
 

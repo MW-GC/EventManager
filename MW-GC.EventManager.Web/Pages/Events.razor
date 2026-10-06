@@ -597,8 +597,14 @@
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelCustomize() { if (!_generating) CloseCustomize(); }
     private void CloseCustomize() { _showCustomize = false; _customize.Close(); }
-    // Overlay click or Escape.
-    private void DismissCustomize() => _confirm = ConfirmRequest.ForDismiss(_confirm, _generating, _customize.IsDirty, CloseCustomize);
+    // Overlay click or Escape. A clean dialog closes once the slot selects are done with the same Escape (#105).
+    private Task DismissCustomize()
+    {
+        var closing = Task.CompletedTask;
+        _confirm = ConfirmRequest.ForDismiss(_confirm, _generating, _customize.IsDirty, CloseCustomize,
+            closeNow: () => closing = _customize.CloseAfterKeyAsync(CloseCustomize));
+        return closing;
+    }
 
     // An edited slot is its stored snapshot until the user changes its Game or Activity, so a
     // later library edit or delete never rewrites it. Null when the slot has been changed.

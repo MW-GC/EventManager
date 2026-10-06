@@ -39,6 +39,25 @@ public sealed class DialogSession
         _snapshot = null;
     }
 
+    /// <summary>
+    /// Runs <paramref name="close"/> once the key that dismissed the dialog is done with it, if this
+    /// session is still the open one then. Escape on a Fluent UI select reaches the select as well:
+    /// Fluent UI 4.14.4 (ListComponentBase.OnKeydownHandlerAsync) waits one millisecond and then calls
+    /// the select's JS module. Closing at once removes the select and disposes that module first, so
+    /// that call throws and the page falls into the error boundary (#105).
+    /// The select starts its wait just before or just after this dismiss, in the same key event, and
+    /// two timers that come due in the same tick may run in either order. Each wait here starts when
+    /// the one before it ended, so by the time the third starts the select's wait is over, and the
+    /// close runs after the select made its call.
+    /// </summary>
+    public async Task CloseAfterKeyAsync(Action close)
+    {
+        var token = _id;
+        for (var wait = 0; wait < 3; wait++)
+            await Task.Delay(1);
+        if (IsCurrent(token)) close();
+    }
+
     /// <summary>The bound fields differ from what they were when the dialog opened.</summary>
     public bool IsDirty => _fields is not null && Serialize(_fields()) != _snapshot;
 
