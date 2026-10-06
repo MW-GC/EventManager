@@ -1,12 +1,16 @@
 @inherits ComponentBase
 
+@* The page's one h1 (App.razor's FocusOnNavigate moves focus here after navigation, hence
+   tabindex="-1") and the browser tab title, "<Page> – Event Manager". *@
+<PageTitle>@Title – Event Manager</PageTitle>
+
 <FluentStack Orientation="Orientation.Horizontal"
              HorizontalAlignment="HorizontalAlignment.SpaceBetween"
              VerticalAlignment="VerticalAlignment.Top"
              Style="margin-bottom: 24px;"
              Wrap="true">
     <FluentStack Orientation="Orientation.Vertical" VerticalGap="4">
-        <FluentLabel Typo="Typography.H3" Style="margin: 0;">@Title</FluentLabel>
+        <h1 class="page-title" tabindex="-1">@Title</h1>
         @if (!string.IsNullOrEmpty(Subtitle))
         {
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); max-width: 72ch;">@Subtitle</FluentLabel>

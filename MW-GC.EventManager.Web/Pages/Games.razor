@@ -4,6 +4,7 @@
 @inject ActivityService ActivitySvc
 @inject ThemeService ThemeSvc
 @inject HolidayService HolidaySvc
+@inject FocusReturn Focus
 
 <PageHeader Title="Games" Subtitle="Manage your game library" />
 <ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
@@ -30,19 +31,21 @@
                          VerticalAlignment="VerticalAlignment.Center"
                          Style="margin-bottom: 16px;"
                          Wrap="true">
-                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search games..." />
+                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search games..." aria-label="Search games" />
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
                     <FluentButton Appearance="@(_viewMode == ViewMode.Table ? Appearance.Accent : Appearance.Outline)"
                                   Size="ButtonSize.Small"
                                   OnClick="@(() => _viewMode = ViewMode.Table)"
                                   IconStart="@(new Size16.TextBulletListSquare())"
-                                  Title="Table view" />
+                                  Title="Table view"
+                                  aria-pressed="@(_viewMode == ViewMode.Table ? "true" : "false")" />
                     <FluentButton Appearance="@(_viewMode == ViewMode.Cards ? Appearance.Accent : Appearance.Outline)"
                                   Size="ButtonSize.Small"
                                   OnClick="@(() => _viewMode = ViewMode.Cards)"
                                   IconStart="@(new Size16.Grid())"
-                                  Title="Card view" />
-                    <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())">
+                                  Title="Card view"
+                                  aria-pressed="@(_viewMode == ViewMode.Cards ? "true" : "false")" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())" data-focus-key="add">
                         Add Game
                     </FluentButton>
                 </FluentStack>
@@ -77,10 +80,12 @@
                     </TemplateColumn>
                     <TemplateColumn Title="Actions">
                         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {context.Name}")" data-focus-key="@($"edit-{context.Id}")"
+                                          Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
                                 <FluentIcon Value="@(new Size16.Edit())" />
                             </FluentButton>
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {context.Name}")" data-focus-key="@($"delete-{context.Id}")"
+                                          Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
                                 <FluentIcon Value="@(new Size16.Delete())" />
                             </FluentButton>
                         </FluentStack>
@@ -122,8 +127,8 @@
                                     }
 
                                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Style="margin-top: auto;">
-                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_rows.IsBusy(game.Id)" OnClick="@(() => ShowEdit(game))" IconStart="@(new Size16.Edit())">Edit</FluentButton>
-                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_rows.Running" OnClick="@(() => AskDelete(game))" IconStart="@(new Size16.Delete())">Delete</FluentButton>
+                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@($"edit-{game.Id}")" Disabled="@_rows.IsBusy(game.Id)" OnClick="@(() => ShowEdit(game))" IconStart="@(new Size16.Edit())">Edit</FluentButton>
+                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@($"delete-{game.Id}")" Disabled="@_rows.Running" OnClick="@(() => AskDelete(game))" IconStart="@(new Size16.Delete())">Delete</FluentButton>
                                     </FluentStack>
                                 </FluentStack>
                             </FluentCard>
@@ -138,9 +143,9 @@
 @* Add Game dialog — simple Name + Website like the original *@
 @if (_showCreate)
 {
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 480px;" @ondialogdismiss="@((DialogEventArgs _) => DismissCreate())">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 480px;" AriaLabel="Add Game" @ondialogdismiss="@((DialogEventArgs _) => DismissCreate())">
         <FluentDialogBody>
-            <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Add Game</FluentLabel>
+            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 16px;">Add Game</FluentLabel>
             <EditForm Model="@_create" OnValidSubmit="CreateGame">
                 <DataAnnotationsValidator />
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
@@ -167,9 +172,10 @@
 {
     <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true"
                   Style="@(_editActivities.Count > 0 ? "--dialog-width: 720px;" : "--dialog-width: 480px;")"
+                  AriaLabel="Edit Game"
                   @ondialogdismiss="@((DialogEventArgs _) => DismissEdit())">
         <FluentDialogBody>
-            <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Game</FluentLabel>
+            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Game</FluentLabel>
             <EditForm Model="@_edit" OnValidSubmit="SaveEdit">
                 <DataAnnotationsValidator />
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
@@ -192,7 +198,7 @@
             {
                 <FluentDivider Style="margin: 16px 0;" />
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold">Activities</FluentLabel>
+                    <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold">Activities</FluentLabel>
                     <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint);">Activities for this game</FluentLabel>
                     <FluentDataGrid Items="@_editActivities.AsQueryable()" TGridItem="ActivityEntity" ItemSize="40">
                         <PropertyColumn Property="@(a => a.Name)" Title="Name" Sortable="true" />
@@ -200,11 +206,11 @@
                             <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Wrap="true">
                                 @foreach (var tid in context.ThemeIds)
                                 {
-                                    <FluentBadge Appearance="Appearance.Neutral" Style="font-size: 0.7rem;">@ResolveTheme(tid)</FluentBadge>
+                                    <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveTheme(tid)" Style="font-size: 0.7rem;" />
                                 }
                                 @foreach (var hid in context.HolidayIds)
                                 {
-                                    <FluentBadge Appearance="Appearance.Accent" Style="font-size: 0.7rem;">@ResolveHoliday(hid)</FluentBadge>
+                                    <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveHoliday(hid)" Style="font-size: 0.7rem;" />
                                 }
                             </FluentStack>
                         </TemplateColumn>
@@ -219,7 +225,7 @@
 {
     <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
                    CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
-                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => _confirm = null)" />
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
 }
 
 @code {
@@ -287,11 +293,12 @@
         _dialogError = null;
         _showCreate = true;
         _form.Open(() => new { _create.Name, _create.Website });
+        _ = Focus.RememberAsync("add");
     }
 
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelCreate() { if (!_saving) CloseCreate(); }
-    private void CloseCreate() { _showCreate = false; _dialogError = null; _form.Close(); }
+    private void CloseCreate() { _showCreate = false; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
     // Overlay click or Escape.
     private void DismissCreate() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseCreate);
 
@@ -331,11 +338,12 @@
         };
         _editActivities = _activities?.Where(a => a.GameId == g.Id).ToList() ?? [];
         _form.Open(() => new { _edit.Name, _edit.Website });
+        _ = Focus.RememberAsync($"edit-{g.Id}");
     }
 
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelEdit() { if (!_saving) CloseEdit(); }
-    private void CloseEdit() { _editingId = Guid.Empty; _editActivities = []; _dialogError = null; _form.Close(); }
+    private void CloseEdit() { _editingId = Guid.Empty; _editActivities = []; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
     // Overlay click or Escape.
     private void DismissEdit() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseEdit);
 
@@ -365,6 +373,7 @@
     private void AskDelete(GameEntity g)
     {
         if (_rows.BusyId is not null) return;
+        _ = Focus.RememberAsync($"delete-{g.Id}");
         var count = GetActivityCount(g.Id);
         var message = count == 0
             ? $"Delete {g.Name}? This cannot be undone."
@@ -377,6 +386,17 @@
         if (_confirm != confirm) return;
         _confirm = null;
         await confirm.OnConfirm();
+        // A Discard closed its form dialog, which returned focus itself. After a delete the row is
+        // gone (focus goes to the heading) or, when it failed, its Delete button is enabled again.
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
+    }
+
+    // Keep editing leaves focus in the form dialog; a cancelled delete returns it to the Delete button.
+    private void Cancelled(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
     }
 
     private async Task Delete(Guid id)

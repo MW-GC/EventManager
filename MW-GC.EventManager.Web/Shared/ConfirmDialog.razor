@@ -5,7 +5,7 @@
 <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 420px;" Class="confirm-dialog"
               AriaLabel="@Title" @ondialogdismiss="@((DialogEventArgs _) => Answer(false))">
     <FluentDialogBody>
-        <FluentLabel Typo="Typography.H4" Style="margin-bottom: 12px;">@Title</FluentLabel>
+        <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 12px;">@Title</FluentLabel>
         <FluentLabel Class="confirm-message">@Message</FluentLabel>
         <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 20px;">
             <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Answer(false))">@CancelText</FluentButton>

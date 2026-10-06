@@ -23,7 +23,11 @@ internal sealed class PageHarness : IDisposable
         _context.Services.AddSingleton(new EventService(http));
         _context.Services.AddSingleton(new ThemeService(http));
         _context.Services.AddSingleton(new HolidayService(http));
+        _context.Services.AddScoped<FocusReturn>();
     }
+
+    // A FocusReturn for a page built without a renderer (new Events()): its JS calls go nowhere.
+    public static FocusReturn LooseFocus() => new(new BunitJSInterop { Mode = JSRuntimeMode.Loose }.JSRuntime);
 
     public IRenderedComponent<TPage> Render<TPage>() where TPage : IComponent => _context.Render<TPage>();
 

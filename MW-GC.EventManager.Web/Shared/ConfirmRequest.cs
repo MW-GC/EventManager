@@ -14,6 +14,12 @@ public sealed class ConfirmRequest(string title, string message, string confirmT
     public bool Destructive { get; } = destructive;
     public Func<Task> OnConfirm { get; } = onConfirm;
 
+    /// <summary>
+    /// Asked over an open form dialog (Discard changes?). Answering it leaves focus to that dialog,
+    /// which returns focus to its own opener when it closes; any other question returns focus itself.
+    /// </summary>
+    public bool OverDialog { get; private init; }
+
     /// <summary>Asks before a delete; Cancel leaves everything as it was and sends nothing.</summary>
     public static ConfirmRequest Delete(string title, string message, Func<Task> delete) =>
         new(title, message, "Delete", "Cancel", true, delete);
@@ -21,7 +27,7 @@ public sealed class ConfirmRequest(string title, string message, string confirmT
     /// <summary>Asked when a dialog with unsaved changes is dismissed by overlay click or Escape.</summary>
     public static ConfirmRequest Discard(Action discard) =>
         new("Discard changes?", "Your changes in this dialog have not been saved.", "Discard", "Keep editing", true,
-            () => { discard(); return Task.CompletedTask; });
+            () => { discard(); return Task.CompletedTask; }) { OverDialog = true };
 
     /// <summary>
     /// What overlay click or Escape on a form dialog does; returns the page's next open question.

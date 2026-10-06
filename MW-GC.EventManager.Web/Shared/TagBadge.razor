@@ -1,0 +1,17 @@
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@* A Theme or Holiday tag on an Activity. The two kinds differ by more than colour: each has its own
+   icon, and a screen reader hears "Theme: " or "Holiday: " before the name. *@
+
+<FluentBadge Appearance="@(Kind == TagKind.Holiday ? Appearance.Accent : Appearance.Neutral)" Style="@Style" Class="@($"tag-badge tag-{Kind.ToString().ToLowerInvariant()}")">
+    <FluentIcon Value="@(Kind == TagKind.Holiday ? new Size16.CalendarStar() : (Icon)new Size16.Tag())"
+                Color="Color.Custom" CustomColor="currentColor" aria-hidden="true"
+                Style="width: 1em; height: 1em; margin-right: 3px; vertical-align: -0.125em;" /><span class="visually-hidden">@(Kind == TagKind.Holiday ? "Holiday: " : "Theme: ")</span>@Text
+</FluentBadge>
+
+@code {
+    [Parameter] public TagKind Kind { get; set; }
+    [Parameter] public string Text { get; set; } = string.Empty;
+    [Parameter] public string? Style { get; set; }
+
+    public enum TagKind { Theme, Holiday }
+}

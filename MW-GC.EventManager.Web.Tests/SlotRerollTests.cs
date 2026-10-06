@@ -26,6 +26,7 @@ public class SlotRerollTests
         replacement = Activity(gameA);
         replacement.ThemeIds = [theme];
         replacement.HolidayIds = [holiday];
+        typeof(Events).GetProperty("Focus", Private)!.SetValue(page, PageHarness.LooseFocus());
         Set("_games", new List<GameEntity> { new() { Id = gameA }, new() { Id = gameB } });
         Set("_activities", new List<ActivityEntity> { current, other, replacement });
         AddSlot(current);

@@ -1,6 +1,7 @@
 @page "/themes"
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject ThemeService ThemeSvc
+@inject FocusReturn Focus
 
 <PageHeader Title="Themes" Subtitle="Manage activity themes for event filtering" />
 <ApiErrorBar Message="@_loads.Message" OnRetry="Reload" />
@@ -27,15 +28,17 @@
                          VerticalAlignment="VerticalAlignment.Center"
                          Style="margin-bottom: 16px;"
                          Wrap="true">
-                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search themes..." />
+                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search themes..." aria-label="Search themes" />
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
                     <FluentButton Appearance="@(_viewMode == ViewMode.Table ? Appearance.Accent : Appearance.Outline)"
                                   Size="ButtonSize.Small" OnClick="@(() => _viewMode = ViewMode.Table)"
-                                  IconStart="@(new Size16.TextBulletListSquare())" Title="Table view" />
+                                  IconStart="@(new Size16.TextBulletListSquare())" Title="Table view"
+                                  aria-pressed="@(_viewMode == ViewMode.Table ? "true" : "false")" />
                     <FluentButton Appearance="@(_viewMode == ViewMode.Cards ? Appearance.Accent : Appearance.Outline)"
                                   Size="ButtonSize.Small" OnClick="@(() => _viewMode = ViewMode.Cards)"
-                                  IconStart="@(new Size16.Grid())" Title="Card view" />
-                    <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())">Add Theme</FluentButton>
+                                  IconStart="@(new Size16.Grid())" Title="Card view"
+                                  aria-pressed="@(_viewMode == ViewMode.Cards ? "true" : "false")" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())" data-focus-key="add">Add Theme</FluentButton>
                 </FluentStack>
             </FluentStack>
 
@@ -45,10 +48,12 @@
                     <PropertyColumn Property="@(t => t.Name)" Title="Name" Sortable="true" />
                     <TemplateColumn Title="Actions">
                         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {context.Name}")" data-focus-key="@($"edit-{context.Id}")"
+                                          Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
                                 <FluentIcon Value="@(new Size16.Edit())" />
                             </FluentButton>
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
+                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {context.Name}")" data-focus-key="@($"delete-{context.Id}")"
+                                          Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
                                 <FluentIcon Value="@(new Size16.Delete())" />
                             </FluentButton>
                         </FluentStack>
@@ -65,8 +70,10 @@
                                 <FluentIcon Value="@(new Size24.Color())" Color="Color.Accent" Style="margin-bottom: 8px;" />
                                 <FluentLabel Weight="FontWeight.Bold">@theme.Name</FluentLabel>
                                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.Center" HorizontalGap="4" Style="margin-top: 8px;">
-                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_rows.IsBusy(theme.Id)" OnClick="@(() => ShowEdit(theme))" IconStart="@(new Size16.Edit())" />
-                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_rows.Running" OnClick="@(() => AskDelete(theme))" IconStart="@(new Size16.Delete())" />
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {theme.Name}")" data-focus-key="@($"edit-{theme.Id}")"
+                                                  Disabled="@_rows.IsBusy(theme.Id)" OnClick="@(() => ShowEdit(theme))" IconStart="@(new Size16.Edit())" />
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {theme.Name}")" data-focus-key="@($"delete-{theme.Id}")"
+                                                  Disabled="@_rows.Running" OnClick="@(() => AskDelete(theme))" IconStart="@(new Size16.Delete())" />
                                 </FluentStack>
                             </FluentCard>
                         </FluentGridItem>
@@ -79,9 +86,9 @@
 
 @if (_showCreate)
 {
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 400px;" @ondialogdismiss="@((DialogEventArgs _) => DismissCreate())">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 400px;" AriaLabel="Add Theme" @ondialogdismiss="@((DialogEventArgs _) => DismissCreate())">
         <FluentDialogBody>
-            <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Add Theme</FluentLabel>
+            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 16px;">Add Theme</FluentLabel>
             <EditForm Model="@_create" OnValidSubmit="Create">
                 <DataAnnotationsValidator />
                 <FluentTextField @bind-Value="_create.Name" Immediate="true" Label="Name" Required Style="width: 100%;" Placeholder="Enter theme name..." />
@@ -97,9 +104,9 @@
 
 @if (_editingId != Guid.Empty)
 {
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 400px;" @ondialogdismiss="@((DialogEventArgs _) => DismissEdit())">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 400px;" AriaLabel="Edit Theme" @ondialogdismiss="@((DialogEventArgs _) => DismissEdit())">
         <FluentDialogBody>
-            <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Theme</FluentLabel>
+            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Theme</FluentLabel>
             <EditForm Model="@_edit" OnValidSubmit="SaveEdit">
                 <DataAnnotationsValidator />
                 <FluentTextField @bind-Value="_edit.Name" Immediate="true" Label="Name" Required Style="width: 100%;" />
@@ -117,7 +124,7 @@
 {
     <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
                    CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
-                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => _confirm = null)" />
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
 }
 
 @code {
@@ -160,11 +167,12 @@
         _dialogError = null;
         _showCreate = true;
         _form.Open(() => new { _create.Name });
+        _ = Focus.RememberAsync("add");
     }
 
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelCreate() { if (!_saving) CloseCreate(); }
-    private void CloseCreate() { _showCreate = false; _dialogError = null; _form.Close(); }
+    private void CloseCreate() { _showCreate = false; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
     // Overlay click or Escape.
     private void DismissCreate() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseCreate);
 
@@ -196,11 +204,12 @@
         _editingId = t.Id;
         _edit = new ThemeEntity { Id = t.Id, Name = t.Name };
         _form.Open(() => new { _edit.Name });
+        _ = Focus.RememberAsync($"edit-{t.Id}");
     }
 
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelEdit() { if (!_saving) CloseEdit(); }
-    private void CloseEdit() { _editingId = Guid.Empty; _dialogError = null; _form.Close(); }
+    private void CloseEdit() { _editingId = Guid.Empty; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
     // Overlay click or Escape.
     private void DismissEdit() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseEdit);
 
@@ -229,6 +238,7 @@
     private void AskDelete(ThemeEntity t)
     {
         if (_rows.BusyId is not null) return;
+        _ = Focus.RememberAsync($"delete-{t.Id}");
         _confirm = ConfirmRequest.Delete("Delete theme", $"Delete {t.Name}? This cannot be undone.", () => _rows.RunAsync(t.Id, () => Delete(t.Id)));
     }
 
@@ -237,6 +247,17 @@
         if (_confirm != confirm) return;
         _confirm = null;
         await confirm.OnConfirm();
+        // A Discard closed its form dialog, which returned focus itself. After a delete the row is
+        // gone (focus goes to the heading) or, when it failed, its Delete button is enabled again.
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
+    }
+
+    // Keep editing leaves focus in the form dialog; a cancelled delete returns it to the Delete button.
+    private void Cancelled(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
     }
 
     private async Task Delete(Guid id)
