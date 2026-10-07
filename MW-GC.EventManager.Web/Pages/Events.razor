@@ -37,15 +37,15 @@
                          VerticalAlignment="VerticalAlignment.Center"
                          Style="margin-bottom: 16px;"
                          Wrap="true">
-                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search events..." aria-label="Search events" />
+                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Immediate="true" ImmediateDelay="300" Placeholder="Search events..." aria-label="Search events" />
                 <FluentButton Appearance="Appearance.Accent" OnClick="ShowCustomize" IconStart="@(new Size16.Add())" data-focus-key="add">
                     Create Event
                 </FluentButton>
             </FluentStack>
 
-            <FluentDataGrid Items="@Filtered" TGridItem="EventEntity" Virtualize="true" ItemSize="44">
+            <FluentDataGrid Items="@Filtered" TGridItem="EventEntity" Virtualize="true" ItemSize="44" GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 120px">
                 <PropertyColumn Property="@(e => e.Name)" Title="Name" Sortable="true" />
-                <TemplateColumn Title="Date" Sortable="true" SortBy="@_dateSort">
+                <TemplateColumn Title="Date" Sortable="true" SortBy="@_dateSort" IsDefaultSortColumn="true" InitialSortDirection="SortDirection.Descending">
                     @context.Date.ToLocalTime().ToString("g")
                 </TemplateColumn>
                 <TemplateColumn Title="Selections">
@@ -150,7 +150,7 @@
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific themes</FluentLabel>
                             @if (_themes is not null)
                             {
-                                <div role="group" aria-label="Filter by themes">
+                                <div style="max-height: 160px; overflow-y: auto;" role="group" aria-label="Filter by themes">
                                     @foreach (var theme in _themes)
                                     {
                                         <FluentCheckbox Label="@theme.Name"
@@ -167,7 +167,7 @@
                             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific holidays</FluentLabel>
                             @if (_holidays is not null)
                             {
-                                <div role="group" aria-label="Filter by holidays">
+                                <div style="max-height: 160px; overflow-y: auto;" role="group" aria-label="Filter by holidays">
                                     @foreach (var holiday in _holidays)
                                     {
                                         <FluentCheckbox Label="@holiday.Name"

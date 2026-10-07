@@ -28,8 +28,8 @@
                          VerticalAlignment="VerticalAlignment.Center"
                          Style="margin-bottom: 16px;"
                          Wrap="true">
-                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search themes..." aria-label="Search themes" />
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
+                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Immediate="true" ImmediateDelay="300" Placeholder="Search themes..." aria-label="Search themes" />
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center" Wrap="true">
                     <FluentButton Appearance="@(_viewMode == ViewMode.Table ? Appearance.Accent : Appearance.Outline)"
                                   Size="ButtonSize.Small" OnClick="@(() => _viewMode = ViewMode.Table)"
                                   IconStart="@(new Size16.TextBulletListSquare())" Title="Table view"
@@ -45,7 +45,7 @@
             @if (_viewMode == ViewMode.Table)
             {
                 <FluentDataGrid Items="@Filtered" TGridItem="ThemeEntity" Virtualize="true" ItemSize="44">
-                    <PropertyColumn Property="@(t => t.Name)" Title="Name" Sortable="true" />
+                    <PropertyColumn Property="@(t => t.Name)" Title="Name" Sortable="true" IsDefaultSortColumn="true" />
                     <TemplateColumn Title="Actions">
                         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
                             <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {context.Name}")" data-focus-key="@($"edit-{context.Id}")"
