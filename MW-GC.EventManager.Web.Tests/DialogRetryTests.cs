@@ -74,6 +74,7 @@ public class DialogRetryTests
         void Set(string name, object value) => typeof(Events).GetField(name, flags)!.SetValue(page, value);
         object? Get(string name) => typeof(Events).GetField(name, flags)!.GetValue(page);
         Task Save() => (Task)typeof(Events).GetMethod("SaveCustomizedEvent", flags)!.Invoke(page, null)!;
+        typeof(Events).GetProperty("Focus", flags)!.SetValue(page, PageHarness.LooseFocus());
         var selection = input.Selections[0];
         Set("_games", new List<GameEntity> { new() { Id = selection.Game.Id, Name = selection.Game.Name } });
         Set("_activities", new List<ActivityEntity> { new() { Id = selection.Activity.Id, GameId = selection.Game.Id, Name = selection.Activity.Name } });

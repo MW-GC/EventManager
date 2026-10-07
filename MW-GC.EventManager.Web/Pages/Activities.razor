@@ -4,6 +4,7 @@
 @inject GameService GameSvc
 @inject ThemeService ThemeSvc
 @inject HolidayService HolidaySvc
+@inject FocusReturn Focus
 
 <PageHeader Title="Activities" Subtitle="Manage game activities, rules, and descriptions" />
 <ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
@@ -31,7 +32,7 @@
                          Style="margin-bottom: 16px;"
                          Wrap="true">
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                    <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search activities..." />
+                    <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search activities..." aria-label="Search activities" />
                     <FluentSelect TOption="GameEntity"
                                   Items="@_games"
                                   OptionValue="@(g => g.Id.ToString())"
@@ -39,9 +40,10 @@
                                   @bind-SelectedOption="_filterGame"
                                   @bind-SelectedOption:after="HandleSearch"
                                   Placeholder="All games"
+                                  aria-label="Filter by game"
                                   Style="min-width: 180px;" />
                 </FluentStack>
-                <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())">
+                <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())" data-focus-key="add">
                     Add Activity
                 </FluentButton>
             </FluentStack>
@@ -57,26 +59,30 @@
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Wrap="true">
                         @foreach (var tid in context.ThemeIds)
                         {
-                            <FluentBadge Appearance="Appearance.Neutral" Style="font-size: 0.7rem;">@ResolveName(_themes, tid)</FluentBadge>
+                            <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveName(_themes, tid)" Style="font-size: 0.7rem;" />
                         }
                         @foreach (var hid in context.HolidayIds)
                         {
-                            <FluentBadge Appearance="Appearance.Accent" Style="font-size: 0.7rem;">@ResolveName(_holidays, hid)</FluentBadge>
+                            <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveName(_holidays, hid)" Style="font-size: 0.7rem;" />
                         }
                     </FluentStack>
                 </TemplateColumn>
                 <TemplateColumn Title="Actions">
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" OnClick="@(() => ShowDetails(context))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" aria-label="@($"Details {context.Name}")" data-focus-key="@($"details-{context.Id}")"
+                                      OnClick="@(() => ShowDetails(context))">
                             <FluentIcon Value="@(new Size16.Eye())" />
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {context.Name}")" data-focus-key="@($"edit-{context.Id}")"
+                                      Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
                             <FluentIcon Value="@(new Size16.Edit())" />
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Duplicate" Disabled="@_rows.Running" OnClick="@(() => _rows.RunAsync(context.Id, () => Duplicate(context.Id)))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Duplicate" aria-label="@($"Duplicate {context.Name}")"
+                                      Disabled="@_rows.Running" OnClick="@(() => _rows.RunAsync(context.Id, () => Duplicate(context.Id)))">
                             <FluentIcon Value="@(new Size16.Copy())" />
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {context.Name}")" data-focus-key="@($"delete-{context.Id}")"
+                                      Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
                             <FluentIcon Value="@(new Size16.Delete())" />
                         </FluentButton>
                     </FluentStack>
@@ -89,11 +95,11 @@
 @* Details dialog — sectioned like the original with editable comments *@
 @if (_detailActivity is not null)
 {
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 680px;" @ondialogdismiss="@((DialogEventArgs _) => DismissDetails())">
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 680px;" AriaLabel="@_detailActivity.Name" @ondialogdismiss="@((DialogEventArgs _) => DismissDetails())">
         <FluentDialogBody>
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween" VerticalAlignment="VerticalAlignment.Top" Style="margin-bottom: 4px;">
-                <FluentLabel Typo="Typography.H3">@_detailActivity.Name</FluentLabel>
-                <FluentButton Appearance="Appearance.Stealth" Title="Close" Disabled="@_savingComments" OnClick="CancelDetails">
+                <FluentLabel aria-level="2" Typo="Typography.H3">@_detailActivity.Name</FluentLabel>
+                <FluentButton Appearance="Appearance.Stealth" Title="Close" aria-label="Close" Disabled="@_savingComments" OnClick="CancelDetails">
                     <FluentIcon Value="@(new Size20.Dismiss())" />
                 </FluentButton>
             </FluentStack>
@@ -107,11 +113,11 @@
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="6" Wrap="true" Style="margin-bottom: 16px;">
                     @foreach (var tid in _detailActivity.ThemeIds)
                     {
-                        <FluentBadge Appearance="Appearance.Neutral">@ResolveName(_themes, tid)</FluentBadge>
+                        <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveName(_themes, tid)" />
                     }
                     @foreach (var hid in _detailActivity.HolidayIds)
                     {
-                        <FluentBadge Appearance="Appearance.Accent">@ResolveName(_holidays, hid)</FluentBadge>
+                        <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveName(_holidays, hid)" />
                     }
                 </FluentStack>
             }
@@ -120,7 +126,7 @@
                 @if (!string.IsNullOrWhiteSpace(_detailActivity.Description))
                 {
                     <div>
-                        <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Description</FluentLabel>
+                        <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Description</FluentLabel>
                         <FluentLabel Style="color: var(--neutral-foreground-rest); line-height: 1.6; white-space: pre-wrap;">@_detailActivity.Description</FluentLabel>
                     </div>
                 }
@@ -130,7 +136,7 @@
                 @if (!string.IsNullOrWhiteSpace(_detailActivity.Rules))
                 {
                     <div>
-                        <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Rules</FluentLabel>
+                        <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Rules</FluentLabel>
                         <FluentLabel Style="color: var(--neutral-foreground-rest); line-height: 1.6; white-space: pre-wrap;">@_detailActivity.Rules</FluentLabel>
                     </div>
                 }
@@ -140,7 +146,7 @@
                 @if (!string.IsNullOrWhiteSpace(_detailActivity.SetupRequirements))
                 {
                     <div>
-                        <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Setup Requirements</FluentLabel>
+                        <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Setup Requirements</FluentLabel>
                         <FluentLabel Style="color: var(--neutral-foreground-rest); line-height: 1.6; white-space: pre-wrap;">@_detailActivity.SetupRequirements</FluentLabel>
                     </div>
                 }
@@ -148,7 +154,7 @@
                 <FluentDivider />
 
                 <div>
-                    <FluentLabel Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments</FluentLabel>
+                    <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments</FluentLabel>
                     <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px;">Track notes about this activity's performance in events</FluentLabel>
                     <FluentTextArea @bind-Value="_detailComments" @bind-Value:after="OnDetailCommentsChanged" Immediate="true" Style="width: 100%;" Rows="4"
                                     Placeholder="Add notes about success, challenges, or improvements..." />
@@ -178,9 +184,10 @@
     var model = isEdit ? _edit : _create;
 
     <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 680px;"
+                  AriaLabel="@(isEdit ? "Edit Activity" : "Add Activity")"
                   @ondialogdismiss="@((DialogEventArgs _) => DismissForm())">
         <FluentDialogBody>
-            <FluentLabel Typo="Typography.H4" Style="margin-bottom: 16px;">@(isEdit ? "Edit Activity" : "Add Activity")</FluentLabel>
+            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 16px;">@(isEdit ? "Edit Activity" : "Add Activity")</FluentLabel>
             <EditForm Model="@model" OnValidSubmit="@(isEdit ? SaveEdit : CreateActivity)">
                 <DataAnnotationsValidator />
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
@@ -210,12 +217,14 @@
                                 <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select applicable themes</FluentLabel>
                                 @if (_themes is not null)
                                 {
-                                    @foreach (var theme in _themes)
-                                    {
-                                        <FluentCheckbox Label="@theme.Name"
-                                                        Value="@model.ThemeIds.Contains(theme.Id)"
-                                                        ValueChanged="@(v => ToggleId(model.ThemeIds, theme.Id, v))" />
-                                    }
+                                    <div role="group" aria-label="Themes">
+                                        @foreach (var theme in _themes)
+                                        {
+                                            <FluentCheckbox Label="@theme.Name"
+                                                            Value="@model.ThemeIds.Contains(theme.Id)"
+                                                            ValueChanged="@(v => ToggleId(model.ThemeIds, theme.Id, v))" />
+                                        }
+                                    </div>
                                 }
                             </FluentCard>
                         </FluentGridItem>
@@ -225,12 +234,14 @@
                                 <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select applicable holidays</FluentLabel>
                                 @if (_holidays is not null)
                                 {
-                                    @foreach (var holiday in _holidays)
-                                    {
-                                        <FluentCheckbox Label="@holiday.Name"
-                                                        Value="@model.HolidayIds.Contains(holiday.Id)"
-                                                        ValueChanged="@(v => ToggleId(model.HolidayIds, holiday.Id, v))" />
-                                    }
+                                    <div role="group" aria-label="Holidays">
+                                        @foreach (var holiday in _holidays)
+                                        {
+                                            <FluentCheckbox Label="@holiday.Name"
+                                                            Value="@model.HolidayIds.Contains(holiday.Id)"
+                                                            ValueChanged="@(v => ToggleId(model.HolidayIds, holiday.Id, v))" />
+                                        }
+                                    </div>
                                 }
                             </FluentCard>
                         </FluentGridItem>
@@ -254,7 +265,7 @@
 {
     <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
                    CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
-                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => _confirm = null)" />
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
 }
 
 @code {
@@ -338,6 +349,7 @@
         _dialogError = null;
         _showCreate = true;
         _form.Open(() => FormFields(_create));
+        _ = Focus.RememberAsync("add");
     }
 
     // The bound fields of the Add or Edit dialog, compared to tell unsaved changes. Theme and Holiday
@@ -347,7 +359,7 @@
 
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelForm() { if (!_saving) CloseForm(); }
-    private void CloseForm() { _showCreate = false; _editingId = Guid.Empty; _dialogError = null; _form.Close(); }
+    private void CloseForm() { _showCreate = false; _editingId = Guid.Empty; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
     // Overlay click or Escape. A clean form closes once the Game select is done with the same Escape (#105).
     private Task DismissForm()
     {
@@ -370,6 +382,7 @@
             SetupRequirements = a.SetupRequirements, Comments = a.Comments
         };
         _form.Open(() => FormFields(_edit));
+        _ = Focus.RememberAsync($"edit-{a.Id}");
     }
 
     private Task SaveEdit() => SaveForm(_edit, ActivitySvc.UpdateAsync);
@@ -402,6 +415,7 @@
         _detailCommentsDirty = false;
         _commentsError = null;
         _details.Open();
+        _ = Focus.RememberAsync($"details-{a.Id}");
     }
 
     // The Close buttons close at once without asking, but never while the comment save runs.
@@ -414,6 +428,7 @@
         _detailCommentsDirty = false;
         _commentsError = null;
         _details.Close();
+        _ = Focus.RestoreAsync();
     }
 
     // Overlay click or Escape: unsaved comment text asks first.
@@ -462,6 +477,7 @@
     private void AskDelete(ActivityEntity a)
     {
         if (_rows.BusyId is not null) return;
+        _ = Focus.RememberAsync($"delete-{a.Id}");
         _confirm = ConfirmRequest.Delete("Delete activity", $"Delete {a.Name}? This cannot be undone.", () => _rows.RunAsync(a.Id, () => Delete(a.Id)));
     }
 
@@ -470,6 +486,17 @@
         if (_confirm != confirm) return;
         _confirm = null;
         await confirm.OnConfirm();
+        // A Discard closed its dialog, which returned focus itself. After a delete the row is
+        // gone (focus goes to the heading) or, when it failed, its Delete button is enabled again.
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
+    }
+
+    // Keep editing leaves focus in the open dialog; a cancelled delete returns it to the Delete button.
+    private void Cancelled(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
     }
 
     private async Task Delete(Guid id)
