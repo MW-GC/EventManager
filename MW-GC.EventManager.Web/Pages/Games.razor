@@ -31,8 +31,8 @@
                          VerticalAlignment="VerticalAlignment.Center"
                          Style="margin-bottom: 16px;"
                          Wrap="true">
-                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search games..." aria-label="Search games" />
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
+                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Immediate="true" ImmediateDelay="300" Placeholder="Search games..." aria-label="Search games" />
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center" Wrap="true">
                     <FluentButton Appearance="@(_viewMode == ViewMode.Table ? Appearance.Accent : Appearance.Outline)"
                                   Size="ButtonSize.Small"
                                   OnClick="@(() => _viewMode = ViewMode.Table)"
@@ -53,8 +53,8 @@
 
             @if (_viewMode == ViewMode.Table)
             {
-                <FluentDataGrid Items="@Filtered" TGridItem="GameEntity" Virtualize="true" ItemSize="44">
-                    <TemplateColumn Title="Name" Sortable="true" SortBy="@(GridSort<GameEntity>.ByAscending(g => g.Name))">
+                <FluentDataGrid Items="@Filtered" TGridItem="GameEntity" Virtualize="true" ItemSize="44" GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 88px">
+                    <TemplateColumn Title="Name" Sortable="true" SortBy="@(GridSort<GameEntity>.ByAscending(g => g.Name))" IsDefaultSortColumn="true">
                         <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="8">
                             @if (!string.IsNullOrWhiteSpace(context.IconUrl))
                             {
@@ -255,7 +255,16 @@
         ? _games!.AsQueryable()
         : _games!.Where(g => g.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)).AsQueryable();
 
-    private int GetActivityCount(Guid gameId) => _activities?.Count(a => a.GameId == gameId) ?? 0;
+    // Activities per Game, counted once whenever the Activities list loads, not on every row render.
+    private Dictionary<Guid, int> _activityCounts = [];
+
+    private int GetActivityCount(Guid gameId) => _activityCounts.GetValueOrDefault(gameId);
+
+    private void SetActivities(List<ActivityEntity>? activities)
+    {
+        _activities = activities ?? [];
+        _activityCounts = _activities.GroupBy(a => a.GameId).ToDictionary(g => g.Key, g => g.Count());
+    }
 
     private string ResolveTheme(Guid id) => _themes?.FirstOrDefault(t => t.Id == id)?.Name ?? id.ToString()[..8];
     private string ResolveHoliday(Guid id) => _holidays?.FirstOrDefault(h => h.Id == id)?.Name ?? id.ToString()[..8];
@@ -279,13 +288,13 @@
 
     private Task LoadAll() => Task.WhenAll(
         _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
-        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []),
+        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, SetActivities),
         _loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? []),
         _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []));
 
     private Task Reload() => Task.WhenAll(
         _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
-        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []));
+        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, SetActivities));
 
     private void ShowCreate()
     {

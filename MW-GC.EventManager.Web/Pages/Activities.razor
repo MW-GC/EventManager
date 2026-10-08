@@ -31,8 +31,8 @@
                          VerticalAlignment="VerticalAlignment.Center"
                          Style="margin-bottom: 16px;"
                          Wrap="true">
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                    <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Placeholder="Search activities..." aria-label="Search activities" />
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" Wrap="true" Style="min-width: 0; max-width: 100%;">
+                    <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Immediate="true" ImmediateDelay="300" Placeholder="Search activities..." aria-label="Search activities" />
                     <FluentSelect TOption="GameEntity"
                                   Items="@_games"
                                   OptionValue="@(g => g.Id.ToString())"
@@ -41,17 +41,18 @@
                                   @bind-SelectedOption:after="HandleSearch"
                                   Placeholder="All games"
                                   aria-label="Filter by game"
-                                  Style="min-width: 180px;" />
+                                  Style="width: 180px; min-width: 0; max-width: 100%;" />
                 </FluentStack>
                 <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())" data-focus-key="add">
                     Add Activity
                 </FluentButton>
             </FluentStack>
 
-            <FluentDataGrid Items="@Filtered" TGridItem="ActivityEntity" Virtualize="true" ItemSize="44">
+            <FluentDataGrid Items="@Filtered" TGridItem="ActivityEntity" Virtualize="true" ItemSize="44" GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 152px">
                 <PropertyColumn Property="@(a => a.Name)" Title="Name" Sortable="true" />
                 <TemplateColumn Title="Game"
                                 Sortable="true"
+                                IsDefaultSortColumn="true"
                                 SortBy="@(GridSort<ActivityEntity>.ByAscending(a => GameName(a.GameId)).ThenAscending(a => a.Name))">
                     @GameName(context.GameId)
                 </TemplateColumn>
@@ -217,7 +218,7 @@
                                 <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select applicable themes</FluentLabel>
                                 @if (_themes is not null)
                                 {
-                                    <div role="group" aria-label="Themes">
+                                    <div style="max-height: 160px; overflow-y: auto;" role="group" aria-label="Themes">
                                         @foreach (var theme in _themes)
                                         {
                                             <FluentCheckbox Label="@theme.Name"
@@ -234,7 +235,7 @@
                                 <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select applicable holidays</FluentLabel>
                                 @if (_holidays is not null)
                                 {
-                                    <div role="group" aria-label="Holidays">
+                                    <div style="max-height: 160px; overflow-y: auto;" role="group" aria-label="Holidays">
                                         @foreach (var holiday in _holidays)
                                         {
                                             <FluentCheckbox Label="@holiday.Name"
