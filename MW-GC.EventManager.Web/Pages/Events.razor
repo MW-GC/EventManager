@@ -123,7 +123,7 @@
 
                 @* Themed-only toggle *@
                 <FluentCard Style="padding: 12px;" AreaRestricted="false">
-                    <FluentSwitch @bind-Value="_custThemedOnly" Label="Themed Activities Only" />
+                    <FluentSwitch @bind-Value="_custThemedOnly" @bind-Value:after="SyncFilter" Label="Themed Activities Only" />
                 </FluentCard>
 
                 @* Game / Theme / Holiday filters *@
@@ -188,9 +188,9 @@
                              VerticalAlignment="VerticalAlignment.Center"
                              Wrap="true">
                     <div>
-                        <FluentLabel Weight="FontWeight.Bold">Game & Activity Selections (@_custSelections.Count)</FluentLabel>
+                        <FluentLabel Weight="FontWeight.Bold">Game & Activity Selections (@_planner.Slots.Count)</FluentLabel>
                         <FluentLabel Typo="Typography.Body">Select 1–5 activities. If only one activity is selected when saved, it automatically becomes the winner.</FluentLabel>
-                        @if (_custSelections.Count == 1)
+                        @if (_planner.Slots.Count == 1)
                         {
                             <FluentLabel role="status">Single activity: this activity will automatically win when you save.</FluentLabel>
                         }
@@ -200,24 +200,24 @@
                         }
                     </div>
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
-                        <FluentSwitch @bind-Value="_custUniqueGames" Label="Unique games only" />
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="RandomizeAll" IconStart="@(new Size16.ArrowShuffle())">
+                        <FluentSwitch @bind-Value="_custUniqueGames" @bind-Value:after="SyncFilter" Label="Unique games only" />
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="_planner.RandomizeAll" IconStart="@(new Size16.ArrowShuffle())">
                             Randomize All
                         </FluentButton>
                     </FluentStack>
                 </FluentStack>
 
-                @if (_generationError is not null)
+                @if (_planner.GenerationError is not null)
                 {
-                    <div role="alert">@_generationError</div>
+                    <div role="alert">@_planner.GenerationError</div>
                 }
 
                 @* Selection slots *@
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
-                    @for (var i = 0; i < _custSelections.Count; i++)
+                    @for (var i = 0; i < _planner.Slots.Count; i++)
                     {
                         var idx = i;
-                        var sel = _custSelections[idx];
+                        var sel = _planner.Slots[idx];
                         <FluentCard Style="padding: 12px;" AreaRestricted="false">
                             <FluentGrid Spacing="3">
                                 <FluentGridItem xs="12" sm="5">
@@ -225,11 +225,11 @@
                                         <FluentIcon Value="@(new Size16.XboxController())" Style="margin-right: 2px;" /> Game @(idx + 1)
                                     </FluentLabel>
                                     <FluentSelect TOption="GameEntity"
-                                                  Items="@WithCurrent(GetAvailableGames(idx), SlotGame(sel))"
+                                                  Items="@WithCurrent(_planner.GetAvailableGames(idx), SlotGame(sel))"
                                                   OptionValue="@(g => g.Id.ToString())"
                                                   OptionText="@(g => g.Name)"
                                                   SelectedOption="@SlotGame(sel)"
-                                                  SelectedOptionChanged="@(g => ChangeSlotGame(idx, g))"
+                                                  SelectedOptionChanged="@(g => _planner.ChangeSlotGame(idx, g))"
                                                   aria-label="@($"Game for slot {idx + 1}")"
                                                   Style="width: 100%;" />
                                 </FluentGridItem>
@@ -255,11 +255,11 @@
                                         }
                                     </FluentStack>
                                     <FluentSelect TOption="ActivityEntity"
-                                                  Items="@WithCurrent(GetAvailableActivities(sel.GameId, idx), SlotActivity(sel))"
+                                                  Items="@WithCurrent(_planner.GetAvailableActivities(sel.GameId, idx), SlotActivity(sel))"
                                                   OptionValue="@(a => a.Id.ToString())"
                                                   OptionText="@(a => a.Name)"
                                                   SelectedOption="@SlotActivity(sel)"
-                                                  SelectedOptionChanged="@(a => ChangeSlotActivity(idx, a))"
+                                                  SelectedOptionChanged="@(a => _planner.ChangeSlotActivity(idx, a))"
                                                   aria-label="@($"Activity for slot {idx + 1}")"
                                                   Style="width: 100%;" />
                                     @if (ReplacesWinner(sel))
@@ -269,16 +269,16 @@
                                 </FluentGridItem>
                                 <FluentGridItem xs="12" sm="2" Style="display: flex; align-items: flex-end; justify-content: flex-end;">
                                     <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
-                                                  Title="@(GetRerollCandidates(idx).Count > 0 ? "Re-roll this slot" : "No alternative matches the current filters")"
+                                                  Title="@(_planner.GetRerollCandidates(idx).Count > 0 ? "Re-roll this slot" : "No alternative matches the current filters")"
                                                   aria-label="@($"Re-roll slot {idx + 1}")"
-                                                  Disabled="@(GetRerollCandidates(idx).Count == 0)"
-                                                  OnClick="@(() => RerollSlot(idx))">
+                                                  Disabled="@(_planner.GetRerollCandidates(idx).Count == 0)"
+                                                  OnClick="@(() => _planner.RerollSlot(idx))">
                                         <FluentIcon Value="@(new Size16.ArrowShuffle())" />
                                     </FluentButton>
                                     <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" Title="Remove slot"
                                                   aria-label="@($"Remove slot {idx + 1}")"
-                                                  Disabled="@(_custSelections.Count <= 1)"
-                                                  OnClick="@(() => RemoveSlot(idx))">
+                                                  Disabled="@(_planner.Slots.Count <= 1)"
+                                                  OnClick="@(() => _planner.RemoveSlot(idx))">
                                         <FluentIcon Value="@(new Size16.Delete())" Color="Color.Error" />
                                     </FluentButton>
                                 </FluentGridItem>
@@ -286,16 +286,16 @@
                         </FluentCard>
                     }
 
-                    @if (_custSelections.Count < 5)
+                    @if (_planner.Slots.Count < 5)
                     {
-                        var addSlotBlocked = GetAddSlotBlockedReason();
-                        <FluentButton Appearance="Appearance.Outline" Style="width: 100%;" OnClick="AddSlot" IconStart="@(new Size16.Add())"
+                        var addSlotBlocked = _planner.GetAddSlotBlockedReason();
+                        <FluentButton Appearance="Appearance.Outline" Style="width: 100%;" OnClick="_planner.AddSlot" IconStart="@(new Size16.Add())"
                                       Title="@(addSlotBlocked ?? "Add an activity slot")"
                                       Disabled="@(addSlotBlocked is not null)">
                             Add Activity Slot
                         </FluentButton>
                         @* Show the live reason; a click that found nothing to add raises it to an alert. *@
-                        @if (addSlotBlocked is not null && addSlotBlocked == _addSlotError)
+                        @if (addSlotBlocked is not null && addSlotBlocked == _planner.AddSlotError)
                         {
                             <div role="alert" style="color: var(--error); font-size: 0.75rem;">@addSlotBlocked</div>
                         }
@@ -511,22 +511,12 @@
     private List<Guid> _custThemeIds = [];
     private List<Guid> _custHolidayIds = [];
     private bool _custUniqueGames = true;
-    private string? _generationError;
-    // Set when Add Activity Slot is invoked with nothing to add.
-    private string? _addSlotError;
-    private List<SlotSelection> _custSelections = [];
+    // The slots and every rule that fills them; the page keeps only what its inputs bind.
+    private readonly SlotPlanner _planner = new(Random.Shared);
 
     // Detail dialog comment editing
     private Dictionary<Guid, string> _detailComments = [];
     private string? _detailCommentError;
-
-    private record SlotSelection
-    {
-        public Guid GameId { get; set; }
-        public Guid ActivityId { get; set; }
-        // The Selection as saved in the Event being edited; null for slots made in this dialog.
-        public Selection? Stored { get; init; }
-    }
 
     private IQueryable<EventEntity> Filtered => string.IsNullOrWhiteSpace(_search)
         ? _events!.AsQueryable()
@@ -539,11 +529,16 @@
             ? ((dynamic)match).Name
             : id.ToString()[..8];
 
-    private static void ToggleId(List<Guid> list, Guid id, bool add)
+    private void ToggleId(List<Guid> list, Guid id, bool add)
     {
         if (add && !list.Contains(id)) list.Add(id);
         else if (!add) list.Remove(id);
+        SyncFilter();
     }
+
+    // Hands the filter inputs to the planner; called whenever one of them changes.
+    private void SyncFilter() => _planner.Filter =
+        new SlotFilter(_custThemedOnly, _custGameIds, _custThemeIds, _custHolidayIds, _custUniqueGames);
 
     // Each list loads on its own: a failed Theme or Holiday list never hides the Events, and
     // the error bar names what failed, with Retry.
@@ -557,8 +552,8 @@
 
     private Task LoadAll() => Task.WhenAll(
         _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
-        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
-        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []),
+        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => { _games = v ?? []; _planner.SetLibrary(_games, _activities); }),
+        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => { _activities = v ?? []; _planner.SetLibrary(_games, _activities); }),
         _loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? []),
         _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []));
 
@@ -583,9 +578,10 @@
         _custThemeIds = [];
         _custHolidayIds = [];
         _custUniqueGames = true;
-        _custSelections = [];
-        _addSlotError = null;
-        RandomizeAll();
+        SyncFilter();
+        _planner.SetSlots([]);
+        _planner.AddSlotError = null;
+        _planner.RandomizeAll();
         _showCustomize = true;
         _customize.Open(CustomizeFields);
         _ = Focus.RememberAsync("add");
@@ -595,7 +591,7 @@
     {
         _customizeError = null;
         _editingEvent = e;
-        _generationError = null;
+        _planner.GenerationError = null;
         _custName = e.Name;
         var localStart = e.Date.ToLocalTime().DateTime;
         _custDate = localStart.Date;
@@ -605,10 +601,11 @@
         _custGameIds = [];
         _custThemeIds = [];
         _custHolidayIds = [];
-        _custSelections = e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id, Stored = s }).ToList();
+        SyncFilter();
+        _planner.SetSlots(e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id, Stored = s }));
         _shownGames.Clear();
         _shownActivities.Clear();
-        _addSlotError = null;
+        _planner.AddSlotError = null;
         _showCustomize = true;
         _customize.Open(CustomizeFields);
         _ = Focus.RememberAsync($"edit-{e.Id}");
@@ -626,7 +623,7 @@
         Time = _custTime?.TimeOfDay,
         _custThemedOnly, _custUniqueGames,
         _custGameIds, _custThemeIds, _custHolidayIds,
-        Slots = _custSelections.Select(s => new { s.GameId, s.ActivityId })
+        Slots = _planner.Slots.Select(s => new { s.GameId, s.ActivityId })
     };
 
     // The Cancel button closes at once without asking, but never while the save runs.
@@ -654,15 +651,7 @@
         var game = _games?.FirstOrDefault(g => g.Id == s.GameId);
         var act = _activities?.FirstOrDefault(a => a.Id == s.ActivityId && a.GameId == s.GameId);
         if (game is null || act is null) return null;
-        return new Selection
-        {
-            Game = new Game { Id = game.Id, Name = game.Name, ImageUrl = game.ImageUrl, Website = game.Website, IconUrl = game.IconUrl },
-            Activity = new Activity
-            {
-                Id = act.Id, GameId = act.GameId, Name = act.Name, Description = act.Description,
-                Rules = act.Rules, SetupRequirements = act.SetupRequirements, Comments = act.Comments
-            }
-        };
+        return SelectionSnapshot.From(game, act);
     }
 
     // Stand-ins for a stored Game or Activity the library no longer has. They are shown only as
@@ -696,262 +685,8 @@
 
     // The slot held the Event's Winner and its Activity has been changed. One slot always wins.
     private bool ReplacesWinner(SlotSelection s) =>
-        _editingEvent?.WinnerActivityId is { } winner && _custSelections.Count > 1 &&
+        _editingEvent?.WinnerActivityId is { } winner && _planner.Slots.Count > 1 &&
         s.Stored?.Activity.Id == winner && s.ActivityId != winner;
-
-    private Random _random = Random.Shared;
-
-    private const int DefaultSlotCount = 3;
-    private const string SelectionsKeptError = "Not enough distinct activities or games match the current filters. Existing selections were kept.";
-    private const string NoMatchError = "No activities match the current filters. Adjust the filters or add activities to the library.";
-
-    // A failed generation leaves the current selections untouched, so only claim they
-    // were kept when there are some to keep.
-    private void SetGenerationFailure() =>
-        _generationError = _custSelections.Count > 0 ? SelectionsKeptError : NoMatchError;
-
-    private void RandomizeAll()
-    {
-        var rng = _random;
-        var available = GetFilteredActivities();
-        var grouped = available.GroupBy(a => a.GameId).ToDictionary(g => g.Key, g => g.ToList());
-        int count;
-        if (_custSelections.Count > 0)
-        {
-            count = _custSelections.Count;
-        }
-        else
-        {
-            // Fresh dialog: aim for the default slot count but settle for what the library can fill.
-            var capacity = _custUniqueGames ? grouped.Count : available.Count;
-            if (capacity == 0)
-            {
-                SetGenerationFailure();
-                return;
-            }
-            count = Math.Min(DefaultSlotCount, capacity);
-        }
-
-        if (_custUniqueGames)
-        {
-            var matched = MatchUniqueGames(grouped, count, rng);
-            if (matched is null)
-            {
-                SetGenerationFailure();
-                return;
-            }
-            _custSelections = matched;
-            _generationError = null;
-            return;
-        }
-
-        var gameIds = grouped.Keys.ToList();
-        var newSelections = new List<SlotSelection>();
-        var usedGames = new HashSet<Guid>();
-        var usedActivities = new HashSet<Guid>();
-
-        for (var i = 0; i < count; i++)
-        {
-            var pool = gameIds.Where(g =>
-                (!_custUniqueGames || !usedGames.Contains(g)) &&
-                grouped[g].Any(a => !usedActivities.Contains(a.Id))).ToList();
-            if (pool.Count == 0)
-            {
-                SetGenerationFailure();
-                return;
-            }
-            var gameId = pool[rng.Next(pool.Count)];
-            var acts = grouped[gameId].Where(a => !usedActivities.Contains(a.Id)).ToList();
-            var act = acts[rng.Next(acts.Count)];
-            newSelections.Add(new SlotSelection { GameId = gameId, ActivityId = act.Id });
-            usedGames.Add(gameId);
-            usedActivities.Add(act.Id);
-        }
-
-        _custSelections = newSelections;
-        _generationError = null;
-    }
-
-    private static List<SlotSelection>? MatchUniqueGames(Dictionary<Guid, List<ActivityEntity>> grouped, int count, Random rng)
-    {
-        if (grouped.Count < count) return null;
-
-        // Randomize preferences, not feasibility. Repair earlier assignments via
-        // augmenting paths and consider every game before declaring exhaustion.
-        var games = grouped.Keys.OrderBy(_ => rng.Next()).ToArray();
-        var choices = games.ToDictionary(g => g,
-            g => grouped[g].Select(a => a.Id).Distinct().OrderBy(_ => rng.Next()).ToArray());
-        var byActivity = new Dictionary<Guid, Guid>();
-        var byGame = new Dictionary<Guid, Guid>();
-        foreach (var game in games)
-        {
-            TryAugment(game);
-            if (byGame.Count == count)
-                return byGame.Select(pair => new SlotSelection { GameId = pair.Key, ActivityId = pair.Value }).ToList();
-        }
-        return null;
-
-        void TryAugment(Guid start)
-        {
-            // Iterative traversal avoids call-stack growth on long repair chains.
-            var paths = new Dictionary<Guid, Guid>();
-            var pending = new Queue<Guid>();
-            pending.Enqueue(start);
-            while (pending.TryDequeue(out var game))
-            {
-                foreach (var activity in choices[game])
-                {
-                    if (!paths.TryAdd(activity, game)) continue;
-                    if (byActivity.TryGetValue(activity, out var owner))
-                    {
-                        pending.Enqueue(owner);
-                        continue;
-                    }
-
-                    var next = activity;
-                    while (true)
-                    {
-                        var reachedGame = paths[next];
-                        var hadPrevious = byGame.TryGetValue(reachedGame, out var previous);
-                        byGame[reachedGame] = next;
-                        byActivity[next] = reachedGame;
-                        if (!hadPrevious) return;
-                        next = previous;
-                    }
-                }
-            }
-        }
-    }
-
-    // The one candidate pool for changing a single slot: Activities that pass the filters,
-    // are not in any other slot and, with Unique games only on, belong to a Game no other
-    // slot uses. freeSlot is the slot being replaced (re-roll); pass -1 to keep every slot (add).
-    private List<ActivityEntity> GetSlotCandidates(int freeSlot, bool uniqueGames)
-    {
-        var others = _custSelections.Where((_, i) => i != freeSlot).ToList();
-        var usedActivities = others.Select(s => s.ActivityId).ToHashSet();
-        var usedGames = others.Select(s => s.GameId).ToHashSet();
-
-        return GetFilteredActivities().Where(a =>
-            !usedActivities.Contains(a.Id) &&
-            (!uniqueGames || !usedGames.Contains(a.GameId))).ToList();
-    }
-
-    private List<ActivityEntity> GetRerollCandidates(int index)
-    {
-        if (index < 0 || index >= _custSelections.Count) return [];
-        var current = _custSelections[index].ActivityId;
-        return GetSlotCandidates(index, _custUniqueGames).Where(a => a.Id != current).ToList();
-    }
-
-    private List<ActivityEntity> GetAddSlotCandidates() => GetSlotCandidates(-1, _custUniqueGames);
-
-    private const string AddSlotFullReason = "An Event holds at most 5 activities.";
-    private const string AddSlotUniqueGamesReason = "Every Game with an unused activity is already in a slot. Turn off Unique games only to repeat a Game.";
-    private const string AddSlotNoMatchReason = "No unused activity matches the current filters. Adjust the filters or add activities to the library.";
-
-    // Null when Add Activity Slot can add a slot; otherwise the reason it cannot.
-    private string? GetAddSlotBlockedReason()
-    {
-        if (_custSelections.Count >= EventEntity.MaximumSelections) return AddSlotFullReason;
-        if (GetAddSlotCandidates().Count > 0) return null;
-        return _custUniqueGames && GetSlotCandidates(-1, uniqueGames: false).Count > 0
-            ? AddSlotUniqueGamesReason
-            : AddSlotNoMatchReason;
-    }
-
-    private void RerollSlot(int index)
-    {
-        // Pick a game first, as Randomize All does, so games with larger
-        // activity catalogs do not dominate the roll. Never touch other slots.
-        var groups = GetRerollCandidates(index).GroupBy(a => a.GameId).ToList();
-        if (groups.Count == 0) return;
-        var activities = groups[Random.Shared.Next(groups.Count)].ToList();
-        var activity = activities[Random.Shared.Next(activities.Count)];
-        _custSelections[index] = _custSelections[index] with { GameId = activity.GameId, ActivityId = activity.Id };
-        _generationError = null;
-    }
-
-    private List<ActivityEntity> GetFilteredActivities()
-    {
-        if (_activities is null || _games is null) return [];
-        var knownGames = _games.Select(g => g.Id).ToHashSet();
-        IEnumerable<ActivityEntity> q = _activities.Where(a => knownGames.Contains(a.GameId));
-        if (_custGameIds.Count > 0)
-            q = q.Where(a => _custGameIds.Contains(a.GameId));
-        if (_custThemedOnly)
-            q = q.Where(a => a.ThemeIds.Count > 0 || a.HolidayIds.Count > 0);
-        if (_custThemeIds.Count > 0)
-            q = q.Where(a => a.ThemeIds.Any(t => _custThemeIds.Contains(t)));
-        if (_custHolidayIds.Count > 0)
-            q = q.Where(a => a.HolidayIds.Any(h => _custHolidayIds.Contains(h)));
-        return q.ToList();
-    }
-
-    private List<GameEntity> GetAvailableGames(int slotIndex)
-    {
-        if (_games is null || _activities is null) return [];
-        var usedActivityIds = _custSelections.Where((_, i) => i != slotIndex).Select(s => s.ActivityId).ToHashSet();
-        var filtered = GetFilteredActivities().Where(a => !usedActivityIds.Contains(a.Id));
-        var gameIds = filtered.Select(a => a.GameId).Distinct().ToHashSet();
-        var available = _games.Where(g => gameIds.Contains(g.Id));
-        if (_custUniqueGames)
-        {
-            var usedGameIds = _custSelections.Where((_, i) => i != slotIndex).Select(s => s.GameId).ToHashSet();
-            available = available.Where(g => !usedGameIds.Contains(g.Id));
-        }
-        return available.ToList();
-    }
-
-    private List<ActivityEntity> GetAvailableActivities(Guid gameId, int slotIndex)
-    {
-        var filtered = GetFilteredActivities().Where(a => a.GameId == gameId);
-        var usedIds = _custSelections.Where((_, i) => i != slotIndex).Select(s => s.ActivityId).ToHashSet();
-        return filtered.Where(a => !usedIds.Contains(a.Id)).ToList();
-    }
-
-    private void ChangeSlotGame(int index, GameEntity? game)
-    {
-        if (game is null) return;
-        var acts = GetAvailableActivities(game.Id, index);
-        if (acts.Count == 0) return;
-        var act = acts[Random.Shared.Next(acts.Count)];
-        _custSelections[index] = _custSelections[index] with { GameId = game.Id, ActivityId = act.Id };
-        _generationError = null;
-    }
-
-    private void ChangeSlotActivity(int index, ActivityEntity? activity)
-    {
-        if (activity is null) return;
-        _custSelections[index] = _custSelections[index] with { ActivityId = activity.Id };
-        _generationError = null;
-    }
-
-    private void AddSlot()
-    {
-        // The button is disabled with this reason; a stale click still says why nothing was added.
-        if (GetAddSlotBlockedReason() is { } reason)
-        {
-            _addSlotError = reason;
-            return;
-        }
-
-        // Pick a game first, as re-roll does, so games with larger catalogs do not dominate.
-        var rng = Random.Shared;
-        var groups = GetAddSlotCandidates().GroupBy(a => a.GameId).ToList();
-        var acts = groups[rng.Next(groups.Count)].ToList();
-        var act = acts[rng.Next(acts.Count)];
-        _custSelections.Add(new SlotSelection { GameId = act.GameId, ActivityId = act.Id });
-        _addSlotError = null;
-        _generationError = null;
-    }
-
-    private void RemoveSlot(int index)
-    {
-        if (_custSelections.Count <= 1) return;
-        _custSelections.RemoveAt(index);
-        _generationError = null;
-    }
 
     // Combines the selected date and time, then resolves the user's local UTC offset so the
     // stored DateTimeOffset represents the correct instant for downstream consumers such as
@@ -967,14 +702,15 @@
     {
         if (_generating || string.IsNullOrWhiteSpace(_custName)) return;
         _customizeError = null;
-        if (_custSelections.Count is < 1 or > 5)
+        var slots = _planner.Slots;
+        if (slots.Count is < 1 or > EventEntity.MaximumSelections)
         {
             _customizeError = "Select 1–5 activities before saving. Adjust the filters or add an activity slot.";
             return;
         }
         // Unchanged slots save their stored snapshot; a changed slot must be a library choice.
-        var built = _custSelections.Select(BuildSelection).ToList();
-        if (_custSelections.Any(s => s.GameId == Guid.Empty || s.ActivityId == Guid.Empty) || built.Any(s => s is null))
+        var built = slots.Select(BuildSelection).ToList();
+        if (slots.Any(s => s.GameId == Guid.Empty || s.ActivityId == Guid.Empty) || built.Any(s => s is null))
         {
             _customizeError = "Choose a valid game and activity for every slot before saving.";
             return;
@@ -987,7 +723,7 @@
             Selections = built.OfType<Selection>().ToList(),
             UniqueGamesOnly = _custUniqueGames,
             // Replacing the Winner's slot clears the Winner, as its notice says.
-            WinnerActivityId = _custSelections.Any(ReplacesWinner) ? null : _editingEvent?.WinnerActivityId
+            WinnerActivityId = slots.Any(ReplacesWinner) ? null : _editingEvent?.WinnerActivityId
         };
         if (entity.ValidateSelections() is not null)
         {
