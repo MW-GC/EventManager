@@ -158,10 +158,14 @@ public sealed class DialogSafetyTests : IDisposable
         var first = RowButton(page, "Grand Prix", "Duplicate").ClickAsync(new());
 
         // While it runs: this row's buttons and every row's Duplicate and Delete are disabled.
-        Assert.IsTrue(RowButton(page, "Grand Prix", "Duplicate").IsBusy());
-        Assert.IsTrue(RowButton(page, "Grand Prix", "Edit").IsBusy());
-        Assert.IsTrue(page.FindAll("fluent-button[title=Duplicate]").All(b => b.IsBusy()));
-        Assert.IsTrue(page.FindAll("fluent-button[title=Delete]").All(b => b.IsBusy()));
+        // The click may still be queued behind other renderer work, so wait for its render.
+        page.WaitForAssertion(() =>
+        {
+            Assert.IsTrue(RowButton(page, "Grand Prix", "Duplicate").IsBusy());
+            Assert.IsTrue(RowButton(page, "Grand Prix", "Edit").IsBusy());
+            Assert.IsTrue(page.FindAll("fluent-button[title=Duplicate]").All(b => b.IsBusy()));
+            Assert.IsTrue(page.FindAll("fluent-button[title=Delete]").All(b => b.IsBusy()));
+        });
         await RowButton(page, "Grand Prix", "Duplicate").ClickAsync(new());
         // A click that lands before the re-render reaches the handler itself, which sends nothing.
         // Not awaited before the release: without the guard it would wait on the held request too.
@@ -187,10 +191,15 @@ public sealed class DialogSafetyTests : IDisposable
 
         var first = WinnerButtons(page)[0].ClickAsync(new());
 
+        // The click may still be queued behind other renderer work, so wait for its render.
+        page.WaitForAssertion(() =>
+        {
+            var busy = WinnerButtons(page);
+            Assert.HasCount(2, busy);
+            Assert.IsTrue(busy.All(b => b.IsBusy()));
+            Assert.IsTrue(page.FormDialog().Button("Close").IsBusy());
+        });
         var during = WinnerButtons(page);
-        Assert.HasCount(2, during);
-        Assert.IsTrue(during.All(b => b.IsBusy()));
-        Assert.IsTrue(page.FormDialog().Button("Close").IsBusy());
         await during[0].ClickAsync(new());
         // A click that lands before the re-render reaches the handler itself, which sends nothing.
         // Not awaited before the release: without the guard it would wait on the held request too.
@@ -220,6 +229,8 @@ public sealed class DialogSafetyTests : IDisposable
         await RowButton(page, "Kart", "Edit").ClickAsync(new());
         await TextField(page).ChangeAsync(new ChangeEventArgs { Value = "Kart renamed" });
         var save = page.FormDialog().QuerySelector("form")!.SubmitAsync();
+        // The submit may still be queued behind other renderer work, so wait for the save's render.
+        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
         await CloseThrough(page, "CloseEdit");
         Assert.IsFalse(page.HasFormDialog());
@@ -250,7 +261,8 @@ public sealed class DialogSafetyTests : IDisposable
         await RowButton(page, "Game night", "Edit").ClickAsync(new());
         await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Night renamed" });
         var save = page.FormDialog().Button("Update Event").ClickAsync(new());
-        Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy());
+        // The click may still be queued behind other renderer work, so wait for the save's render.
+        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
         await CloseThrough(page, "CloseCustomize");
         Assert.IsFalse(page.HasFormDialog());
@@ -280,8 +292,9 @@ public sealed class DialogSafetyTests : IDisposable
         await TextField(page).ChangeAsync(new ChangeEventArgs { Value = "Kart renamed" });
         var save = page.FormDialog().QuerySelector("form")!.SubmitAsync();
 
+        // The submit may still be queued behind other renderer work, so wait for the save's render.
+        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
         var cancel = page.FormDialog().Button("Cancel");
-        Assert.IsTrue(cancel.IsBusy());
         await cancel.ClickAsync(new());
         // A click that lands before the re-render reaches the handler itself, which ignores it.
         await CloseThrough(page, "CancelEdit");
@@ -460,6 +473,8 @@ public sealed class DialogSafetyTests : IDisposable
             gate = api.Hold(HttpMethod.Put, $"/api/events/{night.Id}", () => new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(night) });
             save = page.FormDialog().Button("Update Event").ClickAsync(new());
         }
+        // The save may still be queued behind other renderer work, so wait for its render.
+        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
         await Dismiss(page);
 
