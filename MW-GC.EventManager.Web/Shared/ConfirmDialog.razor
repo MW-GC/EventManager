@@ -1,6 +1,9 @@
 @* A yes/no question over the page, such as "Delete game" or "Discard changes?". Built on the plain
    FluentDialog every page dialog uses, so the planned Fluent UI v5 migration (#81) moves them all the
-   same way. Overlay click and Escape answer Cancel. *@
+   same way. Overlay click and Escape answer Cancel. Focus moves into the question when it opens and,
+   if a form dialog is still open behind it once it closes, back into that dialog (FocusReturn). *@
+@implements IAsyncDisposable
+@inject FocusReturn Focus
 
 <FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 420px;" Class="confirm-dialog"
               AriaLabel="@Title" @ondialogdismiss="@((DialogEventArgs _) => Answer(false))">
@@ -34,4 +37,11 @@
         _answered = true;
         return confirmed ? OnConfirm.InvokeAsync() : OnCancel.InvokeAsync();
     }
+
+    // Each question is its own instance (the page keys it by its ConfirmRequest), so the first render
+    // is the moment it appears on the page.
+    protected override Task OnAfterRenderAsync(bool firstRender) => firstRender ? Focus.QuestionAsync() : Task.CompletedTask;
+
+    // However the question goes (either button, overlay click, Escape on it or on the form dialog behind it).
+    public async ValueTask DisposeAsync() => await Focus.AnsweredAsync();
 }
