@@ -1,0 +1,72 @@
+@* The Library editor's name rule (LibraryRules.Name) as a form validator. EditForm asks it on submit, so a
+   bad name sends nothing; it checks again whenever the name changes, so the message goes once the name is
+   fixed. Its messages show where it sits, under the name field. *@
+@using System.Linq.Expressions
+@implements IDisposable
+
+@if (_context is not null)
+{
+    @foreach (var message in _context.GetValidationMessages(_field))
+    {
+        <div role="alert" class="validation-message" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@message</div>
+    }
+}
+
+@code {
+    [CascadingParameter] private EditContext? CurrentEditContext { get; set; }
+
+    /// <summary>The name property of the item in the form, as a field expression (like ValidationMessage's For).</summary>
+    [Parameter, EditorRequired] public Expression<Func<string?>> For { get; set; } = default!;
+
+    private EditContext? _context;
+    private ValidationMessageStore? _store;
+    private Expression<Func<string?>>? _for;
+    private FieldIdentifier _field;
+
+    protected override void OnParametersSet()
+    {
+        if (CurrentEditContext is null)
+            throw new InvalidOperationException($"{nameof(LibraryNameValidator)} must sit inside an EditForm.");
+        if (!ReferenceEquals(For, _for))
+        {
+            _for = For;
+            _field = FieldIdentifier.Create(For);
+        }
+        if (ReferenceEquals(CurrentEditContext, _context)) return;
+        Detach();
+        _context = CurrentEditContext;
+        _store = new ValidationMessageStore(_context);
+        _context.OnValidationRequested += Requested;
+        _context.OnFieldChanged += Changed;
+        _context.OnValidationStateChanged += StateChanged;
+    }
+
+    private void Requested(object? sender, ValidationRequestedEventArgs e) => Check();
+
+    private void Changed(object? sender, FieldChangedEventArgs e)
+    {
+        if (e.FieldIdentifier.Equals(_field)) Check();
+    }
+
+    private void Check()
+    {
+        _store!.Clear();
+        if (LibraryRules.Name(Value()) is { } message) _store.Add(_field, message);
+        _context!.NotifyValidationStateChanged();
+    }
+
+    private string? Value() => (string?)_field.Model.GetType().GetProperty(_field.FieldName)!.GetValue(_field.Model);
+
+    private void StateChanged(object? sender, ValidationStateChangedEventArgs e) => StateHasChanged();
+
+    private void Detach()
+    {
+        if (_context is null) return;
+        _context.OnValidationRequested -= Requested;
+        _context.OnFieldChanged -= Changed;
+        _context.OnValidationStateChanged -= StateChanged;
+        _store?.Clear();
+    }
+
+    public void Dispose() => Detach();
+}
