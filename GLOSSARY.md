@@ -30,6 +30,14 @@ Activity can have any number of Holidays.
 **Themed activity**:
 An Activity with at least one Theme or Holiday.
 
+**Comment**:
+A dated, plain-text note about how an Activity went. An Activity has any number
+of Comments, each with its own added date, and each can be edited or deleted. A
+Comment written from an Event's details lands on the Activity that won that
+Event and records which Event it came from. This replaces the Activity's old
+single text field.
+_Avoid_: note, Activity comments
+
 ### Events
 
 **Event**:
@@ -41,7 +49,8 @@ One Game and one of that Game's Activities chosen for an Event, stored as a
 snapshot of the Game and Activity as they were when the Selection was chosen.
 Editing the Event keeps that snapshot, even if the Game or Activity has since
 changed or been deleted, unless the user changes that slot. An Activity can
-appear in an Event only once.
+appear in an Event only once. The snapshot does not carry the Activity's
+Comments; those are always read live from the Activity.
 
 **Unique games only**:
 An Event setting, on by default. When it is on, every Selection in the Event
@@ -52,6 +61,24 @@ The Selection that won the Event, identified by its Activity because a Game can
 appear in more than one Selection. An Event with exactly one Selection has that
 Selection as its Winner.
 _Avoid_: winning game
+
+**Event metrics**:
+The optional numbers recorded about an Event after it was played: attendees,
+new attendees, returning attendees and amount spent. They belong to one Event
+and are kept apart from it, so editing the Event's Selections never changes
+them.
+_Avoid_: figures, attendance
+
+**Like**:
+One visitor's thumbs-up for an Event, given through the Event's feedback link.
+A visitor address counts once per Event.
+
+**Activity performance**:
+How an Activity has done across every Event it appeared in: appearances, wins,
+win rate, and the average Likes and attendees of those Events. It is raw
+numbers, never a single score, and it is worked out when read, not stored. It
+cannot tell a weak Activity from a weak night, because an Event has several
+Selections.
 
 **slot**:
 A position for one Selection while an Event is put together in the create or
@@ -71,6 +98,11 @@ Themes or Holidays, and Themed activities only.
   **Game** and one of its **Activities**.
 - An **Event** has zero or one **Winner**, which is one of its **Selections**.
 - Each **slot** becomes one **Selection** when the **Event** is saved.
+- An **Activity** has zero or more **Comments**; a **Comment** may record the
+  **Event** it was written from.
+- An **Event** has zero or one set of **Event metrics**.
+- **Activity performance** is built from the **Event metrics** and **Likes** of
+  the **Events** an **Activity** appeared in.
 
 ## Storage
 
