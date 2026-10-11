@@ -20,7 +20,8 @@ namespace MW_GC.EventManager.Web.Tests;
 
 // The Events page's customize dialog against the real API handlers in process (moved from
 // IdempotentCreateTests): a lost create response is retried with the same Idempotency-Key.
-// Ported with its reflection style; issue #58 makes the planner properly testable later.
+// Ported with its reflection style. The slots go through the page's SlotPlanner (issue #58);
+// reflection remains for the page's own save and dialog handlers.
 [TestClass]
 public class DialogRetryTests
 {
@@ -76,20 +77,19 @@ public class DialogRetryTests
         Task Save() => (Task)typeof(Events).GetMethod("SaveCustomizedEvent", flags)!.Invoke(page, null)!;
         typeof(Events).GetProperty("Focus", flags)!.SetValue(page, PageHarness.LooseFocus());
         var selection = input.Selections[0];
-        Set("_games", new List<GameEntity> { new() { Id = selection.Game.Id, Name = selection.Game.Name } });
-        Set("_activities", new List<ActivityEntity> { new() { Id = selection.Activity.Id, GameId = selection.Game.Id, Name = selection.Activity.Name } });
+        var games = new List<GameEntity> { new() { Id = selection.Game.Id, Name = selection.Game.Name } };
+        var activities = new List<ActivityEntity> { new() { Id = selection.Activity.Id, GameId = selection.Game.Id, Name = selection.Activity.Name } };
+        Set("_games", games);
+        Set("_activities", activities);
+        // What the page's library load hands its slot planner.
+        var planner = (SlotPlanner)Get("_planner")!;
+        planner.SetLibrary(games, activities);
         void NewDialog()
         {
             typeof(Events).GetMethod("ShowCustomize", flags)!.Invoke(page, null);
             // ShowCustomize randomizes three slots and keeps none when the pool is smaller;
             // pin the single-slot state this test saves instead of relying on that draw.
-            var slotType = typeof(Events).GetNestedType("SlotSelection", BindingFlags.NonPublic)!;
-            var slot = Activator.CreateInstance(slotType)!;
-            slotType.GetProperty("GameId")!.SetValue(slot, selection.Game.Id);
-            slotType.GetProperty("ActivityId")!.SetValue(slot, selection.Activity.Id);
-            var slots = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(slotType))!;
-            slots.Add(slot);
-            Set("_custSelections", slots);
+            planner.SetSlots([new SlotSelection { GameId = selection.Game.Id, ActivityId = selection.Activity.Id }]);
             Set("_custName", input.Name);
         }
         var handler = new ApiHandler(api) { Failures = 2, CommitBeforeFailure = committed, Timeout = timeout };
