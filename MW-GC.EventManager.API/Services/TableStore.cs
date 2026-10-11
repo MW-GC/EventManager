@@ -99,6 +99,20 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
                 or nameof(EntityBase.Timestamp) or nameof(EntityBase.ETag) or nameof(EntityBase.Id)))
         .ToArray();
 
+    // The data properties (every public instance property except the keys, Timestamp, ETag and Id),
+    // read once per type instead of once per row. Flatten writes the readable ones, Hydrate sets
+    // the writable ones; Complex marks the ones in ComplexProps.
+    private static readonly (PropertyInfo Prop, bool Complex)[] DataProps = typeof(TEntity)
+        .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        .Where(p => p.Name is not (nameof(EntityBase.PartitionKey) or nameof(EntityBase.RowKey)
+            or nameof(EntityBase.Timestamp) or nameof(EntityBase.ETag) or nameof(EntityBase.Id)))
+        .Select(p => (p, ComplexProps.Contains(p)))
+        .ToArray();
+
+    private static readonly (PropertyInfo Prop, bool Complex)[] ReadableProps = DataProps.Where(p => p.Prop.CanRead).ToArray();
+
+    private static readonly (PropertyInfo Prop, bool Complex)[] WritableProps = DataProps.Where(p => p.Prop.CanWrite).ToArray();
+
     public TableStore(TableServiceClient serviceClient, string tableName, string partitionKey)
     {
         _table = serviceClient.GetTableClient(tableName);
@@ -233,15 +247,10 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
         var row = new TableEntity(entity.PartitionKey, entity.RowKey);
         string? largest = null;
         var largestLength = -1;
-        foreach (var prop in typeof(TEntity).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        foreach (var (prop, complex) in ReadableProps)
         {
-            if (prop.Name is nameof(EntityBase.PartitionKey) or nameof(EntityBase.RowKey)
-                or nameof(EntityBase.Timestamp) or nameof(EntityBase.ETag) or nameof(EntityBase.Id))
-                continue;
-            if (!prop.CanRead) continue;
-
             var value = prop.GetValue(entity);
-            if (ComplexProps.Contains(prop))
+            if (complex)
             {
                 var json = JsonSerializer.Serialize(value, prop.PropertyType, Json);
                 WriteChunks(row, prop.Name, json);
@@ -331,14 +340,11 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
             ETag = row.ETag
         };
 
-        foreach (var prop in typeof(TEntity).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        foreach (var (prop, complex) in WritableProps)
         {
-            if (prop.Name is nameof(EntityBase.PartitionKey) or nameof(EntityBase.RowKey)
-                or nameof(EntityBase.Timestamp) or nameof(EntityBase.ETag) or nameof(EntityBase.Id))
-                continue;
-            if (!prop.CanWrite || !row.ContainsKey(prop.Name)) continue;
+            if (!row.ContainsKey(prop.Name)) continue;
 
-            if (ComplexProps.Contains(prop))
+            if (complex)
             {
                 var json = ReadChunks(row, prop.Name);
                 if (json is not null)

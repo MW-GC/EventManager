@@ -14,63 +14,36 @@ internal sealed class ActivityFunctions
     private readonly TableStore<ActivityEntity> _store;
     private readonly TableStore<GameEntity> _games;
     private readonly ILogger<ActivityFunctions> _logger;
+    private readonly CrudHandler<ActivityEntity> _crud;
 
     public ActivityFunctions(TableStore<ActivityEntity> store, TableStore<GameEntity> games, ILogger<ActivityFunctions> logger)
     {
         _store = store;
         _games = games;
         _logger = logger;
+        // No delete guard: nothing refers to an Activity by id, so a delete goes straight to storage.
+        _crud = new CrudHandler<ActivityEntity>(store, logger, "activities", ValidateAsync);
     }
 
     [Function("GetActivities")]
     public Task<IActionResult> GetAll(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "activities")] HttpRequest req,
-        CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetActivities", ct, async () =>
-    {
-        var activities = await _store.GetAllAsync(ct);
-        return new OkObjectResult(activities);
-    });
+        CancellationToken ct) => _crud.GetAllAsync("GetActivities", ct);
 
     [Function("GetActivity")]
     public Task<IActionResult> Get(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "activities/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetActivity", ct, async () =>
-    {
-        var activity = await _store.GetAsync(id, ct);
-        return activity is null ? new NotFoundResult() : EntityResults.Ok(req, activity);
-    });
+        Guid id, CancellationToken ct) => _crud.GetAsync(req, id, "GetActivity", ct);
 
     [Function("CreateActivity")]
     public Task<IActionResult> Create(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "activities")] HttpRequest req,
-        CancellationToken ct) => RouteFailures.RunAsync(_logger, "CreateActivity", ct, async () =>
-    {
-        var body = await RequestBody.ReadAsync<ActivityEntity>(req, ct);
-        if (!body.Ok) return body.Error;
-        var entity = body.Value;
-        if (await ValidateAsync(entity, ct) is { } error) return new BadRequestObjectResult(error);
-
-        entity.Id = Guid.NewGuid();
-        await _store.UpsertAsync(entity, ct);
-        return EntityResults.Created(req, $"/api/activities/{entity.Id}", entity);
-    });
+        CancellationToken ct) => _crud.CreateAsync(req, "CreateActivity", ct);
 
     [Function("UpdateActivity")]
     public Task<IActionResult> Update(
         [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "activities/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "UpdateActivity", ct, async () =>
-    {
-        var existing = await _store.GetAsync(id, ct);
-        if (existing is null) return new NotFoundResult();
-
-        var body = await RequestBody.ReadAsync<ActivityEntity>(req, ct);
-        if (!body.Ok) return body.Error;
-        var entity = body.Value;
-        if (await ValidateAsync(entity, ct) is { } error) return new BadRequestObjectResult(error);
-
-        entity.Id = id;
-        return await EntityResults.UpdateAsync(_store, req, entity, ct);
-    });
+        Guid id, CancellationToken ct) => _crud.UpdateAsync(req, id, "UpdateActivity", ct);
 
     // The shared rules, then the one rule that needs storage: the Game must exist.
     private async Task<string?> ValidateAsync(ActivityEntity entity, CancellationToken ct)
@@ -82,10 +55,7 @@ internal sealed class ActivityFunctions
     [Function("DeleteActivity")]
     public Task<IActionResult> Delete(
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "activities/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteActivity", ct, async () =>
-    {
-        return await EntityResults.DeleteAsync(_store, req, id, ct);
-    });
+        Guid id, CancellationToken ct) => _crud.DeleteAsync(req, id, "DeleteActivity", ct);
 
     [Function("DuplicateActivity")]
     public Task<IActionResult> Duplicate(

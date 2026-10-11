@@ -10,81 +10,42 @@ namespace MW_GC.EventManager.API.Functions;
 
 internal sealed class GameFunctions
 {
-    private readonly TableStore<GameEntity> _store;
-    private readonly TableStore<ActivityEntity> _activities;
-    private readonly ILogger<GameFunctions> _logger;
+    private readonly CrudHandler<GameEntity> _crud;
 
     public GameFunctions(TableStore<GameEntity> store, TableStore<ActivityEntity> activities, ILogger<GameFunctions> logger)
     {
-        _store = store;
-        _activities = activities;
-        _logger = logger;
+        // A missing Game stays an idempotent 204. A Game that Activities still use is refused
+        // (409) and nothing is deleted, so no Activity is left pointing at a Game that is gone.
+        _crud = new CrudHandler<GameEntity>(store, logger, "games", CrudHandler<GameEntity>.Sync(GameValidator.Validate),
+            async (id, ct) => (await activities.GetAllAsync(ct)).Count(a => a.GameId == id) is var inUse and > 0
+                ? InUseMessage(inUse)
+                : null);
     }
 
     [Function("GetGames")]
     public Task<IActionResult> GetAll(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "games")] HttpRequest req,
-        CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetGames", ct, async () =>
-    {
-        var games = await _store.GetAllAsync(ct);
-        return new OkObjectResult(games);
-    });
+        CancellationToken ct) => _crud.GetAllAsync("GetGames", ct);
 
     [Function("GetGame")]
     public Task<IActionResult> Get(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "games/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetGame", ct, async () =>
-    {
-        var game = await _store.GetAsync(id, ct);
-        return game is null ? new NotFoundResult() : EntityResults.Ok(req, game);
-    });
+        Guid id, CancellationToken ct) => _crud.GetAsync(req, id, "GetGame", ct);
 
     [Function("CreateGame")]
     public Task<IActionResult> Create(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "games")] HttpRequest req,
-        CancellationToken ct) => RouteFailures.RunAsync(_logger, "CreateGame", ct, async () =>
-    {
-        var body = await RequestBody.ReadAsync<GameEntity>(req, ct);
-        if (!body.Ok) return body.Error;
-        var entity = body.Value;
-        if (GameValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
-
-        entity.Id = Guid.NewGuid();
-        await _store.UpsertAsync(entity, ct);
-        return EntityResults.Created(req, $"/api/games/{entity.Id}", entity);
-    });
+        CancellationToken ct) => _crud.CreateAsync(req, "CreateGame", ct);
 
     [Function("UpdateGame")]
     public Task<IActionResult> Update(
         [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "games/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "UpdateGame", ct, async () =>
-    {
-        var existing = await _store.GetAsync(id, ct);
-        if (existing is null) return new NotFoundResult();
-
-        var body = await RequestBody.ReadAsync<GameEntity>(req, ct);
-        if (!body.Ok) return body.Error;
-        var entity = body.Value;
-        if (GameValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
-
-        entity.Id = id;
-        return await EntityResults.UpdateAsync(_store, req, entity, ct);
-    });
+        Guid id, CancellationToken ct) => _crud.UpdateAsync(req, id, "UpdateGame", ct);
 
     [Function("DeleteGame")]
     public Task<IActionResult> Delete(
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "games/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteGame", ct, async () =>
-    {
-        // A missing Game stays an idempotent 204. A Game that Activities still use is refused
-        // (409) and nothing is deleted, so no Activity is left pointing at a Game that is gone.
-        if (await _store.GetAsync(id, ct) is null) return new NoContentResult();
-
-        var inUse = (await _activities.GetAllAsync(ct)).Count(a => a.GameId == id);
-        if (inUse > 0) return new ConflictObjectResult(InUseMessage(inUse));
-
-        return await EntityResults.DeleteAsync(_store, req, id, ct);
-    });
+        Guid id, CancellationToken ct) => _crud.DeleteAsync(req, id, "DeleteGame", ct);
 
     internal static string InUseMessage(int activities) => activities == 1
         ? "This game is used by 1 activity. Delete or move that activity first."
