@@ -1,0 +1,170 @@
+@page "/feedback/{Token}"
+@layout FeedbackLayout
+@implements IDisposable
+@using System.Net
+@using Microsoft.Extensions.Configuration
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider Services
+@inject NavigationManager Nav
+
+@* Issue #101: the anonymous Event feedback page. A signed-out visitor sees the Event's name and date
+   and one Like button. It calls only /api/feedback/..., never an admin route, and never loads a list. *@
+<PageHeader Title="@(_event?.Name ?? "Event feedback")" />
+
+@switch (_state)
+{
+    case PageState.Loading:
+        <p role="status">Loading…</p>
+        break;
+
+    case PageState.Invalid:
+        <p role="alert">This link is not valid.</p>
+        break;
+
+    case PageState.LoadFailed:
+        <div role="alert">
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true">
+                <span>@_error</span>
+                <FluentButton Appearance="Appearance.Outline" OnClick="LoadAsync">Retry</FluentButton>
+            </FluentStack>
+        </div>
+        break;
+
+    default:
+        <p class="feedback-date">@_event!.Date.ToLocalTime().ToString("f")</p>
+        <FluentButton Appearance="Appearance.Accent" Loading="@_liking" Disabled="@_liking" OnClick="LikeAsync">Like</FluentButton>
+        @switch (_like)
+        {
+            case LikeState.Liked:
+                <p role="status">Thanks! Your like was recorded.</p>
+                break;
+            case LikeState.AlreadyLiked:
+                <p role="status">You already liked this event. Each connection can like an event once.</p>
+                break;
+            case LikeState.RateLimited:
+                <p role="alert">Too many tries from your connection. Wait a minute, then try again.</p>
+                break;
+            case LikeState.Failed:
+                <div role="alert">
+                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true">
+                        <span>@_error</span>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="LikeAsync">Retry</FluentButton>
+                    </FluentStack>
+                </div>
+                break;
+        }
+        break;
+}
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+
+    private enum PageState { Loading, Invalid, LoadFailed, Ready }
+    private enum LikeState { None, Liked, AlreadyLiked, RateLimited, Failed }
+
+    private PageState _state = PageState.Loading;
+    private LikeState _like;
+    private FeedbackEvent? _event;
+    private string? _error;
+    private bool _liking;
+    private string? _loadedToken;
+
+    private FeedbackService? _api;
+    // Set only when this page made its own client, so only that one is disposed here.
+    private HttpClient? _ownClient;
+
+    // The tests register a FeedbackService. The app does not: the page makes its own client WITHOUT
+    // SessionExpiredHandler, because a signed-out visitor must never be sent to sign in from here.
+    private FeedbackService Api
+    {
+        get
+        {
+            if (_api is not null) return _api;
+            if (Services.GetService<FeedbackService>() is { } registered) return _api = registered;
+            var baseAddress = Services.GetService<IConfiguration>()?["ApiBaseUrl"] ?? Nav.BaseUri;
+            _ownClient = new HttpClient { BaseAddress = new Uri(baseAddress), Timeout = TimeSpan.FromSeconds(30) };
+            return _api = new FeedbackService(_ownClient);
+        }
+    }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (_loadedToken == Token) return Task.CompletedTask;
+        _loadedToken = Token;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var token = Token;
+        _state = PageState.Loading;
+        _event = null;
+        _like = LikeState.None;
+        _error = null;
+        try
+        {
+            using var response = await Api.GetEventAsync(token);
+            if (token != Token) return;
+            if (response.StatusCode == HttpStatusCode.NotFound) { _state = PageState.Invalid; return; }
+            if (!response.IsSuccessStatusCode) { Fail(PageState.LoadFailed, Message(response.StatusCode)); return; }
+            _event = await response.Content.ReadFromJsonAsync<FeedbackEvent>()
+                ?? throw new System.Text.Json.JsonException("The response was empty.");
+            _state = PageState.Ready;
+        }
+        catch (Exception ex) when (ApiResult.IsApiFailure(ex))
+        {
+            if (token == Token) Fail(PageState.LoadFailed, Message(ex));
+        }
+    }
+
+    private async Task LikeAsync()
+    {
+        if (_liking || _state != PageState.Ready) return;
+        var token = Token;
+        _liking = true;
+        try
+        {
+            using var response = await Api.LikeAsync(token);
+            if (token != Token) return;
+            switch (response.StatusCode)
+            {
+                case HttpStatusCode.NotFound:
+                    // The Event was deleted after the page loaded; the link no longer leads anywhere.
+                    _event = null;
+                    _state = PageState.Invalid;
+                    return;
+                case HttpStatusCode.TooManyRequests:
+                    _like = LikeState.RateLimited;
+                    return;
+                case var status when !response.IsSuccessStatusCode:
+                    LikeFailed(Message(status));
+                    return;
+            }
+            var result = await response.Content.ReadFromJsonAsync<FeedbackLikeResult>()
+                ?? throw new System.Text.Json.JsonException("The response was empty.");
+            _like = result.AlreadyLiked ? LikeState.AlreadyLiked : LikeState.Liked;
+        }
+        catch (Exception ex) when (ApiResult.IsApiFailure(ex))
+        {
+            if (token == Token) LikeFailed(Message(ex));
+        }
+        finally
+        {
+            _liking = false;
+        }
+    }
+
+    private void Fail(PageState state, string error) { _state = state; _error = error; }
+    private void LikeFailed(string error) { _like = LikeState.Failed; _error = error; }
+
+    // No sign-in wording here: the visitor has no session, so ApiResult's 401 text does not apply.
+    private static string Message(HttpStatusCode status) => (int)status >= 500
+        ? ApiResult.ForStatus(status)
+        : $"The request was not accepted (HTTP {(int)status}).";
+
+    private static string Message(Exception ex) => ex is HttpRequestException or OperationCanceledException
+        ? ApiResult.UnreachableMessage
+        : ApiResult.UnreadableMessage;
+
+    public void Dispose() => _ownClient?.Dispose();
+}
