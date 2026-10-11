@@ -15,6 +15,18 @@ public sealed class FocusReturn(IJSRuntime js)
 
     public Task RestoreAsync() => InvokeAsync("emFocus.restore");
 
+    /// <summary>
+    /// A question (<c>ConfirmDialog</c>) is on the page: a form dialog behind it stops holding focus,
+    /// and focus moves into the question. Called once the question has rendered.
+    /// </summary>
+    public Task QuestionAsync() => InvokeAsync("emFocus.question");
+
+    /// <summary>
+    /// The question is going away. If a form dialog is still open behind it (Keep editing), focus goes
+    /// back to where it was in that dialog. With no dialog left, the page's own <see cref="RestoreAsync"/> decides.
+    /// </summary>
+    public Task AnsweredAsync() => InvokeAsync("emFocus.answered");
+
     private async Task InvokeAsync(string identifier, params object?[] args)
     {
         try
