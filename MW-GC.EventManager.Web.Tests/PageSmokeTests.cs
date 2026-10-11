@@ -92,4 +92,16 @@ public sealed class PageSmokeTests : IDisposable
         Assert.IsEmpty(page.PageAlerts());
         Assert.AreEqual(1, api.Count(HttpMethod.Get, "/api/events"));
     }
+
+    [TestMethod]
+    public void StatsPageRendersItsLists()
+    {
+        var page = harness.Render<Stats>();
+        page.WaitForRows(2);
+        var rows = page.Rows();
+        Assert.IsTrue(rows.Any(r => r.Contains("Smoke game")));
+        Assert.IsTrue(rows.Any(r => r.Contains("Smoke activity")));
+        Assert.IsEmpty(page.PageAlerts());
+        Assert.AreEqual(1, api.Count(HttpMethod.Get, "/api/events"));
+    }
 }
