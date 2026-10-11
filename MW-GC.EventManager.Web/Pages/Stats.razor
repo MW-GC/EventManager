@@ -1,0 +1,126 @@
+@page "/stats"
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@inject EventService EventSvc
+@inject GameService GameSvc
+@inject ActivityService ActivitySvc
+
+<PageHeader Title="Stats" Subtitle="How often each Game and Activity was offered and won, and when it was last offered" />
+<ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
+
+<FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
+    @if (_report is null)
+    {
+        @if (_loads.Message is null)
+        {
+            <FluentCard AreaRestricted="false">
+                <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
+                    <FluentProgressRing />
+                    <FluentLabel>Loading stats...</FluentLabel>
+                </div>
+            </FluentCard>
+        }
+    }
+    else
+    {
+        <FluentCard Style="overflow: visible;" AreaRestricted="false">
+            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 4px;">Games</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 12px;">@PastEventsNote</FluentLabel>
+            <FluentDataGrid Items="@_report.Games.AsQueryable()" TGridItem="GamePlayStats" ItemSize="44"
+                            GridTemplateColumns="minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
+                            Class="stats-games" aria-label="Game stats">
+                <TemplateColumn Title="Name" Sortable="true" SortBy="@(GridSort<GamePlayStats>.ByAscending(g => g.Name))">
+                    @NameCell((context.Name, context.Deleted))
+                </TemplateColumn>
+                <TemplateColumn Title="Offered" Sortable="true" SortBy="@(GridSort<GamePlayStats>.ByAscending(g => g.Offered))">
+                    <span class="stats-offered">@context.Offered</span>
+                </TemplateColumn>
+                <TemplateColumn Title="Wins" Sortable="true" SortBy="@(GridSort<GamePlayStats>.ByAscending(g => g.Wins))">
+                    <span class="stats-wins">@context.Wins</span>
+                </TemplateColumn>
+                <TemplateColumn Title="Last offered" Sortable="true" IsDefaultSortColumn="true"
+                                SortBy="@(GridSort<GamePlayStats>.ByAscending(g => g.LastOffered).ThenDescending(g => g.Offered).ThenAscending(g => g.Name))">
+                    @LastOfferedCell(context.LastOffered)
+                </TemplateColumn>
+            </FluentDataGrid>
+        </FluentCard>
+
+        <FluentCard Style="overflow: visible;" AreaRestricted="false">
+            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 4px;">Activities</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 12px;">@PastEventsNote</FluentLabel>
+            <FluentDataGrid Items="@_report.Activities.AsQueryable()" TGridItem="ActivityPlayStats" ItemSize="44"
+                            GridTemplateColumns="minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
+                            Class="stats-activities" aria-label="Activity stats">
+                <TemplateColumn Title="Name" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.Name))">
+                    @NameCell((context.Name, context.Deleted))
+                </TemplateColumn>
+                <TemplateColumn Title="Game" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.GameName).ThenAscending(a => a.Name))">
+                    <span class="stats-game">@context.GameName</span>
+                </TemplateColumn>
+                <TemplateColumn Title="Offered" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.Offered))">
+                    <span class="stats-offered">@context.Offered</span>
+                </TemplateColumn>
+                <TemplateColumn Title="Wins" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.Wins))">
+                    <span class="stats-wins">@context.Wins</span>
+                </TemplateColumn>
+                <TemplateColumn Title="Last offered" Sortable="true" IsDefaultSortColumn="true"
+                                SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.LastOffered).ThenDescending(a => a.Offered).ThenAscending(a => a.Name))">
+                    @LastOfferedCell(context.LastOffered)
+                </TemplateColumn>
+            </FluentDataGrid>
+        </FluentCard>
+    }
+</FluentStack>
+
+@code {
+    private const string PastEventsNote = "Counts Events dated up to now; future Events are not included.";
+
+    // The name, and for an item no longer in the library a "Deleted" chip: visible text with its own
+    // icon, so it differs by more than colour, and a tooltip that says where the name came from.
+    private static readonly RenderFragment<(string Name, bool Deleted)> NameCell = item =>
+        @<FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="8" Wrap="true">
+            <FluentLabel Weight="FontWeight.Bold" Class="stats-name">@item.Name</FluentLabel>
+            @if (item.Deleted)
+            {
+                <FluentBadge Appearance="Appearance.Neutral" Class="stats-deleted" title="No longer in the library; the name is from the last Event that offered it">
+                    <FluentIcon Value="@(new Size16.Delete())" Color="Color.Custom" CustomColor="currentColor" aria-hidden="true"
+                                Style="width: 1em; height: 1em; margin-right: 3px; vertical-align: -0.125em;" />Deleted
+                </FluentBadge>
+            }
+        </FluentStack>;
+
+    // A date with its exact moment in the datetime attribute, or "Never".
+    private static readonly RenderFragment<DateTimeOffset?> LastOfferedCell = date =>
+        @<span class="stats-last">
+            @if (date is { } d)
+            {
+                <time datetime="@d.ToString("O")">@d.ToLocalTime().ToString("d")</time>
+            }
+            else
+            {
+                <span style="color: var(--neutral-foreground-hint);">Never</span>
+            }
+        </span>;
+
+    // Computed in the browser from the Events list (issue #96). Now comes from the system clock here;
+    // PlayStats takes any TimeProvider, so its rules are tested with a fixed one.
+    private readonly PlayStats _stats = new(TimeProvider.System);
+    private readonly LoadErrors _loads = new();
+    private List<EventEntity>? _events;
+    private List<GameEntity>? _games;
+    private List<ActivityEntity>? _activities;
+    private PlayStatsReport? _report;
+
+    protected override Task OnInitializedAsync() => LoadAll();
+
+    // All three lists are needed: without the library every row would look deleted. A failed list keeps
+    // its previous contents and is named in the error bar with Retry; the stats wait until all three loaded.
+    private async Task LoadAll()
+    {
+        await Task.WhenAll(
+            _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
+            _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
+            _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []));
+        if (_events is not null && _games is not null && _activities is not null)
+            _report = _stats.Compute(_events, _games, _activities);
+    }
+}
