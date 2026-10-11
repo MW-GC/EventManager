@@ -1,4 +1,3 @@
-using System.Reflection;
 using Bunit;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
@@ -8,12 +7,13 @@ namespace MW_GC.EventManager.Web.Tests;
 
 // Exercise the actual page handlers without a renderer or network services. The slot rules
 // themselves are tested on SlotPlanner (SlotPlannerTests); these tests reach the page's planner
-// through its public API and keep reflection only for the page's own handlers and fields.
+// through its public API and keep reflection only for the page's own handlers and fields, which
+// since #93 live in the create-and-edit and details dialogs (UnrenderedEventsPage finds them).
 [TestClass]
 public class SlotRerollTests
 {
-    private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
-    private readonly Events page = new();
+    // The page and its two dialogs (#93): the handlers and fields below moved into the dialogs.
+    private readonly UnrenderedEventsPage page = new();
     private readonly Guid gameA = Guid.NewGuid();
     private readonly Guid gameB = Guid.NewGuid();
     private readonly Guid theme = Guid.NewGuid();
@@ -29,7 +29,6 @@ public class SlotRerollTests
         replacement = Activity(gameA);
         replacement.ThemeIds = [theme];
         replacement.HolidayIds = [holiday];
-        typeof(Events).GetProperty("Focus", Private)!.SetValue(page, PageHarness.LooseFocus());
         Set("_games", new List<GameEntity> { new() { Id = gameA }, new() { Id = gameB } });
         Set("_activities", new List<ActivityEntity> { current, other, replacement });
         AddSlot(current);
@@ -104,8 +103,7 @@ public class SlotRerollTests
         Set("_showCustomize", true);
         if (editing) Set("_editingEvent", new EventEntity { Id = Guid.NewGuid() });
         using var http = new HttpClient(new FailedSaveHandler()) { BaseAddress = new Uri("https://example.invalid/") };
-        typeof(Events).GetProperty("EventSvc", Private)!.SetValue(page,
-            new MW_GC.EventManager.Web.Services.EventService(http));
+        page.SetService("EventSvc", new MW_GC.EventManager.Web.Services.EventService(http));
         var original = Slots;
         var originalSlots = Slots.Cast<object>().ToArray();
 
@@ -142,19 +140,19 @@ public class SlotRerollTests
         Set("_custName", "One activity");
         var handler = new EventHttpHandler();
         var service = new MW_GC.EventManager.Web.Services.EventService(new HttpClient(handler) { BaseAddress = new Uri("https://example.test") });
-        typeof(Events).GetProperty("EventSvc", Private)!.SetValue(page, service);
-        await (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
+        page.SetService("EventSvc", service);
+        await (Task)page.Call("SaveCustomizedEvent")!;
         Assert.AreEqual(HttpMethod.Post, handler.LastWrite);
         Assert.AreEqual(current.Id, handler.Saved!.WinnerActivityId);
         Assert.AreEqual(current.Id, Assert.ContainsSingle((List<EventEntity>)Get("_events")!).WinnerActivityId);
 
-        typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
+        page.Call("ShowEditEvent", handler.Saved);
         Assert.ContainsSingle(Slots.Cast<object>());
         Set("_custGameIds", new List<Guid> { gameA });
         Assert.AreEqual(replacement.Id, Assert.ContainsSingle(Candidates()).Id);
         Planner.RerollSlot(0);
         var replacementId = Id(Slots[0]!, "ActivityId");
-        await (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
+        await (Task)page.Call("SaveCustomizedEvent")!;
         Assert.AreEqual(HttpMethod.Put, handler.LastWrite);
         Assert.AreEqual(replacementId, handler.Saved!.WinnerActivityId);
         Assert.AreEqual("One activity", handler.Saved.Name);
@@ -225,7 +223,7 @@ public class SlotRerollTests
         await Save();
         Assert.IsNull(handler.Saved!.WinnerActivityId);
         handler.Saved.WinnerActivityId = current.Id;
-        typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
+        page.Call("ShowEditEvent", handler.Saved);
         if (replaceWinner) Planner.RerollSlot(0);
         await Save();
         Assert.AreEqual(HttpMethod.Put, handler.LastWrite);
@@ -241,7 +239,7 @@ public class SlotRerollTests
         await Save();
         var persisted = Assert.ContainsSingle((List<EventEntity>)Get("_events")!);
         Assert.AreNotSame(handler.Saved, persisted);
-        typeof(Events).GetMethod("ShowDetails", Private)!.Invoke(page, [persisted]);
+        page.Call("ShowDetails", persisted);
         var detail = (EventEntity)Get("_detailEvent")!;
         Assert.AreEqual(Assert.ContainsSingle(detail.Selections).Activity.Id, detail.WinnerActivityId);
         Assert.AreSame(persisted, detail);
@@ -317,7 +315,7 @@ public class SlotRerollTests
         await Save();
         Assert.IsNotNull(handler.Saved);
         handler.Saved.WinnerActivityId = hadWinner ? other.Id : null;
-        typeof(Events).GetMethod("ShowEditEvent", Private)!.Invoke(page, [handler.Saved]);
+        page.Call("ShowEditEvent", handler.Saved);
         Planner.RemoveSlot(1);
         await Save();
         Assert.IsNull(Get("_customizeError"));
@@ -325,7 +323,7 @@ public class SlotRerollTests
         Assert.AreEqual(current.Id, Assert.ContainsSingle(handler.Saved.Selections).Activity.Id);
         Assert.AreEqual(current.Id, handler.Saved.WinnerActivityId);
         var listed = Assert.ContainsSingle((List<EventEntity>)Get("_events")!);
-        typeof(Events).GetMethod("ShowDetails", Private)!.Invoke(page, [listed]);
+        page.Call("ShowDetails", listed);
         Assert.AreEqual(current.Id, ((EventEntity)Get("_detailEvent")!).WinnerActivityId);
     }
 
@@ -355,7 +353,7 @@ public class SlotRerollTests
         Assert.IsNull(Get("_customizeError"));
         Assert.AreEqual(committedId, Assert.ContainsSingle((List<EventEntity>)Get("_events")!).Id);
 
-        typeof(Events).GetMethod("ShowCustomize", Private)!.Invoke(page, null);
+        page.Call("ShowCustomize");
         // ShowCustomize fills as many slots as the two-game fixture allows (here two);
         // pin the single-slot state this test saves instead of relying on that draw.
         SetSlots(current);
@@ -371,11 +369,11 @@ public class SlotRerollTests
         Set("_showCustomize", true);
         var handler = new EventHttpHandler();
         var service = new MW_GC.EventManager.Web.Services.EventService(new HttpClient(handler) { BaseAddress = new Uri("https://example.test") });
-        typeof(Events).GetProperty("EventSvc", Private)!.SetValue(page, service);
+        page.SetService("EventSvc", service);
         return handler;
     }
 
-    private Task Save() => (Task)typeof(Events).GetMethod("SaveCustomizedEvent", Private)!.Invoke(page, null)!;
+    private Task Save() => (Task)page.Call("SaveCustomizedEvent")!;
 
     private sealed class EventHttpHandler : HttpMessageHandler
     {
@@ -426,20 +424,20 @@ public class SlotRerollTests
     private IReadOnlyList<SlotSelection> Slots => Planner.Slots;
     private List<ActivityEntity> Activities => (List<ActivityEntity>)Get("_activities")!;
     private List<ActivityEntity> Candidates() => Planner.GetRerollCandidates(0);
-    private object? Get(string name) => typeof(Events).GetField(name, Private)!.GetValue(page);
+    private object? Get(string name) => page.Get(name);
 
     // Sets a page field, then hands the planner what the page would: the library after a load,
     // the filters after one of their inputs changes.
     private void Set(string name, object value)
     {
-        typeof(Events).GetField(name, Private)!.SetValue(page, value);
+        page.Set(name, value);
         if (name is "_games" or "_activities")
             Planner.SetLibrary((List<GameEntity>?)Get("_games"), (List<ActivityEntity>?)Get("_activities"));
         if (name is "_custThemedOnly" or "_custGameIds" or "_custThemeIds" or "_custHolidayIds" or "_custUniqueGames")
             Call("SyncFilter");
     }
 
-    private object? Call(string name, params object[] args) => typeof(Events).GetMethod(name, Private)!.Invoke(page, args);
+    private object? Call(string name, params object[] args) => page.Call(name, args);
     private static Guid Id(object slot, string name) =>
         name == "GameId" ? ((SlotSelection)slot).GameId : ((SlotSelection)slot).ActivityId;
     private static SlotSelection Slot(ActivityEntity activity) => new() { GameId = activity.GameId, ActivityId = activity.Id };
@@ -452,7 +450,7 @@ public class SlotRerollTests
         var planner = new SlotPlanner(random) { Filter = Planner.Filter, GenerationError = Planner.GenerationError, AddSlotError = Planner.AddSlotError };
         planner.SetLibrary((List<GameEntity>?)Get("_games"), (List<ActivityEntity>?)Get("_activities"));
         planner.SetSlots(Slots);
-        typeof(Events).GetField("_planner", Private)!.SetValue(page, planner);
+        page.Set("_planner", planner);
     }
 
     private const string NoMatchMessage = "No activities match the current filters. Adjust the filters or add activities to the library.";
@@ -608,7 +606,7 @@ public class SlotRerollTests
         };
         Set("_events", new List<EventEntity> { ev });
         var handler = new CommentHttpHandler();
-        typeof(Events).GetProperty("ActivitySvc", Private)!.SetValue(page,
+        page.SetService("ActivitySvc",
             new MW_GC.EventManager.Web.Services.ActivityService(new HttpClient(handler) { BaseAddress = new Uri("https://example.test") }));
         Call("ShowDetails", ev);
         return (ev, handler);
