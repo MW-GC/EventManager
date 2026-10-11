@@ -78,3 +78,19 @@ internal static class EventValidator
         return error ?? evt.ValidateSelections();
     }
 }
+
+internal static class EventMetricsValidator
+{
+    public const int MaxCount = 1_000_000;
+    public const decimal MaxAmount = 1_000_000_000m;
+
+    /// <summary>
+    /// One rule per metric, in field order; the first failure wins. Every field is optional and
+    /// there is no cross-check between attendees, new and returning (decided in #123).
+    /// </summary>
+    public static string? Validate(EventMetricsEntity metrics) =>
+        FieldRules.Count(metrics.Attendees, "Attendees", MaxCount)
+        ?? FieldRules.Count(metrics.NewAttendees, "New attendees", MaxCount)
+        ?? FieldRules.Count(metrics.ReturningAttendees, "Returning attendees", MaxCount)
+        ?? FieldRules.Money(metrics.AmountSpent, "Amount spent", MaxAmount);
+}

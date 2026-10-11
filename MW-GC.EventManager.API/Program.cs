@@ -23,6 +23,9 @@ builder.Services.AddSingleton(sp =>
     new TableStore<ThemeEntity>(sp.GetRequiredService<TableServiceClient>(), "Themes", "Theme"));
 builder.Services.AddSingleton(sp =>
     new TableStore<HolidayEntity>(sp.GetRequiredService<TableServiceClient>(), "Holidays", "Holiday"));
+// Event metrics (#134, ADR 0001): one row per Event, keyed by the Event id.
+builder.Services.AddSingleton(sp =>
+    new TableStore<EventMetricsEntity>(sp.GetRequiredService<TableServiceClient>(), "EventMetrics", "Metrics"));
 // The anonymous Event feedback page (#101): its own tables, and a per-instance like rate limit.
 builder.Services.AddSingleton<FeedbackStore>();
 builder.Services.AddSingleton(new LikeRateLimiter(TimeProvider.System));
