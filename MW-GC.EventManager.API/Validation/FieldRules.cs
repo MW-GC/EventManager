@@ -6,6 +6,7 @@ internal static class FieldRules
     public const int NameMaxLength = 100;
     public const int TextMaxLength = 2000;
     public const int UrlMaxLength = 2048;
+    public const int CommentTextMaxLength = 1000;
 
     /// <summary>
     /// Trims a name and checks it is non-empty and within <see cref="NameMaxLength"/>.
