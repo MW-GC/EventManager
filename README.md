@@ -106,6 +106,31 @@ dotnet test MW-GC.EventManager.Web.Tests/MW-GC.EventManager.Web.Tests.csproj
 
 Package restore requires access to NuGet or a populated local package cache.
 
+### Browser tests (E2E)
+
+`MW-GC.EventManager.E2ETests` drives the running app in headless Chromium with
+Playwright for .NET. Its tests are reported as skipped (inconclusive) unless
+`EM_E2E_URL` names the app, so the solution-wide `dotnet test` needs no browsers
+and no stack. The `E2E - Browser tests` workflow runs them on pushes and pull
+requests; it is separate from the main CI and not a required check.
+
+To run them locally:
+
+```sh
+# 1. Build, then install Chromium for Playwright (once; needs PowerShell, `pwsh`)
+dotnet build MW-GC.EventManager.slnx
+pwsh MW-GC.EventManager.E2ETests/bin/Debug/net10.0/playwright.ps1 install chromium
+
+# 2. Start the stack as in "Run locally" above (Azurite, API, Web, SWA proxy)
+
+# 3. Point the tests at the SWA proxy and run them
+EM_E2E_URL=http://localhost:4280 dotnet test MW-GC.EventManager.E2ETests/MW-GC.EventManager.E2ETests.csproj
+```
+
+The tests sign in by setting the SWA emulator's `StaticWebAppsAuthCookie`
+cookie with the `admin` role, so no mock login form is involved. This works only
+against the local emulator, never against a deployed Static Web App.
+
 ## Contributing
 
 - Branch from `dev` when it exists; otherwise use the default branch. Use a

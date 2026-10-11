@@ -1,0 +1,88 @@
+name: E2E - Browser tests
+
+# Separate from the main CI on purpose: a flaky browser job must not block the main check. Not a required check.
+on:
+  pull_request:
+    branches: [ dev, main ]
+  push:
+    branches: [ dev ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      FUNCTIONS_CORE_TOOLS_TELEMETRY_OPTOUT: 1
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install the local stack tools (Azurite, Functions Core Tools, SWA CLI)
+        run: npm install --global azurite@3.37.0 azure-functions-core-tools@4.15.2 @azure/static-web-apps-cli@2.0.10
+
+      - name: Build
+        run: dotnet build MW-GC.EventManager.slnx -c Release
+
+      - name: Install Playwright Chromium
+        run: pwsh MW-GC.EventManager.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Publish the Web app
+        run: |
+          dotnet publish MW-GC.EventManager.Web/MW-GC.EventManager.Web.csproj -c Release -o "$RUNNER_TEMP/web"
+          cp MW-GC.EventManager.Web/staticwebapp.config.json "$RUNNER_TEMP/web/wwwroot/staticwebapp.config.json"
+
+      - name: Start the stack (Azurite, API, SWA emulator)
+        run: |
+          EM_LOGS="$RUNNER_TEMP/e2e-logs"
+          mkdir -p "$EM_LOGS"
+          printf '{"IsEncrypted": false, "Values": {"AzureWebJobsStorage": "UseDevelopmentStorage=true", "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated"}}\n' > MW-GC.EventManager.API/local.settings.json
+          nohup azurite --silent --skipApiVersionCheck --location "$RUNNER_TEMP/azurite" > "$EM_LOGS/azurite.log" 2>&1 &
+          (cd MW-GC.EventManager.API && nohup func start --port 7071 > "$EM_LOGS/api.log" 2>&1 &)
+          (cd "$RUNNER_TEMP/web/wwwroot" && nohup swa start . --port 4280 --api-devserver-url http://localhost:7071 --swa-config-location . > "$EM_LOGS/swa.log" 2>&1 &)
+          wait_for() {
+            for i in $(seq 1 "$2"); do
+              if curl -fsS -o /dev/null "$1"; then echo "$1 up after ${i}s"; return 0; fi
+              sleep 1
+            done
+            echo "$1 NOT up after $2s"; return 1
+          }
+          wait_for http://127.0.0.1:7071/api/games 300
+          # The emulator answers an anonymous request with a redirect to sign-in; any response means it is up.
+          for i in $(seq 1 180); do
+            if curl -sS -o /dev/null http://127.0.0.1:4280/; then echo "SWA emulator up after ${i}s"; exit 0; fi
+            sleep 1
+          done
+          echo "SWA emulator NOT up after 180s"; exit 1
+
+      - name: Run browser tests
+        env:
+          EM_E2E_URL: http://127.0.0.1:4280
+        run: dotnet test MW-GC.EventManager.E2ETests/MW-GC.EventManager.E2ETests.csproj --no-build -c Release --logger "console;verbosity=normal"
+
+      - name: Upload stack logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-stack-logs
+          path: ${{ runner.temp }}/e2e-logs

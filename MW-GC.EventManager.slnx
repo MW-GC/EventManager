@@ -8,4 +8,5 @@
   </Project>
   <Project Path="MW-GC.EventManager.Api.Tests/MW-GC.EventManager.Api.Tests.csproj" />
   <Project Path="MW-GC.EventManager.Web.Tests/MW-GC.EventManager.Web.Tests.csproj" />
+  <Project Path="MW-GC.EventManager.E2ETests/MW-GC.EventManager.E2ETests.csproj" />
 </Solution>
