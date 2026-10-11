@@ -13,13 +13,19 @@ internal sealed class ActivityFunctions
 {
     private readonly TableStore<ActivityEntity> _store;
     private readonly TableStore<GameEntity> _games;
+    private readonly TableStore<ActivityCommentEntity> _comments;
     private readonly ILogger<ActivityFunctions> _logger;
     private readonly CrudHandler<ActivityEntity> _crud;
 
-    public ActivityFunctions(TableStore<ActivityEntity> store, TableStore<GameEntity> games, ILogger<ActivityFunctions> logger)
+    public ActivityFunctions(
+        TableStore<ActivityEntity> store,
+        TableStore<GameEntity> games,
+        TableStore<ActivityCommentEntity> comments,
+        ILogger<ActivityFunctions> logger)
     {
         _store = store;
         _games = games;
+        _comments = comments;
         _logger = logger;
         // No delete guard: nothing refers to an Activity by id, so a delete goes straight to storage.
         _crud = new CrudHandler<ActivityEntity>(store, logger, "activities", ValidateAsync);
@@ -55,7 +61,16 @@ internal sealed class ActivityFunctions
     [Function("DeleteActivity")]
     public Task<IActionResult> Delete(
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "activities/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => _crud.DeleteAsync(req, id, "DeleteActivity", ct);
+        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteActivity", ct, async () =>
+    {
+        var result = await _crud.DeleteAsync(req, id, "DeleteActivity", ct);
+        // Deleting an Activity deletes its Comments (ADR 0001), only once the Activity delete
+        // answered 204: a stale If-Match (409) deletes nothing. A 204 for a row that was already
+        // gone still cleans up, so retrying a delete whose cleanup failed removes what was left.
+        if (result is NoContentResult)
+            await ActivityCommentFunctions.DeleteAllForActivityAsync(_comments, id, ct);
+        return result;
+    });
 
     [Function("DuplicateActivity")]
     public Task<IActionResult> Duplicate(

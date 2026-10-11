@@ -18,7 +18,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
-    <PackageReference Include="MSTest" Version="4.4.1" />
+    <PackageReference Include="MSTest" Version="4.5.1" />
     <PackageReference Include="Moq" Version="4.21.0" />
     <ProjectReference Include="../MW-GC.EventManager.API/MW-GC.EventManager.API.csproj" />
   </ItemGroup>
