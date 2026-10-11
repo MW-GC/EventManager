@@ -10,72 +10,37 @@ namespace MW_GC.EventManager.API.Functions;
 
 internal sealed class ThemeFunctions
 {
-    private readonly TableStore<ThemeEntity> _store;
-    private readonly TableStore<ActivityEntity> _activities;
-    private readonly ILogger<ThemeFunctions> _logger;
+    private readonly CrudHandler<ThemeEntity> _crud;
 
     public ThemeFunctions(TableStore<ThemeEntity> store, TableStore<ActivityEntity> activities, ILogger<ThemeFunctions> logger)
     {
-        _store = store;
-        _activities = activities;
-        _logger = logger;
+        // A missing Theme stays an idempotent 204. A Theme that Activities still list is refused
+        // (409) and nothing is deleted, so no Activity is left with an id that names nothing.
+        _crud = new CrudHandler<ThemeEntity>(store, logger, "themes", CrudHandler<ThemeEntity>.Sync(ThemeValidator.Validate),
+            async (id, ct) => (await activities.GetAllAsync(ct)).Count(a => a.ThemeIds.Contains(id)) is var inUse and > 0
+                ? InUseMessage(inUse)
+                : null);
     }
 
     [Function("GetThemes")]
     public Task<IActionResult> GetAll(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "themes")] HttpRequest req,
-        CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetThemes", ct, async () =>
-    {
-        var themes = await _store.GetAllAsync(ct);
-        return new OkObjectResult(themes);
-    });
+        CancellationToken ct) => _crud.GetAllAsync("GetThemes", ct);
 
     [Function("CreateTheme")]
     public Task<IActionResult> Create(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "themes")] HttpRequest req,
-        CancellationToken ct) => RouteFailures.RunAsync(_logger, "CreateTheme", ct, async () =>
-    {
-        var body = await RequestBody.ReadAsync<ThemeEntity>(req, ct);
-        if (!body.Ok) return body.Error;
-        var entity = body.Value;
-        if (ThemeValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
-
-        entity.Id = Guid.NewGuid();
-        await _store.UpsertAsync(entity, ct);
-        return EntityResults.Created(req, $"/api/themes/{entity.Id}", entity);
-    });
+        CancellationToken ct) => _crud.CreateAsync(req, "CreateTheme", ct);
 
     [Function("UpdateTheme")]
     public Task<IActionResult> Update(
         [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "themes/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "UpdateTheme", ct, async () =>
-    {
-        var existing = await _store.GetAsync(id, ct);
-        if (existing is null) return new NotFoundResult();
-
-        var body = await RequestBody.ReadAsync<ThemeEntity>(req, ct);
-        if (!body.Ok) return body.Error;
-        var entity = body.Value;
-        if (ThemeValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
-
-        entity.Id = id;
-        return await EntityResults.UpdateAsync(_store, req, entity, ct);
-    });
+        Guid id, CancellationToken ct) => _crud.UpdateAsync(req, id, "UpdateTheme", ct);
 
     [Function("DeleteTheme")]
     public Task<IActionResult> Delete(
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "themes/{id:guid}")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteTheme", ct, async () =>
-    {
-        // A missing Theme stays an idempotent 204. A Theme that Activities still list is refused
-        // (409) and nothing is deleted, so no Activity is left with an id that names nothing.
-        if (await _store.GetAsync(id, ct) is null) return new NoContentResult();
-
-        var inUse = (await _activities.GetAllAsync(ct)).Count(a => a.ThemeIds.Contains(id));
-        if (inUse > 0) return new ConflictObjectResult(InUseMessage(inUse));
-
-        return await EntityResults.DeleteAsync(_store, req, id, ct);
-    });
+        Guid id, CancellationToken ct) => _crud.DeleteAsync(req, id, "DeleteTheme", ct);
 
     internal static string InUseMessage(int activities) => activities == 1
         ? "This theme is used by 1 activity. Remove it from that activity first."
