@@ -68,6 +68,24 @@ internal static class ActivityValidator
         FieldRules.MaxLength(comments, nameof(ActivityEntity.Comments), FieldRules.TextMaxLength);
 }
 
+internal static class CommentValidator
+{
+    public const string TextRequiredMessage = "Comment text is required.";
+    public const string EventNotFoundMessage = "Event not found.";
+
+    /// <summary>
+    /// The Comment text rule, shared by add and edit: trimmed, non-empty and at most
+    /// <see cref="FieldRules.CommentTextMaxLength"/> characters. The caller checks that the
+    /// Activity and any Event exist.
+    /// </summary>
+    public static string? ValidateText(string? text, out string trimmed)
+    {
+        trimmed = text?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0) return TextRequiredMessage;
+        return FieldRules.MaxLength(trimmed, "Comment text", FieldRules.CommentTextMaxLength);
+    }
+}
+
 internal static class EventValidator
 {
     /// <summary>The Event name rule, then the existing selection rules (messages unchanged).</summary>
