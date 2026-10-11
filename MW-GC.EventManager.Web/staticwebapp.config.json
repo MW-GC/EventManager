@@ -17,6 +17,39 @@
       "allowedRoles": [ "anonymous" ]
     },
     {
+      "route": "/feedback/*",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/api/feedback/*",
+      "methods": [ "GET", "POST" ],
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/_framework/*",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/_content/*",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/css/app.css",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/js/focus.js",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/MW-GC.EventManager.Web.styles.css",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
+      "route": "/favicon.png",
+      "allowedRoles": [ "anonymous" ]
+    },
+    {
       "route": "/api/*",
       "allowedRoles": [ "admin" ]
     },

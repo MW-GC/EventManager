@@ -44,6 +44,8 @@ public sealed class ServiceRouteContractTests
         new(typeof(EventService), nameof(EventService.SaveAsync), "POST", "api/events", h => new EventService(h).SaveAsync(new EventEntity { Id = Id }, Guid.NewGuid())),
         new(typeof(EventService), nameof(EventService.UpdateAsync), "PUT", "api/events/{id}", h => new EventService(h).UpdateAsync(new EventEntity { Id = Id })),
         new(typeof(EventService), nameof(EventService.DeleteAsync), "DELETE", "api/events/{id}", h => new EventService(h).DeleteAsync(Id)),
+        new(typeof(EventService), nameof(EventService.GetFeedbackLinkAsync), "GET", "api/events/{id}/feedback-link", h => new EventService(h).GetFeedbackLinkAsync(Id)),
+        new(typeof(EventService), nameof(EventService.GetLikesAsync), "GET", "api/events/{id}/likes", h => new EventService(h).GetLikesAsync(Id)),
 
         new(typeof(ThemeService), nameof(ThemeService.GetAllAsync), "GET", "api/themes", h => new ThemeService(h).GetAllAsync()),
         new(typeof(ThemeService), nameof(ThemeService.CreateAsync), "POST", "api/themes", h => new ThemeService(h).CreateAsync(new ThemeEntity { Id = Id })),

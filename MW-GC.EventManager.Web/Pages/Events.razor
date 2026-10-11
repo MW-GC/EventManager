@@ -7,6 +7,8 @@
 @inject ThemeService ThemeSvc
 @inject HolidayService HolidaySvc
 @inject FocusReturn Focus
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageHeader Title="Events" Subtitle="Generate, view, and manage gaming events" />
 <ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
@@ -330,6 +332,23 @@
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 16px;">
                 @_detailEvent.Date.ToLocalTime().ToString("f")
             </FluentLabel>
+            @* #101: the like count and the anonymous feedback link (admin only). *@
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true" Style="margin-bottom: 16px;">
+                <span class="event-likes">@LikesText</span>
+                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Loading="@_copyingLink" OnClick="CopyFeedbackLink">Copy feedback link</FluentButton>
+                @if (_feedbackLinkStatus is not null)
+                {
+                    <span role="status">@_feedbackLinkStatus</span>
+                }
+                @if (_feedbackLinkError is not null)
+                {
+                    <span role="alert" style="color: var(--error);">@_feedbackLinkError</span>
+                }
+            </FluentStack>
+            @if (_feedbackLink is not null)
+            {
+                <input type="text" readonly value="@_feedbackLink" aria-label="Feedback link" style="width: 100%; margin-bottom: 16px;" />
+            }
 
             <ApiErrorBar Message="@_winnerError" />
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding-right: 8px;">
@@ -1020,8 +1039,69 @@
         _detailComments = [];
         _detailCommentError = null;
         _winnerError = null;
+        _likesFor = null;
+        _feedbackLink = _feedbackLinkStatus = _feedbackLinkError = null;
         _details.Open();
         _ = Focus.RememberAsync($"details-{e.Id}");
+    }
+
+    // #101: the like count and feedback link in the details dialog (admin routes).
+    private Guid? _likesFor;
+    private int? _likes;
+    private bool _likesFailed;
+    private string? _feedbackLink;
+    private string? _feedbackLinkStatus;
+    private string? _feedbackLinkError;
+    private bool _copyingLink;
+
+    private string LikesText => _likes is { } n ? (n == 1 ? "1 like" : $"{n} likes")
+        : _likesFailed ? "Likes could not be loaded." : "Loading likes…";
+
+    // The count loads once the dialog has rendered, once per opening.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_detailEvent is not { } detail || _likesFor == detail.Id) return;
+        _likesFor = detail.Id;
+        _likes = null;
+        _likesFailed = false;
+        var token = _details.Current;
+        var (value, error) = await ApiResult.LoadAsync(() => EventSvc.GetLikesAsync(detail.Id));
+        if (!_details.IsCurrent(token)) return;
+        _likes = value?.Count;
+        _likesFailed = error is not null || value is null;
+        StateHasChanged();
+    }
+
+    private async Task CopyFeedbackLink()
+    {
+        if (_detailEvent is not { } detail || _copyingLink) return;
+        _copyingLink = true;
+        _feedbackLinkStatus = _feedbackLinkError = null;
+        var token = _details.Current;
+        try
+        {
+            var (link, error) = await ApiResult.LoadAsync(() => EventSvc.GetFeedbackLinkAsync(detail.Id));
+            if (!_details.IsCurrent(token)) return;
+            if (link is null)
+            {
+                _feedbackLinkError = $"The feedback link could not be loaded. {error ?? ApiResult.UnreadableMessage}";
+                return;
+            }
+            _feedbackLink = Nav.ToAbsoluteUri($"feedback/{link.Token}").ToString();
+            try
+            {
+                await JS.InvokeVoidAsync("navigator.clipboard.writeText", _feedbackLink);
+                if (_details.IsCurrent(token)) _feedbackLinkStatus = "Feedback link copied.";
+            }
+            catch (JSException)
+            {
+                if (_details.IsCurrent(token)) _feedbackLinkStatus = "Copy the feedback link from the box below.";
+            }
+        }
+        finally
+        {
+            _copyingLink = false;
+        }
     }
 
     // The Close button closes at once without asking, but never while Select Winner runs.
