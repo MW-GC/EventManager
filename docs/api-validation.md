@@ -15,7 +15,7 @@ All routes stay `AuthorizationLevel.Anonymous` on purpose: the Static Web App ro
 
 Property names are case-insensitive and camelCase, as before. A `charset` other than UTF-8 is transcoded. The body is read and deserialised once.
 
-The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/themes`, `PUT /api/themes/{id}`, `POST /api/holidays`, `PUT /api/holidays/{id}`, `POST /api/activities`, `PUT /api/activities/{id}`, `PATCH /api/activities/{id}/comments`, `POST /api/events` and `PUT /api/events/{id}`. An update to an id that does not exist is still a 404, checked before the body is read.
+The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/themes`, `PUT /api/themes/{id}`, `POST /api/holidays`, `PUT /api/holidays/{id}`, `POST /api/activities`, `PUT /api/activities/{id}`, `PATCH /api/activities/{id}/comments`, `POST /api/activities/{id}/comments`, `PUT /api/activities/{id}/comments/{commentId}`, `POST /api/events` and `PUT /api/events/{id}`. An update to an id that does not exist is still a 404, checked before the body is read. For Comments, a `POST` to an Activity that does not exist and a `PUT` of a Comment that does not exist or belongs to another Activity are also 404, checked before the body is read.
 
 ## Field rules (400, the message names the field)
 
@@ -27,6 +27,8 @@ The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/them
 | Activity | `GameId` | Required (`GameId is required.`) and must name an existing Game (`Game not found.`). |
 | Activity | `ThemeIds`, `HolidayIds` | Lenient: a missing or `null` list is stored as `[]`, and duplicates are removed. Whether the ids exist is not checked. |
 | Event | `Selections` and the rest | Unchanged: the existing `ValidateSelections` messages, run after the name rule. |
+| Comment | `Text` | Trimmed, then required and at most 1000 characters. The trimmed value is stored. Messages: `Comment text is required.` / `Comment text must be 1000 characters or fewer.` |
+| Comment | `EventId` | Optional. On add it must name an existing Event (`Event not found.`), checked after the text rule. An edit never changes it. |
 
 The event-create idempotency flow is unchanged: 201 on first insert, 200 on a matching replay, 409 when the details differ, and 400 for a bad `Idempotency-Key` (see `idempotent-event-creates.md`).
 
@@ -44,9 +46,20 @@ A Game, Theme or Holiday that Activities still use cannot be deleted. The route 
 
 The count and the delete are two separate storage calls with no lock, so an Activity created between them can still end up pointing at a deleted row. That race is accepted. A storage failure while counting goes through the failure mapping below like any other route (for example a 503 for an outage), and nothing is deleted. Saved Events are unaffected: they keep their own copies of the Game and Activity they selected.
 
+## Comments
+
+| Request | Status |
+| --- | --- |
+| `GET /api/activities/{id}/comments` | 200 with the Activity's Comments, oldest first by added date (`createdUtc`) then id; 404 for an unknown Activity |
+| `POST /api/activities/{id}/comments` | 201 with `Location: /api/activities/{id}/comments/{commentId}`, the `ETag` header and the Comment. The API sets `id`, `activityId` and `createdUtc` and ignores them in the body. 404 for an unknown Activity; 400 for an unknown Event |
+| `PUT /api/activities/{id}/comments/{commentId}` | 200 with the Comment. Only the text changes; the added date, the Activity and the Event are kept. 404 when the Comment is missing or belongs to another Activity |
+| `DELETE /api/activities/{id}/comments/{commentId}` | 204, idempotent. A Comment of another Activity is also 204 and nothing is deleted |
+
+Each Comment is its own row in the `ActivityComments` table (ADR 0001). Deleting an Activity deletes its Comments, and a retried Activity delete after the Activity row is already gone still deletes them. Deleting an Event leaves Comments written from it in place, with their `eventId`. Duplicating an Activity copies no Comments.
+
 ## Conflict-safe writes (ETags and If-Match)
 
-Every Game, Theme, Holiday, Activity and Event carries its Table Storage ETag as the string property `eTag` in the JSON body (lists included), and every single-entity response (GET one, POST, PUT, the comments `PATCH`) also sends it as the HTTP `ETag` header. A client may echo it as `If-Match` on `PUT`, `DELETE` and `PATCH /api/activities/{id}/comments`; the value is passed to storage as given. If-Match is optional, and only the header counts: an `eTag` in a request body is ignored.
+Every Game, Theme, Holiday, Activity, Event and Comment carries its Table Storage ETag as the string property `eTag` in the JSON body (lists included), and every single-entity response (GET one, POST, PUT, the comments `PATCH`, the Comment `POST` and `PUT`) also sends it as the HTTP `ETag` header. A client may echo it as `If-Match` on `PUT`, `DELETE`, `PATCH /api/activities/{id}/comments` and the Comment `PUT` and `DELETE`; the value is passed to storage as given. If-Match is optional, and only the header counts: an `eTag` in a request body is ignored.
 
 | Request | Status |
 | --- | --- |
@@ -55,8 +68,12 @@ Every Game, Theme, Holiday, Activity and Event carries its Table Storage ETag as
 | `PUT` for a row that was deleted, even between the existence check and the write, with or without `If-Match` | 404; the row is not recreated (updates are never upserts) |
 | `DELETE` with a stale `If-Match` | 409; nothing is deleted |
 | `DELETE` of a row that does not exist | 204 (idempotent, as before) |
+| `PUT /api/activities/{id}/comments/{commentId}` with a stale `If-Match` | 409; the text is unchanged |
+| `DELETE /api/activities/{id}/comments/{commentId}` with a stale `If-Match` | 409; the Comment is kept |
 
 The comments `PATCH` reads the row and writes it back with the ETag it just read, so a write that lands in between makes the `PATCH` a 409 instead of being overwritten. It does not retry.
+
+Each Comment row has its own eTag, so editing one Comment never makes another Comment or the Activity stale.
 
 ## Long values (chunked properties)
 
@@ -78,4 +95,4 @@ Every failure is logged through `ILogger<T>` in the Functions class, with the ex
 
 ## Test coverage
 
-`RequestBodyGuardTests` calls the guard directly, with no Functions host. `EntityValidatorTests` covers each validator. `ApiValidationRouteTests` drives every body-reading route through the real Functions classes and `TableStore` over in-memory mocked tables, and checks that rejected requests write nothing. `StorageFailureTests` covers the failure mapping and logging with a mocked `TableClient`, because a running instance cannot simulate a storage outage. `DeleteInUseRefusalTests` covers the delete refusal for all three entities, an Event keeping its snapshot after a Game delete, and a failure while counting. `ConditionalWriteTests` covers If-Match on every `PUT`, `DELETE` and the comments `PATCH`, the update-that-races-a-delete 404, and the ETag header and body. `PropertyLimitTests` covers chunking a five-Selection Event at every cap, old-shape rows, the row-limit 413 and the 412 mapping.
+`RequestBodyGuardTests` calls the guard directly, with no Functions host. `EntityValidatorTests` covers each validator. `ApiValidationRouteTests` drives every body-reading route through the real Functions classes and `TableStore` over in-memory mocked tables, and checks that rejected requests write nothing. `StorageFailureTests` covers the failure mapping and logging with a mocked `TableClient`, because a running instance cannot simulate a storage outage. `DeleteInUseRefusalTests` covers the delete refusal for all three entities, an Event keeping its snapshot after a Game delete, and a failure while counting. `ConditionalWriteTests` covers If-Match on every `PUT`, `DELETE` and the comments `PATCH`, the update-that-races-a-delete 404, and the ETag header and body. `PropertyLimitTests` covers chunking a five-Selection Event at every cap, old-shape rows, the row-limit 413 and the 412 mapping. `CommentApiTests` covers the Comment routes through the real Functions classes over in-memory tables: add, list order, edit, delete, the text rule, an unknown Activity or Event, bad bodies, If-Match on edit and delete, the Activity-delete cascade (including a retried delete and a stale one), an Event delete leaving Comments in place, a duplicate copying none, and a list or Activity delete that queries only that Activity's Comments.
