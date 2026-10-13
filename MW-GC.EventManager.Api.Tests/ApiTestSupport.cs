@@ -217,7 +217,7 @@ internal sealed class LibraryHarness
         ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, "Themes", "Theme"), activities, ThemeLog);
         HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), activities, HolidayLog);
         ActivityApi = new ActivityFunctions(activities, games, comments, ActivityLog);
-        EventApi = new EventFunctions(events, games, activities, EventLog, metrics);
+        EventApi = new EventFunctions(events, games, activities, metrics, EventLog);
         EventMetricsApi = new EventMetricsFunctions(metrics, events, EventMetricsLog);
         CommentApi = new ActivityCommentFunctions(comments, activities, events, CommentLog);
     }

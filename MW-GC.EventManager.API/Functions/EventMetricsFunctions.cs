@@ -44,11 +44,12 @@ internal sealed class EventMetricsFunctions
     });
 
     /// <summary>
-    /// Replaces the Event's metrics with the body's fields (an all-null body clears them and is
-    /// stored). An <c>id</c> or <c>eTag</c> in the body is ignored. With no stored row, no If-Match
-    /// creates it and an If-Match is a 409 (a tag cannot match a missing row); with a stored row,
-    /// no If-Match replaces it and a stale If-Match is a 409. A create that loses a race is a 409.
-    /// Every success is a 200 with the row and its ETag.
+    /// Writes the Event's metrics from the body's fields (an all-null body clears them and is
+    /// stored). An <c>id</c> or <c>eTag</c> in the body is ignored. No If-Match only creates the
+    /// row: when a row is stored (including one a concurrent first save just created) it is a 409,
+    /// so two first saves cannot overwrite each other. An If-Match (a tag or <c>*</c>) replaces the
+    /// stored row conditionally: a stale tag is a 409, and so is any tag when no row is stored (a
+    /// tag cannot match a missing row). Every success is a 200 with the row and its ETag.
     /// </summary>
     [Function("PutEventMetrics")]
     public Task<IActionResult> PutEventMetrics(
@@ -63,11 +64,16 @@ internal sealed class EventMetricsFunctions
         if (EventMetricsValidator.Validate(metrics) is { } error) return new BadRequestObjectResult(error);
 
         metrics.Id = id;
-        if (await _store.GetAsync(id, ct) is not null)
-            return await EntityResults.UpdateAsync(_store, req, metrics, ct);
+        var ifMatch = EntityResults.IfMatch(req);
+        if (ifMatch == default)
+        {
+            // Insert-only: an existing row (or one a concurrent create just added) is the usual 409.
+            metrics.ETag = default;
+            return await _store.TryAddAsync(metrics, ct) ? EntityResults.Ok(req, metrics) : EntityResults.Conflict();
+        }
 
-        if (EntityResults.IfMatch(req) != default) return EntityResults.Conflict();
-        metrics.ETag = default;
-        return await _store.TryAddAsync(metrics, ct) ? EntityResults.Ok(req, metrics) : EntityResults.Conflict();
+        // Conditional replace; a tag (even *) cannot match a row that is not stored.
+        var result = await EntityResults.UpdateAsync(_store, req, metrics, ct, ifMatch);
+        return result is NotFoundResult ? EntityResults.Conflict() : result;
     });
 }

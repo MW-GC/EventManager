@@ -283,22 +283,60 @@ public sealed class EventMetricsTests
         Assert.AreEqual(RouteFailures.ConflictMessage, ApiResults.Message(tagged));
         Assert.AreEqual(StatusCodes.Status409Conflict, ApiResults.Status(star));
         Assert.IsEmpty(h.EventMetrics);
-        Assert.AreEqual(0, MetricsWrites());
+        // An If-Match is only ever a conditional replace, which storage refuses for a missing row;
+        // nothing tries to insert or upsert one.
+        Assert.AreEqual(0, h.EventMetricsTable.Invocations.Count(i => i.Method.Name is nameof(TableClient.AddEntityAsync)
+            or nameof(TableClient.UpsertEntityAsync)));
     }
 
     [TestMethod]
-    public async Task Put_WithoutIfMatch_ReplacesAStoredRow()
+    public async Task Put_WithoutIfMatch_WhenNoRowIsStored_Creates_200_WithETag()
     {
         var (id, _) = await CreateEvent();
+
+        var (written, putTag) = await Put(id, Metrics(10, 2, 8, 50m));
+        var (read, getTag) = await Get(id);
+
+        Assert.AreEqual(putTag, written.ETag.ToString());
+        AssertValues(read, 10, 2, 8, 50m);
+        Assert.AreEqual(putTag, getTag);
+        Assert.AreEqual(1, h.EventMetricsTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.AddEntityAsync)));
+        Assert.AreEqual(0, h.EventMetricsTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.UpdateEntityAsync)));
+    }
+
+    [TestMethod]
+    public async Task Put_WithoutIfMatch_WhenARowIsStored_Is409_AndLeavesTheRowUnchanged()
+    {
+        var (id, _) = await CreateEvent();
+        // Two admins both opened the empty metrics; the first saves.
         var (_, first) = await Put(id, Metrics(10, 2, 8, 50m));
 
-        var (replaced, second) = await Put(id, Metrics(attendees: 11));
+        var result = await h.EventMetricsApi.PutEventMetrics(Json(Metrics(attendees: 11)), id, default);
 
-        AssertValues(replaced, 11, null, null, null);
-        AssertValues((await Get(id)).Metrics, 11, null, null, null);
-        Assert.AreNotEqual(first, second);
-        var update = h.EventMetricsTable.Invocations.Single(i => i.Method.Name == nameof(TableClient.UpdateEntityAsync));
-        Assert.AreEqual(ETag.All, (ETag)update.Arguments[1]!, "no If-Match is an unconditional replace");
+        Assert.AreEqual(StatusCodes.Status409Conflict, ApiResults.Status(result));
+        Assert.AreEqual(RouteFailures.ConflictMessage, ApiResults.Message(result));
+        var (read, getTag) = await Get(id);
+        AssertValues(read, 10, 2, 8, 50m);
+        Assert.AreEqual(first, getTag);
+        Assert.AreEqual(0, h.EventMetricsTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.UpdateEntityAsync)),
+            "no If-Match never replaces a stored row");
+    }
+
+    [TestMethod]
+    public async Task Put_TwoConcurrentFirstSaves_OneWins_TheOtherIs409()
+    {
+        var (id, _) = await CreateEvent();
+        var requests = new[] { Json(Metrics(10)), Json(Metrics(20)) };
+
+        var results = await Task.WhenAll(requests.Select(r => h.EventMetricsApi.PutEventMetrics(r, id, default)));
+
+        var statuses = results.Select(ApiResults.Status).ToArray();
+        Assert.AreEqual(1, statuses.Count(s => s == StatusCodes.Status200OK));
+        Assert.AreEqual(1, statuses.Count(s => s == StatusCodes.Status409Conflict));
+        var winner = ApiResults.Value<EventMetricsEntity>(results.Single(r => ApiResults.Status(r) == StatusCodes.Status200OK));
+        var (read, getTag) = await Get(id);
+        Assert.AreEqual(winner.Attendees, read.Attendees);
+        Assert.AreEqual(winner.ETag.ToString(), getTag);
     }
 
     [TestMethod]
@@ -322,7 +360,8 @@ public sealed class EventMetricsTests
         var (_, current) = await Put(id, Metrics(10));
         var other = Guid.NewGuid();
 
-        var request = RawJson($"{{\"id\":\"{other}\",\"eTag\":\"W/\\\"datetime'2000-01-01T00%3A00%3A00Z'\\\"\",\"attendees\":15}}");
+        // The header carries the current tag; the body's stale eTag and other id must not count.
+        var request = RawJson($"{{\"id\":\"{other}\",\"eTag\":\"W/\\\"datetime'2000-01-01T00%3A00%3A00Z'\\\"\",\"attendees\":15}}", current);
         var result = await h.EventMetricsApi.PutEventMetrics(request, id, default);
 
         Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(result), "a stale eTag in the body is not an If-Match");
@@ -338,13 +377,12 @@ public sealed class EventMetricsTests
     {
         var (id, _) = await CreateEvent();
         var key = id.ToString("D");
-        // The other create lands between this PUT's read (no row yet) and its insert.
-        h.EventMetricsTable.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, string rowKey, IEnumerable<string> _, CancellationToken _) =>
-            {
-                h.EventMetrics[rowKey] = new TableEntity("Metrics", rowKey) { ["Attendees"] = 99, ETag = TableMocks.NextETag() };
-                throw new RequestFailedException(404, "Missing");
-            });
+        // The other create lands just before this PUT's insert. TableStore flattens the metrics
+        // to a TableEntity (decimal is stored as a JSON string), so that is the insert it makes.
+        h.EventMetricsTable.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
+            .Callback((TableEntity row, CancellationToken _) =>
+                h.EventMetrics[row.RowKey] = new TableEntity("Metrics", row.RowKey) { ["Attendees"] = 99, ETag = TableMocks.NextETag() })
+            .ThrowsAsync(new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null));
 
         var result = await h.EventMetricsApi.PutEventMetrics(Json(Metrics(10)), id, default);
 

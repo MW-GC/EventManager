@@ -30,8 +30,10 @@ public sealed class FeedbackTests
         service.Setup(s => s.GetTableClient("Events")).Returns(TableMocks.Table(_events).Object);
         service.Setup(s => s.GetTableClient(FeedbackStore.LinksTable)).Returns(TableMocks.Table(_links).Object);
         service.Setup(s => s.GetTableClient(FeedbackStore.LikesTable)).Returns(TableMocks.FilteringTable(_likes).Object);
+        service.Setup(s => s.GetTableClient("EventMetrics")).Returns(TableMocks.Table(new ConcurrentDictionary<string, TableEntity>()).Object);
         var events = new TableStore<EventEntity>(service.Object, "Events", "Event");
-        _eventApi = new EventFunctions(events, null!, null!, new ListLogger<EventFunctions>());
+        var metrics = new TableStore<EventMetricsEntity>(service.Object, "EventMetrics", "Metrics");
+        _eventApi = new EventFunctions(events, null!, null!, metrics, new ListLogger<EventFunctions>());
         _api = new FeedbackFunctions(new FeedbackStore(service.Object), events, new LikeRateLimiter(_time), new ListLogger<FeedbackFunctions>());
     }
 
