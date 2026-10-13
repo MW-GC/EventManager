@@ -9,6 +9,7 @@ using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
 using MW_GC.EventManager.Web.Shared;
+using MW_GC.EventManager.Web.Shared.Library;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -232,7 +233,7 @@ public sealed class DialogSafetyTests : IDisposable
         // The submit may still be queued behind other renderer work, so wait for the save's render.
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
-        await CloseThrough(page, "CloseEdit");
+        await CloseThrough(page, GamesLibrary(page), "CloseForm");
         Assert.IsFalse(page.HasFormDialog());
         await RowButton(page, "Brawl", "Edit").ClickAsync(new());
         await TextField(page).ChangeAsync(new ChangeEventArgs { Value = "Brawl typed" });
@@ -242,7 +243,7 @@ public sealed class DialogSafetyTests : IDisposable
 
         Assert.AreEqual("Edit Game", page.DialogTitle());
         Assert.AreEqual("Brawl typed", TextField(page).GetAttribute("value"));
-        Assert.AreEqual(brawl.Id, ((GameEntity)Field(page.Instance, "_edit")!).Id);
+        Assert.AreEqual(brawl.Id, ((LibraryEdit<GameEntity>)Field(GamesLibrary(page), "_edit")!).Item.Id);
         Assert.Contains("Stock", page.FormDialog().TextContent);
         Assert.IsEmpty(page.FormDialog().Alerts());
         Assert.AreEqual(1, api.Count(HttpMethod.Put, pathA));
@@ -297,7 +298,7 @@ public sealed class DialogSafetyTests : IDisposable
         var cancel = page.FormDialog().Button("Cancel");
         await cancel.ClickAsync(new());
         // A click that lands before the re-render reaches the handler itself, which ignores it.
-        await CloseThrough(page, "CancelEdit");
+        await CloseThrough(page, GamesLibrary(page), "CancelForm");
 
         Assert.IsTrue(page.HasFormDialog());
         Assert.AreEqual("Kart renamed", TextField(page).GetAttribute("value"));
@@ -615,11 +616,18 @@ public sealed class DialogSafetyTests : IDisposable
     }
 
     // Runs one of the page's close methods, then renders, as an event handler would.
-    private static Task CloseThrough(IRenderedComponent<IComponent> page, string method) => page.InvokeAsync(() =>
+    private static Task CloseThrough(IRenderedComponent<IComponent> page, string method) => CloseThrough(page, page.Instance, method);
+
+    // The same on a component inside the page, such as the shared Library page that holds the Games dialogs.
+    private static Task CloseThrough(IRenderedComponent<IComponent> page, IComponent component, string method) => page.InvokeAsync(() =>
     {
-        Call(page.Instance, method);
-        Call(page.Instance, "StateHasChanged");
+        Call(component, method);
+        Call(component, "StateHasChanged");
     });
+
+    // The Games page's dialogs, busy flag and close methods live in the shared Library page it renders (#124).
+    private static IComponent GamesLibrary(IRenderedComponent<IComponent> page) =>
+        page.FindComponent<LibraryPage<GameEntity>>().Instance;
 
     private static IElement RowButton(IRenderedComponent<IComponent> page, string item, string title) =>
         page.FindAll("tbody tr.fluent-data-grid-row")
