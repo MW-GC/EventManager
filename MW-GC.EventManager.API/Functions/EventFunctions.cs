@@ -13,17 +13,21 @@ internal sealed class EventFunctions
     private readonly TableStore<EventEntity> _store;
     private readonly TableStore<GameEntity> _games;
     private readonly TableStore<ActivityEntity> _activities;
+    private readonly TableStore<EventMetricsEntity> _metrics;
     private readonly ILogger<EventFunctions> _logger;
 
+    /// <param name="metrics">The Event metrics table; deleting an Event deletes its row there too.</param>
     public EventFunctions(
         TableStore<EventEntity> store,
         TableStore<GameEntity> games,
         TableStore<ActivityEntity> activities,
+        TableStore<EventMetricsEntity> metrics,
         ILogger<EventFunctions> logger)
     {
         _store = store;
         _games = games;
         _activities = activities;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -103,6 +107,12 @@ internal sealed class EventFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "events/{id:guid}")] HttpRequest req,
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteEvent", ct, async () =>
     {
-        return await EntityResults.DeleteAsync(_store, req, id, ct);
+        var result = await EntityResults.DeleteAsync(_store, req, id, ct);
+        // The Event's metrics row goes with it (ADR 0001). A 204 also covers an Event that was
+        // already gone, so a retried delete removes a row an interrupted one left behind; a 409
+        // (stale If-Match) deleted nothing, so the metrics stay too.
+        if (result is NoContentResult)
+            await _metrics.DeleteAsync(id, ct: ct);
+        return result;
     });
 }

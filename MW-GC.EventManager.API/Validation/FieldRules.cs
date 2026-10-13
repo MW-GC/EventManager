@@ -22,4 +22,17 @@ internal static class FieldRules
     /// <summary>Returns an error naming the field when the value is longer than <paramref name="max"/>.</summary>
     public static string? MaxLength(string? value, string field, int max) =>
         value is not null && value.Length > max ? $"{field} must be {max} characters or fewer." : null;
+
+    /// <summary>
+    /// An optional count: null, or a whole number from 0 to <paramref name="max"/>. A fractional
+    /// JSON number never gets here; it fails to read into an <c>int?</c> and is a malformed body.
+    /// </summary>
+    public static string? Count(int? value, string field, int max) =>
+        value is < 0 || value > max ? $"{field} must be a whole number from 0 to {max}." : null;
+
+    /// <summary>An optional amount of money: null, or 0 to <paramref name="max"/> with at most 2 decimal places.</summary>
+    public static string? Money(decimal? value, string field, decimal max) =>
+        value is { } amount && (amount < 0 || amount > max || decimal.Round(amount, 2) != amount)
+            ? $"{field} must be between 0 and {max} with at most 2 decimal places."
+            : null;
 }

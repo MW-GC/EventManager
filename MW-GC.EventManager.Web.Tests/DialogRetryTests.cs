@@ -60,7 +60,9 @@ public class DialogRetryTests
             .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(rows.Values.ToList(), null, Mock.Of<Response>())]));
         var service = new Mock<TableServiceClient>();
         service.Setup(s => s.GetTableClient(It.IsAny<string>())).Returns(table.Object);
-        api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
+        // Its own metrics table; these tests never delete an Event, so it is never written.
+        service.Setup(s => s.GetTableClient("metrics")).Returns(new Mock<TableClient>().Object);
+        api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(service.Object, "metrics", "metrics"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
     }
 
     [TestMethod]

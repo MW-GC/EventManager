@@ -162,6 +162,7 @@ internal sealed class LibraryHarness
     public ConcurrentDictionary<string, HolidayEntity> Holidays { get; } = new();
     public ConcurrentDictionary<string, TableEntity> Activities { get; } = new();
     public ConcurrentDictionary<string, TableEntity> Events { get; } = new();
+    public ConcurrentDictionary<string, TableEntity> EventMetrics { get; } = new();
     public ConcurrentDictionary<string, ActivityCommentEntity> ActivityComments { get; } = new();
 
     public Mock<TableClient> GameTable { get; }
@@ -169,6 +170,7 @@ internal sealed class LibraryHarness
     public Mock<TableClient> HolidayTable { get; }
     public Mock<TableClient> ActivityTable { get; }
     public Mock<TableClient> EventTable { get; }
+    public Mock<TableClient> EventMetricsTable { get; }
     public Mock<TableClient> CommentTable { get; }
 
     public ListLogger<GameFunctions> GameLog { get; } = new();
@@ -176,6 +178,7 @@ internal sealed class LibraryHarness
     public ListLogger<HolidayFunctions> HolidayLog { get; } = new();
     public ListLogger<ActivityFunctions> ActivityLog { get; } = new();
     public ListLogger<EventFunctions> EventLog { get; } = new();
+    public ListLogger<EventMetricsFunctions> EventMetricsLog { get; } = new();
     public ListLogger<ActivityCommentFunctions> CommentLog { get; } = new();
 
     public GameFunctions GameApi { get; }
@@ -183,6 +186,7 @@ internal sealed class LibraryHarness
     public HolidayFunctions HolidayApi { get; }
     public ActivityFunctions ActivityApi { get; }
     public EventFunctions EventApi { get; }
+    public EventMetricsFunctions EventMetricsApi { get; }
     public ActivityCommentFunctions CommentApi { get; }
 
     public LibraryHarness()
@@ -192,6 +196,7 @@ internal sealed class LibraryHarness
         HolidayTable = TableMocks.Table(Holidays);
         ActivityTable = TableMocks.Table(Activities);
         EventTable = TableMocks.Table(Events);
+        EventMetricsTable = TableMocks.Table(EventMetrics);
         CommentTable = TableMocks.Table(ActivityComments);
 
         var service = new Mock<TableServiceClient>();
@@ -200,22 +205,25 @@ internal sealed class LibraryHarness
         service.Setup(s => s.GetTableClient("Holidays")).Returns(HolidayTable.Object);
         service.Setup(s => s.GetTableClient("Activities")).Returns(ActivityTable.Object);
         service.Setup(s => s.GetTableClient("Events")).Returns(EventTable.Object);
+        service.Setup(s => s.GetTableClient("EventMetrics")).Returns(EventMetricsTable.Object);
         service.Setup(s => s.GetTableClient("ActivityComments")).Returns(CommentTable.Object);
 
         var games = new TableStore<GameEntity>(service.Object, "Games", "Game");
         var activities = new TableStore<ActivityEntity>(service.Object, "Activities", "Activity");
         var events = new TableStore<EventEntity>(service.Object, "Events", "Event");
+        var metrics = new TableStore<EventMetricsEntity>(service.Object, "EventMetrics", "Metrics");
         var comments = new TableStore<ActivityCommentEntity>(service.Object, "ActivityComments", "Comment");
         GameApi = new GameFunctions(games, activities, GameLog);
         ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, "Themes", "Theme"), activities, ThemeLog);
         HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), activities, HolidayLog);
         ActivityApi = new ActivityFunctions(activities, games, comments, ActivityLog);
-        EventApi = new EventFunctions(events, games, activities, EventLog);
+        EventApi = new EventFunctions(events, games, activities, metrics, EventLog);
+        EventMetricsApi = new EventMetricsFunctions(metrics, events, EventMetricsLog);
         CommentApi = new ActivityCommentFunctions(comments, activities, events, CommentLog);
     }
 
     /// <summary>Insert, upsert and update calls that reached any table. Seeding writes the dictionaries directly, so it never counts.</summary>
-    public int Writes() => new[] { GameTable, ThemeTable, HolidayTable, ActivityTable, EventTable, CommentTable }
+    public int Writes() => new[] { GameTable, ThemeTable, HolidayTable, ActivityTable, EventTable, EventMetricsTable, CommentTable }
         .Sum(t => t.Invocations.Count(i => i.Method.Name is nameof(TableClient.UpsertEntityAsync) or nameof(TableClient.AddEntityAsync)
             or nameof(TableClient.UpdateEntityAsync)));
 
