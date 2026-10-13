@@ -1,0 +1,268 @@
+@* The Filters and slots of the create-and-edit Event dialog: Themed activities only, the Game, Theme
+   and Holiday filters, Unique games only, Randomize All, and one card per slot with its Game and
+   Activity pickers. The slots live in the SlotPlanner, which this panel drives directly. The filter
+   values belong to the dialog (they count as unsaved changes and Unique games only is saved): the
+   panel shows the planner's Filter and hands every change back through FilterChanged. *@
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+
+@* Themed-only toggle *@
+<FluentCard Style="padding: 12px;" AreaRestricted="false">
+    <FluentSwitch @bind-Value="_custThemedOnly" @bind-Value:after="@(() => Change(Filter with { ThemedOnly = _custThemedOnly }))" Label="Themed Activities Only" />
+</FluentCard>
+
+@* Game / Theme / Holiday filters *@
+<FluentGrid Spacing="3">
+    <FluentGridItem xs="12" sm="4">
+        <FluentCard Style="padding: 12px;" AreaRestricted="false">
+            <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Games</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Only randomize from specific games</FluentLabel>
+            @if (Games is not null)
+            {
+                <FluentStack Orientation="Orientation.Vertical" VerticalGap="4" Style="max-height: 160px; overflow-y: auto;"
+                             role="group" aria-label="Filter by games">
+                    @foreach (var game in Games.OrderBy(g => g.Name))
+                    {
+                        <FluentCheckbox Label="@game.Name"
+                                        Value="@Filter.GameIds.Contains(game.Id)"
+                                        ValueChanged="@(v => Change(Filter with { GameIds = Toggle(Filter.GameIds, game.Id, v) }))" />
+                    }
+                </FluentStack>
+            }
+        </FluentCard>
+    </FluentGridItem>
+    <FluentGridItem xs="12" sm="4">
+        <FluentCard Style="padding: 12px;" AreaRestricted="false">
+            <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Themes</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific themes</FluentLabel>
+            @if (Themes is not null)
+            {
+                <div style="max-height: 160px; overflow-y: auto;" role="group" aria-label="Filter by themes">
+                    @foreach (var theme in Themes)
+                    {
+                        <FluentCheckbox Label="@theme.Name"
+                                        Value="@Filter.ThemeIds.Contains(theme.Id)"
+                                        ValueChanged="@(v => Change(Filter with { ThemeIds = Toggle(Filter.ThemeIds, theme.Id, v) }))" />
+                    }
+                </div>
+            }
+        </FluentCard>
+    </FluentGridItem>
+    <FluentGridItem xs="12" sm="4">
+        <FluentCard Style="padding: 12px;" AreaRestricted="false">
+            <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Holidays</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific holidays</FluentLabel>
+            @if (Holidays is not null)
+            {
+                <div style="max-height: 160px; overflow-y: auto;" role="group" aria-label="Filter by holidays">
+                    @foreach (var holiday in Holidays)
+                    {
+                        <FluentCheckbox Label="@holiday.Name"
+                                        Value="@Filter.HolidayIds.Contains(holiday.Id)"
+                                        ValueChanged="@(v => Change(Filter with { HolidayIds = Toggle(Filter.HolidayIds, holiday.Id, v) }))" />
+                    }
+                </div>
+            }
+        </FluentCard>
+    </FluentGridItem>
+</FluentGrid>
+
+@* Selections header with controls *@
+<FluentStack Orientation="Orientation.Horizontal"
+             HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+             VerticalAlignment="VerticalAlignment.Center"
+             Wrap="true">
+    <div>
+        <FluentLabel Weight="FontWeight.Bold">Game & Activity Selections (@Planner.Slots.Count)</FluentLabel>
+        <FluentLabel Typo="Typography.Body">Select 1–5 activities. If only one activity is selected when saved, it automatically becomes the winner.</FluentLabel>
+        @if (Planner.Slots.Count == 1)
+        {
+            <FluentLabel role="status">Single activity: this activity will automatically win when you save.</FluentLabel>
+        }
+        @if (Filter.ThemedOnly || Filter.GameIds.Count > 0 || Filter.ThemeIds.Count > 0 || Filter.HolidayIds.Count > 0)
+        {
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Filters apply when randomizing all selections or re-rolling a slot</FluentLabel>
+        }
+    </div>
+    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
+        <FluentSwitch @bind-Value="_custUniqueGames" @bind-Value:after="@(() => Change(Filter with { UniqueGames = _custUniqueGames }))" Label="Unique games only" />
+        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="Planner.RandomizeAll" IconStart="@(new Size16.ArrowShuffle())">
+            Randomize All
+        </FluentButton>
+    </FluentStack>
+</FluentStack>
+
+@if (Planner.GenerationError is not null)
+{
+    <div role="alert">@Planner.GenerationError</div>
+}
+
+@* Selection slots *@
+<FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+    @for (var i = 0; i < Planner.Slots.Count; i++)
+    {
+        var idx = i;
+        var sel = Planner.Slots[idx];
+        <FluentCard Style="padding: 12px;" AreaRestricted="false">
+            <FluentGrid Spacing="3">
+                <FluentGridItem xs="12" sm="5">
+                    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-bottom: 4px;">
+                        <FluentIcon Value="@(new Size16.XboxController())" Style="margin-right: 2px;" /> Game @(idx + 1)
+                    </FluentLabel>
+                    <FluentSelect TOption="GameEntity"
+                                  Items="@WithCurrent(Planner.GetAvailableGames(idx), SlotGame(sel))"
+                                  OptionValue="@(g => g.Id.ToString())"
+                                  OptionText="@(g => g.Name)"
+                                  SelectedOption="@SlotGame(sel)"
+                                  SelectedOptionChanged="@(g => Planner.ChangeSlotGame(idx, g))"
+                                  aria-label="@($"Game for slot {idx + 1}")"
+                                  Style="width: 100%;" />
+                </FluentGridItem>
+                <FluentGridItem xs="12" sm="5">
+                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="4" Style="margin-bottom: 4px;" Wrap="true">
+                        <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">
+                            <FluentIcon Value="@(new Size16.Flash())" Style="margin-right: 2px;" /> Activity
+                        </FluentLabel>
+                        @if (sel.ActivityId != Guid.Empty)
+                        {
+                            var act = Activities?.FirstOrDefault(a => a.Id == sel.ActivityId);
+                            if (act is not null)
+                            {
+                                @foreach (var tid in act.ThemeIds)
+                                {
+                                    <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveName(Themes, tid)" Style="font-size: 0.65rem;" />
+                                }
+                                @foreach (var hid in act.HolidayIds)
+                                {
+                                    <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveName(Holidays, hid)" Style="font-size: 0.65rem;" />
+                                }
+                            }
+                        }
+                    </FluentStack>
+                    <FluentSelect TOption="ActivityEntity"
+                                  Items="@WithCurrent(Planner.GetAvailableActivities(sel.GameId, idx), SlotActivity(sel))"
+                                  OptionValue="@(a => a.Id.ToString())"
+                                  OptionText="@(a => a.Name)"
+                                  SelectedOption="@SlotActivity(sel)"
+                                  SelectedOptionChanged="@(a => Planner.ChangeSlotActivity(idx, a))"
+                                  aria-label="@($"Activity for slot {idx + 1}")"
+                                  Style="width: 100%;" />
+                    @if (ReplacesWinner(sel))
+                    {
+                        <FluentLabel role="status" Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-top: 4px;">Replacing this activity clears the Winner.</FluentLabel>
+                    }
+                </FluentGridItem>
+                <FluentGridItem xs="12" sm="2" Style="display: flex; align-items: flex-end; justify-content: flex-end;">
+                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                  Title="@(Planner.GetRerollCandidates(idx).Count > 0 ? "Re-roll this slot" : "No alternative matches the current filters")"
+                                  aria-label="@($"Re-roll slot {idx + 1}")"
+                                  Disabled="@(Planner.GetRerollCandidates(idx).Count == 0)"
+                                  OnClick="@(() => Planner.RerollSlot(idx))">
+                        <FluentIcon Value="@(new Size16.ArrowShuffle())" />
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" Title="Remove slot"
+                                  aria-label="@($"Remove slot {idx + 1}")"
+                                  Disabled="@(Planner.Slots.Count <= 1)"
+                                  OnClick="@(() => Planner.RemoveSlot(idx))">
+                        <FluentIcon Value="@(new Size16.Delete())" Color="Color.Error" />
+                    </FluentButton>
+                </FluentGridItem>
+            </FluentGrid>
+        </FluentCard>
+    }
+
+    @if (Planner.Slots.Count < 5)
+    {
+        var addSlotBlocked = Planner.GetAddSlotBlockedReason();
+        <FluentButton Appearance="Appearance.Outline" Style="width: 100%;" OnClick="Planner.AddSlot" IconStart="@(new Size16.Add())"
+                      Title="@(addSlotBlocked ?? "Add an activity slot")"
+                      Disabled="@(addSlotBlocked is not null)">
+            Add Activity Slot
+        </FluentButton>
+        @* Show the live reason; a click that found nothing to add raises it to an alert. *@
+        @if (addSlotBlocked is not null && addSlotBlocked == Planner.AddSlotError)
+        {
+            <div role="alert" style="color: var(--error); font-size: 0.75rem;">@addSlotBlocked</div>
+        }
+        else if (addSlotBlocked is not null)
+        {
+            <FluentLabel role="status" Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">@addSlotBlocked</FluentLabel>
+        }
+    }
+</FluentStack>
+
+@code {
+    // The slots and every rule that fills them, shared with the dialog that saves them.
+    [Parameter, EditorRequired] public SlotPlanner Planner { get; set; } = null!;
+    // The library, as the page loaded it.
+    [Parameter] public List<GameEntity>? Games { get; set; }
+    [Parameter] public List<ActivityEntity>? Activities { get; set; }
+    [Parameter] public List<ThemeEntity>? Themes { get; set; }
+    [Parameter] public List<HolidayEntity>? Holidays { get; set; }
+    // A filter input changed: the new Filter, for the dialog to keep and hand to the planner.
+    [Parameter] public EventCallback<SlotFilter> FilterChanged { get; set; }
+    // The slot held the edited Event's Winner and its Activity has been changed.
+    [Parameter] public Func<SlotSelection, bool> ReplacesWinner { get; set; } = _ => false;
+
+    // The dialog hands every filter change to the planner, so the planner's Filter is what is shown.
+    private SlotFilter Filter => Planner.Filter;
+
+    // What the two switches bind, taken from the planner's Filter on every render of the dialog.
+    private bool _custThemedOnly;
+    private bool _custUniqueGames;
+
+    protected override void OnParametersSet()
+    {
+        _custThemedOnly = Filter.ThemedOnly;
+        _custUniqueGames = Filter.UniqueGames;
+    }
+
+    private Task Change(SlotFilter filter) => FilterChanged.InvokeAsync(filter);
+
+    private static List<Guid> Toggle(IReadOnlyList<Guid> ids, Guid id, bool add)
+    {
+        var list = ids.ToList();
+        if (add && !list.Contains(id)) list.Add(id);
+        else if (!add) list.Remove(id);
+        return list;
+    }
+
+    private static string ResolveName<T>(List<T>? list, Guid id) where T : EntityBase =>
+        list?.FirstOrDefault(x => x.Id == id) is { } match
+            ? ((dynamic)match).Name
+            : id.ToString()[..8];
+
+    // An edited slot is its stored snapshot until the user changes its Game or Activity, so a
+    // later library edit or delete never rewrites it. Null when the slot has been changed.
+    internal static Selection? Unchanged(SlotSelection s) =>
+        s.Stored is { } stored && stored.Game.Id == s.GameId && stored.Activity.Id == s.ActivityId ? stored : null;
+
+    // Stand-ins for a stored Game or Activity the library no longer has. They are shown only as
+    // the current value of their own slot, and kept per id so the picker sees the same option.
+    // The panel lives as long as one open dialog, so every dialog starts with none.
+    private readonly Dictionary<Guid, GameEntity> _shownGames = [];
+    private readonly Dictionary<Guid, ActivityEntity> _shownActivities = [];
+
+    private static string StoredName(string name, bool libraryLoaded) => libraryLoaded ? $"(deleted) {name}" : name;
+
+    private GameEntity? SlotGame(SlotSelection s)
+    {
+        if (Games?.FirstOrDefault(g => g.Id == s.GameId) is { } game) return game;
+        if (Unchanged(s) is not { } stored) return null;
+        var shown = _shownGames.TryGetValue(stored.Game.Id, out var known) ? known : _shownGames[stored.Game.Id] = new GameEntity { Id = stored.Game.Id };
+        shown.Name = StoredName(stored.Game.Name, Games is not null);
+        return shown;
+    }
+
+    private ActivityEntity? SlotActivity(SlotSelection s)
+    {
+        if (Activities?.FirstOrDefault(a => a.Id == s.ActivityId) is { } act) return act;
+        if (Unchanged(s) is not { } stored) return null;
+        var shown = _shownActivities.TryGetValue(stored.Activity.Id, out var known) ? known : _shownActivities[stored.Activity.Id] = new ActivityEntity { Id = stored.Activity.Id, GameId = stored.Game.Id };
+        shown.Name = StoredName(stored.Activity.Name, Activities is not null);
+        return shown;
+    }
+
+    // A picker's live choices, plus the slot's own current value when the library lacks it.
+    private static List<T> WithCurrent<T>(List<T> choices, T? current) where T : EntityBase =>
+        current is null || choices.Any(c => c.Id == current.Id) ? choices : [current, .. choices];
+}
