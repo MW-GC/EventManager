@@ -5,7 +5,7 @@ namespace MW_GC.EventManager.Shared.Entities;
 /// <c>ActivityComments</c> table with its own eTag (ADR 0001), so editing one Comment never
 /// conflicts with editing the Activity or another of its Comments.
 /// </summary>
-public class ActivityCommentEntity : EntityBase
+public class CommentEntity : EntityBase
 {
     /// <summary>The Activity the Comment is about.</summary>
     public Guid ActivityId { get; set; }

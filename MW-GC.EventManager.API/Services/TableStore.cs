@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -135,6 +136,29 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
         await foreach (var row in _table.QueryAsync<TableEntity>(e => e.PartitionKey == _partitionKey, cancellationToken: ct))
             raw.Add(row);
         return raw.Select(Hydrate).ToList();
+    }
+
+    /// <summary>
+    /// The rows of this store's partition that match <paramref name="filter"/>. The filter is ANDed
+    /// with the partition-key condition and sent to Table Storage as part of the query (OData), so
+    /// only matching rows are read. Only for entity types with no complex (JSON-serialised)
+    /// properties, since those rows are read as <see cref="TableEntity"/>; throws
+    /// <see cref="NotSupportedException"/> otherwise.
+    /// </summary>
+    public async Task<List<TEntity>> GetWhereAsync(Expression<Func<TEntity, bool>> filter, CancellationToken ct = default)
+    {
+        if (ComplexProps.Length != 0)
+            throw new NotSupportedException($"{typeof(TEntity).Name} has complex properties; filter after GetAllAsync instead.");
+
+        Expression<Func<TEntity, bool>> inPartition = e => e.PartitionKey == _partitionKey;
+        var parameter = inPartition.Parameters[0];
+        var body = new ParameterSwap(filter.Parameters[0], parameter).Visit(filter.Body);
+        var combined = Expression.Lambda<Func<TEntity, bool>>(Expression.AndAlso(inPartition.Body, body), parameter);
+
+        var results = new List<TEntity>();
+        await foreach (var entity in _table.QueryAsync<TEntity>(combined, cancellationToken: ct))
+            results.Add(entity);
+        return results;
     }
 
     public async Task<TEntity?> GetAsync(Guid id, CancellationToken ct = default)
@@ -359,5 +383,11 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
         }
 
         return entity;
+    }
+
+    /// <summary>Replaces one lambda parameter with another, so two lambdas can share a body.</summary>
+    private sealed class ParameterSwap(ParameterExpression from, ParameterExpression to) : ExpressionVisitor
+    {
+        protected override Expression VisitParameter(ParameterExpression node) => node == from ? to : base.VisitParameter(node);
     }
 }

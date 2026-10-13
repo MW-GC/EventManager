@@ -162,7 +162,7 @@ internal sealed class LibraryHarness
     public ConcurrentDictionary<string, HolidayEntity> Holidays { get; } = new();
     public ConcurrentDictionary<string, TableEntity> Activities { get; } = new();
     public ConcurrentDictionary<string, TableEntity> Events { get; } = new();
-    public ConcurrentDictionary<string, ActivityCommentEntity> ActivityComments { get; } = new();
+    public ConcurrentDictionary<string, CommentEntity> Comments { get; } = new();
 
     public Mock<TableClient> GameTable { get; }
     public Mock<TableClient> ThemeTable { get; }
@@ -176,14 +176,14 @@ internal sealed class LibraryHarness
     public ListLogger<HolidayFunctions> HolidayLog { get; } = new();
     public ListLogger<ActivityFunctions> ActivityLog { get; } = new();
     public ListLogger<EventFunctions> EventLog { get; } = new();
-    public ListLogger<ActivityCommentFunctions> CommentLog { get; } = new();
+    public ListLogger<CommentFunctions> CommentLog { get; } = new();
 
     public GameFunctions GameApi { get; }
     public ThemeFunctions ThemeApi { get; }
     public HolidayFunctions HolidayApi { get; }
     public ActivityFunctions ActivityApi { get; }
     public EventFunctions EventApi { get; }
-    public ActivityCommentFunctions CommentApi { get; }
+    public CommentFunctions CommentApi { get; }
 
     public LibraryHarness()
     {
@@ -192,7 +192,7 @@ internal sealed class LibraryHarness
         HolidayTable = TableMocks.Table(Holidays);
         ActivityTable = TableMocks.Table(Activities);
         EventTable = TableMocks.Table(Events);
-        CommentTable = TableMocks.Table(ActivityComments);
+        CommentTable = TableMocks.FilteringTable(Comments);
 
         var service = new Mock<TableServiceClient>();
         service.Setup(s => s.GetTableClient("Games")).Returns(GameTable.Object);
@@ -205,13 +205,13 @@ internal sealed class LibraryHarness
         var games = new TableStore<GameEntity>(service.Object, "Games", "Game");
         var activities = new TableStore<ActivityEntity>(service.Object, "Activities", "Activity");
         var events = new TableStore<EventEntity>(service.Object, "Events", "Event");
-        var comments = new TableStore<ActivityCommentEntity>(service.Object, "ActivityComments", "Comment");
+        var comments = new TableStore<CommentEntity>(service.Object, "ActivityComments", "Comment");
         GameApi = new GameFunctions(games, activities, GameLog);
         ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, "Themes", "Theme"), activities, ThemeLog);
         HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), activities, HolidayLog);
         ActivityApi = new ActivityFunctions(activities, games, comments, ActivityLog);
         EventApi = new EventFunctions(events, games, activities, EventLog);
-        CommentApi = new ActivityCommentFunctions(comments, activities, events, CommentLog);
+        CommentApi = new CommentFunctions(comments, activities, events, CommentLog);
     }
 
     /// <summary>Insert, upsert and update calls that reached any table. Seeding writes the dictionaries directly, so it never counts.</summary>

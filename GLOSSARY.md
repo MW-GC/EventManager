@@ -106,7 +106,7 @@ Themes or Holidays, and Themed activities only.
 
 ## Storage
 
-Two admins editing the same Game, Activity, Theme, Holiday or Event cannot silently
+Two admins editing the same Game, Activity, Theme, Holiday, Event or Comment cannot silently
 overwrite each other: every item carries an `eTag`, and a save or delete that sends it
 back as `If-Match` after someone else saved is refused with 409. An edit never brings
 back an item that was deleted in the meantime (404). See `docs/api-validation.md`.

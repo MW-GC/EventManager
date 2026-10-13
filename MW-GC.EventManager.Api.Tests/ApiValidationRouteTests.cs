@@ -17,12 +17,13 @@ public class ApiValidationRouteTests
 {
     private readonly LibraryHarness h = new();
 
-    // One entry per body-reading route. Updates and the comments PATCH target a stored row,
+    // One entry per body-reading route. Updates, the comments PATCH and the Comment routes target a stored row,
     // so the 400/415 comes from the body and not from a 404.
     public static IEnumerable<object?[]> BodyRoutes =>
     [
         ["CreateGame"], ["UpdateGame"], ["CreateTheme"], ["UpdateTheme"], ["CreateHoliday"], ["UpdateHoliday"],
         ["CreateActivity"], ["UpdateActivity"], ["UpdateActivityComments"],
+        ["AddComment"], ["UpdateComment"],
         ["SaveCustomizedEvent"], ["UpdateEvent"],
     ];
 
@@ -43,6 +44,8 @@ public class ApiValidationRouteTests
         {
             ["Name"] = "Friday", ["Selections"] = "[]", ["UniqueGamesOnly"] = true,
         };
+        var comment = new CommentEntity { Id = Guid.NewGuid(), PartitionKey = "Comment", ActivityId = activityId, Text = "Keep me" };
+        h.Comments[comment.RowKey] = comment;
 
         return route switch
         {
@@ -55,6 +58,8 @@ public class ApiValidationRouteTests
             "CreateActivity" => h.ActivityApi.Create(req, default),
             "UpdateActivity" => h.ActivityApi.Update(req, activityId, default),
             "UpdateActivityComments" => h.ActivityApi.UpdateComments(req, activityId, default),
+            "AddComment" => h.CommentApi.Add(req, activityId, default),
+            "UpdateComment" => h.CommentApi.Update(req, activityId, comment.Id, default),
             "SaveCustomizedEvent" => h.EventApi.SaveCustomized(req, default),
             "UpdateEvent" => h.EventApi.Update(req, eventId, default),
             _ => throw new ArgumentOutOfRangeException(nameof(route), route, null),
