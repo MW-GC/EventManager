@@ -56,7 +56,8 @@ public class IdempotentCreateTests
             .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(rows.Values.ToList(), null, Mock.Of<Response>())]));
         var service = new Mock<TableServiceClient>();
         service.Setup(s => s.GetTableClient(It.IsAny<string>())).Returns(table.Object);
-        api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
+        service.Setup(s => s.GetTableClient("metrics")).Returns(TableMocks.Table(new System.Collections.Concurrent.ConcurrentDictionary<string, TableEntity>()).Object);
+        api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(service.Object, "metrics", "metrics"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
     }
 
     [TestMethod]

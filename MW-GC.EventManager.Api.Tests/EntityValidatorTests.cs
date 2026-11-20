@@ -1,3 +1,4 @@
+using System.Globalization;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
@@ -123,6 +124,62 @@ public class EntityValidatorTests
     {
         Assert.AreEqual("Select between 1 and 5 activities.", EventValidator.Validate(new EventEntity { Name = "Friday", Selections = [] }));
         Assert.AreEqual("Name is required.", EventValidator.Validate(new EventEntity { Name = " ", Selections = [] }));
+    }
+
+    private const string AmountMessage = "Amount spent must be between 0 and 1000000000 with at most 2 decimal places.";
+
+    private static EventMetricsEntity MetricsWith(string field, int value)
+    {
+        var metrics = new EventMetricsEntity();
+        typeof(EventMetricsEntity).GetProperty(field)!.SetValue(metrics, value);
+        return metrics;
+    }
+
+    [TestMethod]
+    public void EventMetricsWithEveryFieldNullAreValid()
+    {
+        Assert.IsNull(EventMetricsValidator.Validate(new EventMetricsEntity()));
+    }
+
+    [TestMethod]
+    [DataRow(nameof(EventMetricsEntity.Attendees), "Attendees must be a whole number from 0 to 1000000.")]
+    [DataRow(nameof(EventMetricsEntity.NewAttendees), "New attendees must be a whole number from 0 to 1000000.")]
+    [DataRow(nameof(EventMetricsEntity.ReturningAttendees), "Returning attendees must be a whole number from 0 to 1000000.")]
+    public void EventMetricsCountsAreWholeNumbersFromZeroToAMillion(string field, string message)
+    {
+        Assert.IsNull(EventMetricsValidator.Validate(MetricsWith(field, 0)));
+        Assert.IsNull(EventMetricsValidator.Validate(MetricsWith(field, 1_000_000)));
+        Assert.AreEqual(message, EventMetricsValidator.Validate(MetricsWith(field, -1)));
+        Assert.AreEqual(message, EventMetricsValidator.Validate(MetricsWith(field, 1_000_001)));
+    }
+
+    [TestMethod]
+    [DataRow("0", null)]
+    [DataRow("0.01", null)]
+    [DataRow("12.34", null)]
+    [DataRow("1000000000", null)]
+    [DataRow("-0.01", AmountMessage)]
+    [DataRow("12.345", AmountMessage)]
+    [DataRow("1000000000.01", AmountMessage)]
+    [DataRow("1000000001", AmountMessage)]
+    public void EventMetricsAmountSpentIsAtMostABillionWithTwoDecimals(string amount, string? expected)
+    {
+        var metrics = new EventMetricsEntity { AmountSpent = decimal.Parse(amount, CultureInfo.InvariantCulture) };
+
+        Assert.AreEqual(expected, EventMetricsValidator.Validate(metrics));
+    }
+
+    [TestMethod]
+    public void EventMetricsReportTheFirstBadFieldInFieldOrder()
+    {
+        Assert.AreEqual("Attendees must be a whole number from 0 to 1000000.",
+            EventMetricsValidator.Validate(new EventMetricsEntity { Attendees = -1, NewAttendees = -1, ReturningAttendees = -1, AmountSpent = -1m }));
+        Assert.AreEqual("New attendees must be a whole number from 0 to 1000000.",
+            EventMetricsValidator.Validate(new EventMetricsEntity { Attendees = 1, NewAttendees = -1, ReturningAttendees = -1, AmountSpent = -1m }));
+        Assert.AreEqual("Returning attendees must be a whole number from 0 to 1000000.",
+            EventMetricsValidator.Validate(new EventMetricsEntity { Attendees = 1, NewAttendees = 1, ReturningAttendees = -1, AmountSpent = -1m }));
+        Assert.AreEqual(AmountMessage,
+            EventMetricsValidator.Validate(new EventMetricsEntity { Attendees = 1, NewAttendees = 1, ReturningAttendees = 1, AmountSpent = -1m }));
     }
 
     private static List<Selection> OneSelection()

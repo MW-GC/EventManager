@@ -15,7 +15,7 @@ All routes stay `AuthorizationLevel.Anonymous` on purpose: the Static Web App ro
 
 Property names are case-insensitive and camelCase, as before. A `charset` other than UTF-8 is transcoded. The body is read and deserialised once.
 
-The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/themes`, `PUT /api/themes/{id}`, `POST /api/holidays`, `PUT /api/holidays/{id}`, `POST /api/activities`, `PUT /api/activities/{id}`, `PATCH /api/activities/{id}/comments`, `POST /api/events` and `PUT /api/events/{id}`. An update to an id that does not exist is still a 404, checked before the body is read.
+The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/themes`, `PUT /api/themes/{id}`, `POST /api/holidays`, `PUT /api/holidays/{id}`, `POST /api/activities`, `PUT /api/activities/{id}`, `PATCH /api/activities/{id}/comments`, `POST /api/events`, `PUT /api/events/{id}` and `PUT /api/events/{id}/metrics`. An update to an id that does not exist is still a 404, checked before the body is read; for the metrics `PUT` that is an unknown Event.
 
 ## Field rules (400, the message names the field)
 
@@ -27,6 +27,10 @@ The guarded routes are `POST /api/games`, `PUT /api/games/{id}`, `POST /api/them
 | Activity | `GameId` | Required (`GameId is required.`) and must name an existing Game (`Game not found.`). |
 | Activity | `ThemeIds`, `HolidayIds` | Lenient: a missing or `null` list is stored as `[]`, and duplicates are removed. Whether the ids exist is not checked. |
 | Event | `Selections` and the rest | Unchanged: the existing `ValidateSelections` messages, run after the name rule. |
+| Event metrics | `Attendees`, `NewAttendees`, `ReturningAttendees` | Optional (`null` allowed), otherwise a whole number from 0 to 1,000,000. Messages: `Attendees must be a whole number from 0 to 1000000.` / `New attendees must be a whole number from 0 to 1000000.` / `Returning attendees must be a whole number from 0 to 1000000.` A fractional or non-numeric count cannot be read into the integer field, so it is the malformed-body 400 (`Request body is empty or malformed.`). |
+| Event metrics | `AmountSpent` | Optional (`null` allowed), otherwise 0 to 1,000,000,000 with at most 2 decimal places. Message: `Amount spent must be between 0 and 1000000000 with at most 2 decimal places.` |
+
+Event metrics fields are checked in the order above and the first failing field wins. There is no cross-check between attendees, new and returning. A body with every field `null` is valid and is stored: it clears the values.
 
 The event-create idempotency flow is unchanged: 201 on first insert, 200 on a matching replay, 409 when the details differ, and 400 for a bad `Idempotency-Key` (see `idempotent-event-creates.md`).
 
@@ -50,13 +54,26 @@ Every Game, Theme, Holiday, Activity and Event carries its Table Storage ETag as
 
 | Request | Status |
 | --- | --- |
-| `PUT` with a current `If-Match`, or with none, or with `If-Match: *` | 200, with the new ETag |
+| `PUT` (other than the Event metrics `PUT`, below) with a current `If-Match`, or with none, or with `If-Match: *` | 200, with the new ETag |
 | `PUT` or comments `PATCH` with a stale `If-Match` | 409 `The request conflicts with the stored data. Reload and try again.`; the row is unchanged |
 | `PUT` for a row that was deleted, even between the existence check and the write, with or without `If-Match` | 404; the row is not recreated (updates are never upserts) |
 | `DELETE` with a stale `If-Match` | 409; nothing is deleted |
 | `DELETE` of a row that does not exist | 204 (idempotent, as before) |
 
 The comments `PATCH` reads the row and writes it back with the ETag it just read, so a write that lands in between makes the `PATCH` a 409 instead of being overwritten. It does not retry.
+
+An Event's metrics row carries an ETag too, in the body and the `ETag` header. `GET /api/events/{id}/metrics` of an Event with no stored row answers 200 with every field `null`, the Event id, and no `ETag` header. `PUT /api/events/{id}/metrics` is the deliberate exception to "updates are never upserts": it creates the row when none exists. Without `If-Match` it only creates, as an insert, so two first saves cannot overwrite each other.
+
+| `PUT /api/events/{id}/metrics` | Status |
+| --- | --- |
+| No `If-Match`, no stored row | 200, the row is created, with its ETag |
+| No `If-Match`, a row is stored (including one another first save just created) | 409 `The request conflicts with the stored data. Reload and try again.`; the row is unchanged |
+| Current `If-Match`, or `If-Match: *`, on a stored row | 200, with the new ETag |
+| Stale `If-Match` | 409; the row is unchanged |
+| Any `If-Match` (including `*`) with no stored row | 409; nothing is created |
+| Unknown Event | 404 |
+
+Deleting an Event also deletes its metrics row, after the Event delete answers 204 (including a retried delete of an Event already gone). A 409 delete deletes neither.
 
 ## Long values (chunked properties)
 
@@ -78,4 +95,4 @@ Every failure is logged through `ILogger<T>` in the Functions class, with the ex
 
 ## Test coverage
 
-`RequestBodyGuardTests` calls the guard directly, with no Functions host. `EntityValidatorTests` covers each validator. `ApiValidationRouteTests` drives every body-reading route through the real Functions classes and `TableStore` over in-memory mocked tables, and checks that rejected requests write nothing. `StorageFailureTests` covers the failure mapping and logging with a mocked `TableClient`, because a running instance cannot simulate a storage outage. `DeleteInUseRefusalTests` covers the delete refusal for all three entities, an Event keeping its snapshot after a Game delete, and a failure while counting. `ConditionalWriteTests` covers If-Match on every `PUT`, `DELETE` and the comments `PATCH`, the update-that-races-a-delete 404, and the ETag header and body. `PropertyLimitTests` covers chunking a five-Selection Event at every cap, old-shape rows, the row-limit 413 and the 412 mapping.
+`RequestBodyGuardTests` calls the guard directly, with no Functions host. `EntityValidatorTests` covers each validator, `EventMetricsValidator` included. `ApiValidationRouteTests` drives every body-reading route through the real Functions classes and `TableStore` over in-memory mocked tables, and checks that rejected requests write nothing. `StorageFailureTests` covers the failure mapping and logging with a mocked `TableClient`, because a running instance cannot simulate a storage outage. `DeleteInUseRefusalTests` covers the delete refusal for all three entities, an Event keeping its snapshot after a Game delete, and a failure while counting. `ConditionalWriteTests` covers If-Match on every `PUT`, `DELETE` and the comments `PATCH`, the update-that-races-a-delete 404, and the ETag header and body. `PropertyLimitTests` covers chunking a five-Selection Event at every cap, old-shape rows, the row-limit 413 and the 412 mapping. `EventMetricsTests` drives the Event metrics routes through `LibraryHarness`: the field limits, the If-Match and first-save rules, concurrent first saves, and the Event delete cascade.
