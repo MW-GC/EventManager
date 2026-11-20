@@ -3,8 +3,8 @@
 @inject EventService EventSvc
 @inject GameService GameSvc
 @inject ActivityService ActivitySvc
-@inject ThemeService ThemeSvc
-@inject HolidayService HolidaySvc
+@inject LibraryClient<ThemeEntity> ThemeSvc
+@inject LibraryClient<HolidayEntity> HolidaySvc
 @inject FocusReturn Focus
 
 @* The routed Events page: it loads the Events and the library, shows the list (EventList), runs a
