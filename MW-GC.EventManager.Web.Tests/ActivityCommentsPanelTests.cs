@@ -48,8 +48,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
 
     public ActivityCommentsPanelTests()
     {
-        // The Activity still carries the old single note (#133 removes it); the panel never shows it.
-        race = new ActivityEntity { Name = "Race", GameId = kart.Id, Description = "Three laps", Comments = "Old note" };
+        race = new ActivityEntity { Name = "Race", GameId = kart.Id, Description = "Three laps" };
         listPath = $"/api/activities/{race.Id}/comments";
         api.Json(HttpMethod.Get, "/api/games", new[] { kart })
            .Json(HttpMethod.Get, "/api/activities", new[] { race })
@@ -75,9 +74,8 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         Assert.AreEqual("Race", dialog.GetAttribute("aria-label"));
         Assert.Contains("Kart", dialog.TextContent);
         Assert.Contains("Three laps", dialog.TextContent);
-        // The panel reads the Comments rows; the old note on the Activity row is neither shown nor editable.
+        // The panel reads the Comments rows; the old single-text editor is gone.
         CollectionAssert.AreEqual(new[] { a.Text, b.Text }, Texts(page));
-        Assert.DoesNotContain("Old note", dialog.TextContent);
         Assert.DoesNotContain("Event Manager Comments", dialog.TextContent);
         Assert.IsEmpty(dialog.QuerySelectorAll("fluent-button").Where(x => x.TextContent.Trim() == "Save Comments").ToList());
         Assert.AreEqual("New Comment", Assert.ContainsSingle(dialog.QuerySelectorAll("fluent-text-area").ToList()).GetAttribute("aria-label"));

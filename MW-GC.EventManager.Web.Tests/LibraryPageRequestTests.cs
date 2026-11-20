@@ -27,7 +27,7 @@ public sealed class LibraryPageRequestTests : IDisposable
 
     public LibraryPageRequestTests()
     {
-        race = new ActivityEntity { Name = "Race", GameId = kart.Id, Rules = "Three laps", ThemeIds = [spooky.Id], Comments = "Old note" };
+        race = new ActivityEntity { Name = "Race", GameId = kart.Id, Rules = "Three laps", ThemeIds = [spooky.Id], SetupRequirements = "Two controllers" };
         api.Json(HttpMethod.Get, "/api/games", new[] { kart, puzzle })
            .Json(HttpMethod.Get, "/api/activities", new[] { race })
            .Json(HttpMethod.Get, "/api/themes", new[] { spooky })
@@ -96,7 +96,7 @@ public sealed class LibraryPageRequestTests : IDisposable
     {
         var page = Open("activities");
         var path = $"/api/activities/{race.Id}";
-        var renamed = new ActivityEntity { Id = race.Id, Name = "Grand race", GameId = kart.Id, Rules = "Five laps", ThemeIds = [spooky.Id], HolidayIds = [halloween.Id], Comments = race.Comments };
+        var renamed = new ActivityEntity { Id = race.Id, Name = "Grand race", GameId = kart.Id, Rules = "Five laps", ThemeIds = [spooky.Id], HolidayIds = [halloween.Id], SetupRequirements = race.SetupRequirements };
         api.Status(HttpMethod.Put, path, HttpStatusCode.NoContent)
            .Json(HttpMethod.Get, "/api/activities", new[] { renamed });
         var reads = api.Count(HttpMethod.Get, "/api/activities");
@@ -114,10 +114,11 @@ public sealed class LibraryPageRequestTests : IDisposable
         Assert.AreEqual("Grand race", sent.GetProperty("name").GetString());
         Assert.AreEqual("Five laps", sent.GetProperty("rules").GetString());
         Assert.AreEqual(halloween.Id, Assert.ContainsSingle(Guids(sent, "holidayIds")));
-        // The fields the user did not touch go back unchanged, the comments included.
+        // The fields the user did not touch go back unchanged; the old single text is no longer sent (#133).
         Assert.AreEqual(kart.Id, sent.GetProperty("gameId").GetGuid());
         Assert.AreEqual(spooky.Id, Assert.ContainsSingle(Guids(sent, "themeIds")));
-        Assert.AreEqual("Old note", sent.GetProperty("comments").GetString());
+        Assert.AreEqual("Two controllers", sent.GetProperty("setupRequirements").GetString());
+        Assert.IsFalse(sent.TryGetProperty("comments", out _), "The Activity PUT must not carry the old single text.");
         Assert.IsFalse(page.HasDialog());
         Assert.AreEqual(reads + 1, api.Count(HttpMethod.Get, "/api/activities"));
         page.WaitForAssertion(() => Assert.Contains("Grand race", Assert.ContainsSingle(page.Rows())));

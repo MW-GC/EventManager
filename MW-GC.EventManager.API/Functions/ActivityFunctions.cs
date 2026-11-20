@@ -1,4 +1,3 @@
-using Azure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
@@ -80,6 +79,7 @@ internal sealed class ActivityFunctions
         var source = await _store.GetAsync(id, ct);
         if (source is null) return new NotFoundResult();
 
+        // A duplicate starts with no Comments: Comments are rows of their own and belong to the original.
         var duplicate = new ActivityEntity
         {
             Id = Guid.NewGuid(),
@@ -89,33 +89,10 @@ internal sealed class ActivityFunctions
             Rules = source.Rules,
             ThemeIds = [.. source.ThemeIds],
             HolidayIds = [.. source.HolidayIds],
-            SetupRequirements = source.SetupRequirements,
-            Comments = source.Comments
+            SetupRequirements = source.SetupRequirements
         };
 
         await _store.UpsertAsync(duplicate, ct);
         return EntityResults.Created(req, $"/api/activities/{duplicate.Id}", duplicate);
     });
-
-    [Function("UpdateActivityComments")]
-    public Task<IActionResult> UpdateComments(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "activities/{id:guid}/comments")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "UpdateActivityComments", ct, async () =>
-    {
-        var existing = await _store.GetAsync(id, ct);
-        if (existing is null) return new NotFoundResult();
-
-        var body = await RequestBody.ReadAsync<CommentsPayload>(req, ct);
-        if (!body.Ok) return body.Error;
-        if (ActivityValidator.ValidateComments(body.Value.Comments) is { } error) return new BadRequestObjectResult(error);
-
-        // Write back with the ETag just read (or the caller's own If-Match), so a write that lands
-        // between the read and this write makes the PATCH a 409 instead of being overwritten.
-        var ifMatch = EntityResults.IfMatch(req);
-        if (ifMatch == default || ifMatch == ETag.All) ifMatch = existing.ETag;
-        existing.Comments = body.Value.Comments;
-        return await EntityResults.UpdateAsync(_store, req, existing, ct, ifMatch);
-    });
-
-    private record CommentsPayload(string? Comments);
 }

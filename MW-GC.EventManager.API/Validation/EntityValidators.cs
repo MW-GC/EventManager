@@ -60,13 +60,8 @@ internal static class ActivityValidator
             ?? (activity.GameId == Guid.Empty ? $"{nameof(ActivityEntity.GameId)} is required." : null)
             ?? FieldRules.MaxLength(activity.Description, nameof(ActivityEntity.Description), FieldRules.TextMaxLength)
             ?? FieldRules.MaxLength(activity.Rules, nameof(ActivityEntity.Rules), FieldRules.TextMaxLength)
-            ?? FieldRules.MaxLength(activity.SetupRequirements, nameof(ActivityEntity.SetupRequirements), FieldRules.TextMaxLength)
-            ?? ValidateComments(activity.Comments);
+            ?? FieldRules.MaxLength(activity.SetupRequirements, nameof(ActivityEntity.SetupRequirements), FieldRules.TextMaxLength);
     }
-
-    /// <summary>The Comments rule, shared with the PATCH comments route.</summary>
-    public static string? ValidateComments(string? comments) =>
-        FieldRules.MaxLength(comments, nameof(ActivityEntity.Comments), FieldRules.TextMaxLength);
 }
 
 internal static class CommentValidator

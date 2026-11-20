@@ -19,19 +19,23 @@ public class ActivityNoteConversionTests
 {
     private readonly LibraryHarness h = new();
 
-    // An Activity row as an older version stored it, with its old note and the time storage last wrote it.
-    private Guid SeedActivity(string? note, DateTimeOffset? lastModified = null)
+    // An Activity row as an older version stored it, with the old single text in its raw Comments
+    // column and the time storage last wrote it. The Activity itself no longer has that field (#133).
+    private Guid SeedActivity(string? note, DateTimeOffset? lastModified = null) =>
+        SeedRow(row => row["Comments"] = note, lastModified);
+
+    private Guid SeedRow(Action<TableEntity> oldColumn, DateTimeOffset? lastModified = null, Guid? gameId = null)
     {
         var id = Guid.NewGuid();
         var row = new TableEntity("Activity", id.ToString("D"))
         {
-            ["GameId"] = Guid.NewGuid(),
+            ["GameId"] = gameId ?? Guid.NewGuid(),
             ["Name"] = "Old activity",
             ["ThemeIds"] = "[]",
             ["HolidayIds"] = "[]",
-            ["Comments"] = note,
             Timestamp = lastModified ?? new DateTimeOffset(2026, 9, 14, 20, 30, 0, TimeSpan.Zero),
         };
+        oldColumn(row);
         h.Activities[row.RowKey] = row;
         return id;
     }
@@ -69,6 +73,58 @@ public class ActivityNoteConversionTests
 
         Assert.IsEmpty(CommentsOf(without));
         Assert.ContainsSingle(CommentsOf(withNote));
+    }
+
+    [TestMethod]
+    public async Task ARowWithoutTheOldCommentsColumnGetsNoComment()
+    {
+        var withText = SeedActivity("Keep");
+        var without = SeedRow(_ => { });
+        Assert.IsFalse(h.Activities[without.ToString("D")].ContainsKey("Comments"));
+
+        await h.NoteConversion.RunAsync(default);
+
+        Assert.IsEmpty(CommentsOf(without));
+        Assert.ContainsSingle(CommentsOf(withText));
+        Assert.IsTrue(MarkerStored());
+    }
+
+    [TestMethod]
+    public async Task ARowWhoseOldCommentsColumnIsNotAStringIsSkippedWithoutThrowing()
+    {
+        var withText = SeedActivity("Keep");
+        // Table Storage keeps a column's type per row; this one was stored as a number.
+        var odd = SeedRow(row => row["Comments"] = 42);
+
+        await h.NoteConversion.RunAsync(default);
+
+        Assert.IsEmpty(CommentsOf(odd));
+        Assert.ContainsSingle(CommentsOf(withText));
+        Assert.IsTrue(MarkerStored(), "The pass finishes and stores the marker.");
+    }
+
+    [TestMethod]
+    public async Task AnActivityPutAfterTheConversionNeitherBringsBackNorNeedsTheOldColumn()
+    {
+        var game = h.SeedGame();
+        var activityId = SeedRow(row => row["Comments"] = "Old text", gameId: game.Id);
+        await h.NoteConversion.RunAsync(default);
+        var converted = Assert.ContainsSingle(CommentsOf(activityId));
+
+        // A client that still sends the old field, and one that never heard of it.
+        var withOld = await h.ActivityApi.Update(
+            TestRequests.Json(new { gameId = game.Id, name = "Renamed", comments = "Sneaked back in" }), activityId, default);
+        Assert.AreEqual(200, ApiResults.Status(withOld));
+        Assert.IsFalse(h.Activities[activityId.ToString("D")].ContainsKey("Comments"), "The PUT must not store the old column.");
+        var without = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed again" }), activityId, default);
+        Assert.AreEqual(200, ApiResults.Status(without));
+        Assert.IsFalse(h.Activities[activityId.ToString("D")].ContainsKey("Comments"));
+        Assert.AreEqual("Renamed again", h.Activities[activityId.ToString("D")].GetString("Name"));
+
+        // The Comment the conversion made is kept, and a later start adds nothing.
+        await h.NoteConversion.RunAsync(default);
+        Assert.AreEqual(converted.Id, Assert.ContainsSingle(CommentsOf(activityId)).Id);
+        Assert.AreEqual("Old text", converted.Text);
     }
 
     [TestMethod]

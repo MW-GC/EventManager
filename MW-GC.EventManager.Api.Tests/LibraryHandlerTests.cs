@@ -159,7 +159,7 @@ public class LibraryHandlerTests
         Assert.AreEqual(rows, Rows(kind));
     }
 
-    // ---- Activity duplicate and comments
+    // ---- Activity duplicate (its Comments are covered in CommentApiTests)
 
     [TestMethod]
     public async Task DuplicateIs201WithANewIdACopyNameAndEqualButSeparateLists()
@@ -169,7 +169,7 @@ public class LibraryHandlerTests
         var source = ApiResults.Value<ActivityEntity>(await h.ActivityApi.Create(TestRequests.Json(new
         {
             gameId = game.Id, name = "Capture the Flag", description = "Two teams", rules = "No camping",
-            themeIds = themes, holidayIds = holidays, setupRequirements = "Big map", comments = "Fan favourite",
+            themeIds = themes, holidayIds = holidays, setupRequirements = "Big map",
         }), default));
 
         var result = await h.ActivityApi.Duplicate(TestRequests.Empty(), source.Id, default);
@@ -185,7 +185,6 @@ public class LibraryHandlerTests
         Assert.AreEqual(source.Description, copy.Description);
         Assert.AreEqual(source.Rules, copy.Rules);
         Assert.AreEqual(source.SetupRequirements, copy.SetupRequirements);
-        Assert.AreEqual(source.Comments, copy.Comments);
         Assert.AreSequenceEqual(themes, copy.ThemeIds);
         Assert.AreSequenceEqual(holidays, copy.HolidayIds);
         Assert.AreEqual(2, h.Activities.Count);
@@ -204,38 +203,6 @@ public class LibraryHandlerTests
         var readCopy = ApiResults.Value<ActivityEntity>(await h.ActivityApi.Get(TestRequests.Empty(), copy.Id, default));
         Assert.IsEmpty(readCopy.ThemeIds);
         Assert.IsEmpty(readCopy.HolidayIds);
-    }
-
-    [TestMethod]
-    public async Task CommentsPatchChangesOnlyTheComments()
-    {
-        Guid[] themes = [Guid.NewGuid()];
-        Guid[] holidays = [Guid.NewGuid(), Guid.NewGuid()];
-        var created = ApiResults.Value<ActivityEntity>(await h.ActivityApi.Create(TestRequests.Json(new
-        {
-            gameId = game.Id, name = "Relay", description = "Pass it on", rules = "One lap each",
-            themeIds = themes, holidayIds = holidays, setupRequirements = "Track", comments = "Old note",
-        }), default));
-        var key = created.Id.ToString("D");
-        string[] untouched = ["GameId", "Name", "Description", "Rules", "ThemeIds", "HolidayIds", "SetupRequirements"];
-        var before = untouched.ToDictionary(name => name, name => h.Activities[key][name]);
-
-        // Other fields in the PATCH body are not part of the comments payload and must be ignored.
-        var result = await h.ActivityApi.UpdateComments(
-            TestRequests.Json(new { comments = "Bring snacks", name = "Ignored", rules = "Ignored", themeIds = Array.Empty<Guid>() }),
-            created.Id, default);
-
-        Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(result));
-        var patched = ApiResults.Value<ActivityEntity>(result);
-        Assert.AreEqual("Bring snacks", patched.Comments);
-        Assert.AreEqual("Relay", patched.Name);
-        Assert.AreEqual("One lap each", patched.Rules);
-        Assert.AreSequenceEqual(themes, patched.ThemeIds);
-
-        Assert.AreEqual("Bring snacks", h.Activities[key].GetString("Comments"));
-        foreach (var name in untouched)
-            Assert.AreEqual(before[name], h.Activities[key][name], $"{name} changed.");
-        Assert.ContainsSingle(h.Activities);
     }
 
     // ---- Event

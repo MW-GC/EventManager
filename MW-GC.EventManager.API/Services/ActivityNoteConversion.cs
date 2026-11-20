@@ -9,9 +9,11 @@ using MW_GC.EventManager.Shared.Entities;
 namespace MW_GC.EventManager.API.Services;
 
 /// <summary>
-/// Turns each Activity's old single note (<see cref="ActivityEntity.Comments"/>) into that
-/// Activity's first Comment (#130, ADR 0001). A non-empty note (after trimming) becomes one
-/// Comment with no Event, dated by the Activity row's last write (its <c>Timestamp</c>), and
+/// Turns each Activity's old single text into that Activity's first Comment (#130, ADR 0001).
+/// The Activity no longer has that field (#133), so the text is read from the old
+/// <c>Comments</c> column of the raw stored Activity row; a row without that column, or with a
+/// value that is not a string, has nothing to convert. A non-empty text (after trimming) becomes
+/// one Comment with no Event, dated by the Activity row's last write (its <c>Timestamp</c>), and
 /// cut to at most <see cref="FieldRules.CommentTextMaxLength"/> characters and trimmed again only
 /// when it is longer (with a warning naming the Activity). The Activity row is only read, never written.
 /// <para>
@@ -21,6 +23,11 @@ namespace MW_GC.EventManager.API.Services;
 /// <c>ActivityComments</c> table under its own partition key, and a later run that finds the
 /// marker does nothing, so a converted Comment the admin deleted never comes back. A pass that
 /// fails part-way stores no marker, and the next start finishes it.
+/// </para>
+/// <para>
+/// A later Activity <c>PUT</c> replaces the row through the typed entity and so drops the old
+/// column; that is intended once the marker is stored. This class, its startup service and the
+/// marker check can be deleted once every deployment has stored the marker.
 /// </para>
 /// </summary>
 internal sealed class ActivityNoteConversion
@@ -33,19 +40,30 @@ internal sealed class ActivityNoteConversion
 
     private const string CommentTable = "ActivityComments";
 
-    private readonly TableStore<ActivityEntity> _activities;
+    // The table and partition the Activity TableStore uses (Program.cs).
+    private const string ActivityTable = "Activities";
+    private const string ActivityPartitionKey = "Activity";
+
+    // The old stored column that held the Activity's single text.
+    private const string OldTextColumn = "Comments";
+
     private readonly TableStore<CommentEntity> _comments;
+    private readonly TableClient _activityTable;
     private readonly TableClient _commentTable;
     private readonly ILogger<ActivityNoteConversion> _logger;
 
+    // The Activity store is taken, though not used, so that building the conversion creates the
+    // Activity table the way the store does before the raw read below.
     public ActivityNoteConversion(
         TableStore<ActivityEntity> activities,
         TableStore<CommentEntity> comments,
         TableServiceClient service,
         ILogger<ActivityNoteConversion> logger)
     {
-        _activities = activities;
+        _ = activities;
         _comments = comments;
+        // The Activity rows are read raw: the old column is no longer part of ActivityEntity.
+        _activityTable = service.GetTableClient(ActivityTable);
         // The Comment store creates the table; the marker goes through the raw client because it
         // is not a Comment and does not live in the Comment partition.
         _commentTable = service.GetTableClient(CommentTable);
@@ -72,10 +90,13 @@ internal sealed class ActivityNoteConversion
         }
 
         var added = 0;
-        foreach (var activity in await _activities.GetAllAsync(ct))
+        await foreach (var row in _activityTable.QueryAsync<TableEntity>(e => e.PartitionKey == ActivityPartitionKey, cancellationToken: ct))
         {
-            var note = activity.Comments?.Trim();
-            if (string.IsNullOrEmpty(note)) continue;
+            // Only a string in the old column is a text to convert; a missing column or another type is skipped.
+            if (!row.TryGetValue(OldTextColumn, out var value) || value is not string text) continue;
+            var note = text.Trim();
+            if (note.Length == 0) continue;
+            var activityId = Guid.Parse(row.RowKey);
 
             // A note longer than the Comment limit is cut, never dropped, and never in the middle
             // of a character made of two UTF-16 units.
@@ -87,17 +108,17 @@ internal sealed class ActivityNoteConversion
                 var kept = note[..length].Trim();
                 _logger.LogWarning(
                     "The old note of Activity {ActivityId} is {Length} characters; its Comment keeps the first {Kept}.",
-                    activity.Id, note.Length, kept.Length);
+                    activityId, note.Length, kept.Length);
                 note = kept;
                 if (note.Length == 0) continue;
             }
 
             var comment = new CommentEntity
             {
-                Id = CommentIdFor(activity.Id),
-                ActivityId = activity.Id,
+                Id = CommentIdFor(activityId),
+                ActivityId = activityId,
                 Text = note,
-                CreatedUtc = (activity.Timestamp ?? DateTimeOffset.UtcNow).ToUniversalTime(),
+                CreatedUtc = (row.Timestamp ?? DateTimeOffset.UtcNow).ToUniversalTime(),
                 EventId = null,
             };
             // Insert only: a Comment an earlier, unfinished pass already added is left as it is.

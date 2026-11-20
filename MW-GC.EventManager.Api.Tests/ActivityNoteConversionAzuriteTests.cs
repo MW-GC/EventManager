@@ -48,17 +48,20 @@ public class ActivityNoteConversionAzuriteTests
         if (apiUrl is not null)
             Flow(markerAtStart.HasValue, "host-start pass stored the marker", "the API host ran the conversion at start");
 
-        // Old-style data: two Activities with an old note and one without, written straight to the Activities table.
+        // Old-style data, written straight to the Activities table as raw rows: the Activity no longer has the
+        // field (#133), so the old single text is a Comments column only. Two rows carry text, one carries
+        // none (no column), and one carries a number in that column (skipped, never thrown on).
         var gameId = Guid.NewGuid();
-        var first = new ActivityEntity { GameId = gameId, Name = "Old note one", Comments = "  Ran long, cut the second round  " };
-        var second = new ActivityEntity { GameId = gameId, Name = "Old note two", Comments = "Bring snacks" };
-        var none = new ActivityEntity { GameId = gameId, Name = "No note", Comments = null };
-        foreach (var activity in new[] { first, second, none })
-            await activities.UpsertAsync(activity, ct);
-        var seeded = new Dictionary<Guid, ActivityEntity>();
-        foreach (var activity in new[] { first, second, none })
-            seeded[activity.Id] = (await activities.GetAsync(activity.Id, ct))!;
-        TestContext.WriteLine($"INFO seeded Activities {first.Id} (note), {second.Id} (note), {none.Id} (no note)");
+        var activityTable = service.GetTableClient("Activities");
+        var first = await SeedRawAsync(activityTable, gameId, "Old text one", "  Ran long, cut the second round  ", ct);
+        var second = await SeedRawAsync(activityTable, gameId, "Old text two", "Bring snacks", ct);
+        var none = await SeedRawAsync(activityTable, gameId, "No old text", null, ct);
+        var number = await SeedRawAsync(activityTable, gameId, "A number in the old column", 42, ct);
+        var seeded = new Dictionary<Guid, TableEntity>();
+        foreach (var id in new[] { first, second, none, number })
+            seeded[id] = (await activityTable.GetEntityAsync<TableEntity>("Activity", id.ToString("D"), cancellationToken: ct)).Value;
+        Flow(!seeded[none].ContainsKey("Comments") && seeded[number]["Comments"] is int,
+            "seeded rows", $"{first} (text), {second} (text), {none} (no Comments column), {number} (Comments stored as a number)");
 
         if (apiUrl is not null)
         {
@@ -71,36 +74,43 @@ public class ActivityNoteConversionAzuriteTests
         await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
         await conversion.RunAsync(ct);
 
+        // The trimmed texts each Comment must carry, written out rather than worked out.
+        var expectedText = new Dictionary<Guid, string> { [first] = "Ran long, cut the second round", [second] = "Bring snacks" };
         var stored = await CommentsOfAsync(comments, seeded.Keys, ct);
         Flow(stored.Count == 2, "first run, table read-back", $"{stored.Count} Comments for the seeded Activities");
-        foreach (var activity in new[] { seeded[first.Id], seeded[second.Id] })
+        foreach (var (id, text) in expectedText)
         {
-            var comment = stored.Single(c => c.ActivityId == activity.Id);
-            var expected = activity.Comments!.Trim();
-            var ok = comment.Id == ActivityNoteConversion.CommentIdFor(activity.Id) && comment.Text == expected
-                && comment.CreatedUtc == activity.Timestamp && comment.EventId is null;
-            Flow(ok, $"Comment of {activity.Id}",
-                $"id {comment.Id}, text \"{comment.Text}\", createdUtc {comment.CreatedUtc:O} (row Timestamp {activity.Timestamp:O}), eventId {comment.EventId?.ToString() ?? "null"}");
+            var row = seeded[id];
+            var comment = stored.Single(c => c.ActivityId == id);
+            var ok = comment.Id == ActivityNoteConversion.CommentIdFor(id) && comment.Text == text
+                && comment.CreatedUtc == row.Timestamp && comment.EventId is null;
+            Flow(ok, $"Comment of {id}",
+                $"id {comment.Id}, text \"{comment.Text}\", createdUtc {comment.CreatedUtc:O} (row Timestamp {row.Timestamp:O}), eventId {comment.EventId?.ToString() ?? "null"}");
         }
-        Flow(stored.All(c => c.ActivityId != none.Id), "Activity without a note", "has no Comment");
+        Flow(stored.All(c => c.ActivityId != none), "row without the old Comments column", "has no Comment");
+        Flow(stored.All(c => c.ActivityId != number), "row with a number in the old Comments column", "has no Comment, and the pass did not throw");
         var markerAfter = await raw.GetEntityIfExistsAsync<TableEntity>(
             ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
         Flow(markerAfter.HasValue, "marker after the pass", "stored in ActivityComments, partition Migration");
-        var note = (await activities.GetAsync(first.Id, ct))!.Comments;
-        Flow(note == first.Comments, "old field untouched", $"Activity.Comments is still \"{note}\"");
+        var after = (await activityTable.GetEntityAsync<TableEntity>("Activity", first.ToString("D"), cancellationToken: ct)).Value;
+        Flow(after.GetString("Comments") == "  Ran long, cut the second round  " && after.ETag == seeded[first].ETag,
+            "old column untouched", $"the row's Comments column is still \"{after.GetString("Comments")}\", ETag unchanged");
 
         if (apiUrl is not null)
         {
-            foreach (var activity in new[] { seeded[first.Id], seeded[second.Id] })
+            foreach (var (id, text) in expectedText)
             {
-                var listed = await ListAsync(apiUrl, activity.Id, ct);
-                var ok = listed.Count == 1 && listed[0].Text == activity.Comments!.Trim()
-                    && listed[0].CreatedUtc == activity.Timestamp && listed[0].EventId is null;
-                Flow(ok, $"list route GET {apiUrl}/activities/{activity.Id}/comments",
+                var listed = await ListAsync(apiUrl, id, ct);
+                var ok = listed.Count == 1 && listed[0].Text == text
+                    && listed[0].CreatedUtc == seeded[id].Timestamp && listed[0].EventId is null;
+                Flow(ok, $"list route GET {apiUrl}/activities/{id}/comments",
                     string.Join("; ", listed.Select(c => $"text \"{c.Text}\", createdUtc {c.CreatedUtc:O}, eventId {c.EventId?.ToString() ?? "null"}")));
             }
-            var listedNone = await ListAsync(apiUrl, none.Id, ct);
-            Flow(listedNone.Count == 0, "list route, Activity without a note", $"{listedNone.Count} Comments");
+            foreach (var id in new[] { none, number })
+            {
+                var listedNone = await ListAsync(apiUrl, id, ct);
+                Flow(listedNone.Count == 0, $"list route, row {id} with nothing to convert", $"{listedNone.Count} Comments");
+            }
         }
 
         // Second run: the marker is there, so nothing is added.
@@ -120,6 +130,21 @@ public class ActivityNoteConversionAzuriteTests
             foreach (var id in seeded.Keys) total += (await ListAsync(apiUrl, id, ct)).Count;
             Flow(total == 2, "list route after the reruns", $"{total} Comments for the seeded Activities");
         }
+    }
+
+    // An Activity row as an older version stored it, with the old single text (or another value) in its
+    // Comments column; null leaves the column out.
+    private static async Task<Guid> SeedRawAsync(TableClient table, Guid gameId, string name, object? oldColumn, CancellationToken ct)
+    {
+        var id = Guid.NewGuid();
+        var row = new TableEntity("Activity", id.ToString("D"))
+        {
+            ["GameId"] = gameId, ["Name"] = name, ["Description"] = "", ["Rules"] = "",
+            ["ThemeIds"] = "[]", ["HolidayIds"] = "[]", ["SetupRequirements"] = "",
+        };
+        if (oldColumn is not null) row["Comments"] = oldColumn;
+        await table.AddEntityAsync(row, ct);
+        return id;
     }
 
     private static async Task<List<CommentEntity>> CommentsOfAsync(

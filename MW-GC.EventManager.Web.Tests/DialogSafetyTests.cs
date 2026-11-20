@@ -43,7 +43,7 @@ public sealed class DialogSafetyTests : IDisposable
         grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id };
         timeTrial = new ActivityEntity { Name = "Time Trial", GameId = kart.Id };
         stock = new ActivityEntity { Name = "Stock", GameId = brawl.Id };
-        retired = new Activity { Id = Guid.NewGuid(), GameId = brawl.Id, Name = "Retired", Comments = "Old note" };
+        retired = new Activity { Id = Guid.NewGuid(), GameId = brawl.Id, Name = "Retired" };
         night = new EventEntity
         {
             Name = "Game night",

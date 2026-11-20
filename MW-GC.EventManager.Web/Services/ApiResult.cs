@@ -27,12 +27,6 @@ public static class ApiResult
         message is not null && message.Contains(SessionExpiredMessage, StringComparison.Ordinal);
 
     /// <summary>
-    /// The failure message of the old single-text Save Comments. Since #132 nothing in the app shows it; #133
-    /// removes it with that field and its PATCH route.
-    /// </summary>
-    public static string CommentsNotSaved(string error) => $"The comments were not saved. {error} Your text is kept.";
-
-    /// <summary>
     /// Names the lists that failed to load, followed by the first failure's message, for example
     /// "Themes could not be loaded. Could not reach the server. ..." Null when nothing failed.
     /// </summary>

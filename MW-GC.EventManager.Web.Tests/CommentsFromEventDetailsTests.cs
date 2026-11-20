@@ -24,10 +24,6 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
     private const string TagA2 = "W/\"datetime'2026-11-20T10%3A30%3A00.0000000Z'\"";
     private const string TagB = "W/\"datetime'2026-11-20T11%3A00%3A00.0000000Z'\"";
     private const string TagC = "W/\"datetime'2026-11-20T12%3A00%3A00.0000000Z'\"";
-    // Text the Event's Selection snapshot and the Activity's old single field still carry (#133 removes
-    // both); neither is ever shown as a Comment.
-    private const string SnapshotText = "Snapshot text";
-    private const string OldFieldText = "Old single text";
 
     private readonly StubApiHandler api = new();
     private readonly PageHarness harness;
@@ -48,14 +44,14 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
 
     public CommentsFromEventDetailsTests()
     {
-        grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id, Comments = OldFieldText };
+        grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id };
         timeTrial = new ActivityEntity { Name = "Time Trial", GameId = kart.Id };
         night = new EventEntity
         {
             Name = "Game night",
             Date = new DateTimeOffset(2026, 10, 9, 19, 0, 0, TimeSpan.Zero),
             UniqueGamesOnly = false,
-            Selections = [Pick(grandPrix, SnapshotText), Pick(timeTrial)],
+            Selections = [Pick(grandPrix), Pick(timeTrial)],
             WinnerActivityId = grandPrix.Id
         };
         open = new EventEntity
@@ -63,7 +59,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
             Name = "Open night",
             Date = new DateTimeOffset(2026, 10, 16, 19, 0, 0, TimeSpan.Zero),
             UniqueGamesOnly = false,
-            Selections = [Pick(grandPrix, SnapshotText), Pick(timeTrial)]
+            Selections = [Pick(grandPrix), Pick(timeTrial)]
         };
         api.Json(HttpMethod.Get, "/api/games", new[] { kart })
            .Json(HttpMethod.Get, "/api/activities", new[] { grandPrix, timeTrial })
@@ -83,10 +79,10 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
 
     public void Dispose() => harness.Dispose();
 
-    private Selection Pick(ActivityEntity act, string? snapshotComments = null) => new()
+    private Selection Pick(ActivityEntity act) => new()
     {
         Game = new Game { Id = kart.Id, Name = kart.Name },
-        Activity = new Activity { Id = act.Id, GameId = act.GameId, Name = act.Name, Comments = snapshotComments }
+        Activity = new Activity { Id = act.Id, GameId = act.GameId, Name = act.Name }
     };
 
     // ---- Where the entry shows -----------------------------------------------------------------
@@ -102,12 +98,10 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
         Assert.IsNotNull(NewBox(page));
         Assert.AreEqual(1, api.Count(HttpMethod.Get, ListPath(grandPrix.Id)));
         Assert.AreEqual(0, api.Count(HttpMethod.Get, ListPath(timeTrial.Id)));
-        // The old single-text editor is gone, and neither the snapshot's nor the old field's text shows.
+        // The old single-text editor is gone.
         var dialog = page.FormDialog();
         Assert.DoesNotContain("Event Manager Comments", dialog.TextContent);
         Assert.IsEmpty(dialog.QuerySelectorAll("fluent-button").Where(b => b.TextContent.Trim() == "Save Comments").ToList());
-        Assert.DoesNotContain(SnapshotText, dialog.TextContent);
-        Assert.DoesNotContain(OldFieldText, dialog.TextContent);
     }
 
     [TestMethod]
@@ -280,8 +274,6 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
 
         page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { "Ran long", "Crowd favourite" }, Texts(page)));
         Assert.AreEqual(2, api.Count(HttpMethod.Get, ListPath(grandPrix.Id)));
-        Assert.DoesNotContain(SnapshotText, page.FormDialog().TextContent);
-        Assert.DoesNotContain(OldFieldText, page.FormDialog().TextContent);
     }
 
     // ---- The dialog's guards -------------------------------------------------------------------

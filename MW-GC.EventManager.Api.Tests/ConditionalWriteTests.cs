@@ -229,48 +229,6 @@ public class ConditionalWriteTests
         Assert.AreEqual("Echoed", StoredName("game", id));
     }
 
-    // ---- PATCH comments
-
-    [TestMethod]
-    public async Task CommentsPatchWithAnInterleavedWriteIs409AndTheInterleavedValueSurvives()
-    {
-        var (id, _) = await Create("activity");
-        var key = id.ToString("D");
-
-        // The PATCH reads the row; before it writes, another request saves new comments.
-        h.ActivityTable.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, string rowKey, IEnumerable<string> _, CancellationToken _) =>
-            {
-                var read = new TableEntity(h.Activities[rowKey]) { ETag = h.Activities[rowKey].ETag };
-                h.Activities[rowKey] = new TableEntity(read) { ["Comments"] = "Interleaved", ETag = TableMocks.NextETag() };
-                return Response.FromValue(read, Mock.Of<Response>());
-            });
-
-        var result = await h.ActivityApi.UpdateComments(Request(new { comments = "Mine" }), id, default);
-
-        Assert.AreEqual(StatusCodes.Status409Conflict, ApiResults.Status(result));
-        Assert.AreEqual(RouteFailures.ConflictMessage, ApiResults.Message(result));
-        Assert.AreEqual("Interleaved", h.Activities[key].GetString("Comments"));
-    }
-
-    [TestMethod]
-    public async Task CommentsPatchHonoursIfMatchAndAnswersWithTheNewETag()
-    {
-        var (id, original) = await Create("activity");
-
-        var first = Request(new { comments = "Bring snacks" }, original);
-        var ok = await h.ActivityApi.UpdateComments(first, id, default);
-        Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(ok));
-        var fresh = ETagHeader(first);
-        Assert.IsNotNull(fresh);
-        Assert.AreNotEqual(original, fresh);
-        Assert.AreEqual(fresh, BodyETag(ok));
-
-        var stale = await h.ActivityApi.UpdateComments(Request(new { comments = "Overwrite" }, original), id, default);
-        Assert.AreEqual(StatusCodes.Status409Conflict, ApiResults.Status(stale));
-        Assert.AreEqual("Bring snacks", h.Activities[id.ToString("D")].GetString("Comments"));
-    }
-
     // ---- DELETE
 
     [TestMethod]
