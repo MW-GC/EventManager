@@ -27,7 +27,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp =>
     new TableStore<EventMetricsEntity>(sp.GetRequiredService<TableServiceClient>(), "EventMetrics", "Metrics"));
 builder.Services.AddSingleton(sp =>
-    new TableStore<ActivityCommentEntity>(sp.GetRequiredService<TableServiceClient>(), "ActivityComments", "Comment"));
+    new TableStore<CommentEntity>(sp.GetRequiredService<TableServiceClient>(), "ActivityComments", "Comment"));
 // The anonymous Event feedback page (#101): its own tables, and a per-instance like rate limit.
 builder.Services.AddSingleton<FeedbackStore>();
 builder.Services.AddSingleton(new LikeRateLimiter(TimeProvider.System));

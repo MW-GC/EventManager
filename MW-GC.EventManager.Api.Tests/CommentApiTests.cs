@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Azure;
 using Azure.Data.Tables;
 using Microsoft.AspNetCore.Http;
@@ -14,7 +15,7 @@ namespace MW_GC.EventManager.Api.Tests;
 /// deleted under its Activity, and deleted with that Activity.
 /// </summary>
 [TestClass]
-public class ActivityCommentApiTests
+public class CommentApiTests
 {
     private const string TextRequired = "Comment text is required.";
     private const string TextTooLong = "Comment text must be 1000 characters or fewer.";
@@ -23,7 +24,7 @@ public class ActivityCommentApiTests
     private readonly LibraryHarness h = new();
     private readonly GameEntity game;
 
-    public ActivityCommentApiTests() => game = h.SeedGame("Owner");
+    public CommentApiTests() => game = h.SeedGame("Owner");
 
     // ---- helpers
 
@@ -59,31 +60,31 @@ public class ActivityCommentApiTests
         return Guid.Parse(id);
     }
 
-    private async Task<(ActivityCommentEntity Comment, string ETag)> AddComment(Guid activityId, string text, Guid? eventId = null)
+    private async Task<(CommentEntity Comment, string ETag)> AddComment(Guid activityId, string text, Guid? eventId = null)
     {
         var request = Request(new { text, eventId });
         var result = await h.CommentApi.Add(request, activityId, default);
         Assert.AreEqual(StatusCodes.Status201Created, ApiResults.Status(result));
-        return (ApiResults.Value<ActivityCommentEntity>(result), ETagHeader(request)!);
+        return (ApiResults.Value<CommentEntity>(result), ETagHeader(request)!);
     }
 
     // A Comment written straight into the in-memory table, for a chosen added date or id.
-    private ActivityCommentEntity Seed(Guid activityId, string text, DateTimeOffset createdUtc, Guid? id = null)
+    private CommentEntity Seed(Guid activityId, string text, DateTimeOffset createdUtc, Guid? id = null)
     {
-        var comment = new ActivityCommentEntity
+        var comment = new CommentEntity
         {
             Id = id ?? Guid.NewGuid(), PartitionKey = "Comment", ActivityId = activityId, Text = text,
             CreatedUtc = createdUtc, ETag = TableMocks.NextETag(),
         };
-        h.ActivityComments[comment.RowKey] = comment;
+        h.Comments[comment.RowKey] = comment;
         return comment;
     }
 
-    private async Task<List<ActivityCommentEntity>> List(Guid activityId) =>
-        ApiResults.Value<List<ActivityCommentEntity>>(await h.CommentApi.List(Bare(), activityId, default));
+    private async Task<List<CommentEntity>> List(Guid activityId) =>
+        ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(Bare(), activityId, default));
 
-    private ActivityCommentEntity? Stored(Guid commentId) =>
-        h.ActivityComments.TryGetValue(commentId.ToString("D"), out var comment) ? comment : null;
+    private CommentEntity? Stored(Guid commentId) =>
+        h.Comments.TryGetValue(commentId.ToString("D"), out var comment) ? comment : null;
 
     private static int Calls(Mock<TableClient> table, string method) => table.Invocations.Count(i => i.Method.Name == method);
 
@@ -103,7 +104,7 @@ public class ActivityCommentApiTests
         var result = await h.CommentApi.Add(request, activityId, default);
 
         var created = Assert.IsExactInstanceOfType<CreatedResult>(result);
-        var comment = Assert.IsExactInstanceOfType<ActivityCommentEntity>(created.Value);
+        var comment = Assert.IsExactInstanceOfType<CommentEntity>(created.Value);
         Assert.AreEqual($"/api/activities/{activityId}/comments/{comment.Id}", created.Location);
         Assert.AreNotEqual(Guid.Empty, comment.Id);
         Assert.AreEqual(activityId, comment.ActivityId);
@@ -134,7 +135,7 @@ public class ActivityCommentApiTests
             Request(new { text = "Hi", createdUtc = "2000-01-01T00:00:00Z", id = sentId, activityId = Guid.NewGuid() }), activityId, default);
 
         var after = DateTimeOffset.UtcNow;
-        var comment = ApiResults.Value<ActivityCommentEntity>(result);
+        var comment = ApiResults.Value<CommentEntity>(result);
         Assert.IsTrue(comment.CreatedUtc >= before && comment.CreatedUtc <= after, $"CreatedUtc {comment.CreatedUtc:O} is not the time of the request.");
         Assert.AreEqual(TimeSpan.Zero, comment.CreatedUtc.Offset);
         Assert.AreNotEqual(sentId, comment.Id);
@@ -149,7 +150,7 @@ public class ActivityCommentApiTests
         var result = await h.CommentApi.Add(Request(new { text = "Orphan" }), Guid.NewGuid(), default);
 
         Assert.IsExactInstanceOfType<NotFoundResult>(result);
-        Assert.IsEmpty(h.ActivityComments);
+        Assert.IsEmpty(h.Comments);
         Assert.AreEqual(0, h.Writes());
     }
 
@@ -162,7 +163,7 @@ public class ActivityCommentApiTests
 
         Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(result));
         Assert.AreEqual(EventNotFound, ApiResults.Message(result));
-        Assert.IsEmpty(h.ActivityComments);
+        Assert.IsEmpty(h.Comments);
         Assert.AreEqual(0, CommentWrites());
     }
 
@@ -185,7 +186,7 @@ public class ActivityCommentApiTests
         Assert.AreEqual(TextRequired, ApiResults.Message(add));
         Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(edit));
         Assert.AreEqual(TextRequired, ApiResults.Message(edit));
-        Assert.ContainsSingle(h.ActivityComments);
+        Assert.ContainsSingle(h.Comments);
         Assert.AreEqual("Keep me", Stored(comment.Id)!.Text);
         Assert.AreEqual(1, CommentWrites());
     }
@@ -206,7 +207,7 @@ public class ActivityCommentApiTests
         var add = await h.CommentApi.Add(Request(new { text = over }), activityId, default);
         Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(add));
         Assert.AreEqual(TextTooLong, ApiResults.Message(add));
-        Assert.AreEqual(2, h.ActivityComments.Count);
+        Assert.AreEqual(2, h.Comments.Count);
 
         var edit = await h.CommentApi.Update(Request(new { text = over }), activityId, comment.Id, default);
         Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(edit));
@@ -234,7 +235,7 @@ public class ActivityCommentApiTests
         Assert.AreEqual(message, ApiResults.Message(add));
         Assert.AreEqual(status, ApiResults.Status(edit));
         Assert.AreEqual(message, ApiResults.Message(edit));
-        Assert.AreEqual("Keep me", Assert.ContainsSingle(h.ActivityComments).Value.Text);
+        Assert.AreEqual("Keep me", Assert.ContainsSingle(h.Comments).Value.Text);
         Assert.AreEqual(1, CommentWrites());
     }
 
@@ -269,6 +270,36 @@ public class ActivityCommentApiTests
         Assert.IsExactInstanceOfType<NotFoundResult>(await h.CommentApi.List(Bare(), Guid.NewGuid(), default));
     }
 
+    [TestMethod]
+    public async Task ListAndActivityDeleteQueryTheTableByActivity()
+    {
+        var (a, aTag) = await CreateActivity("A");
+        var (b, _) = await CreateActivity("B");
+        var (mine, _) = await AddComment(a, "Mine");
+        var (theirs, _) = await AddComment(b, "Theirs");
+        var mineRow = Stored(mine.Id)!;
+        var theirsRow = Stored(theirs.Id)!;
+
+        Assert.AreEqual(mine.Id, Assert.ContainsSingle(await List(a)).Id);
+        Assert.IsExactInstanceOfType<NoContentResult>(await h.ActivityApi.Delete(Bare(aTag), a, default));
+
+        // The list and the Activity delete each sent the ActivityId filter to the table, so B's
+        // row was never read for A.
+        var filters = h.CommentTable.Invocations
+            .Where(i => i.Method.Name == nameof(TableClient.QueryAsync))
+            .Select(i => Assert.IsInstanceOfType<Expression<Func<CommentEntity, bool>>>(i.Arguments[0]).Compile())
+            .ToList();
+        Assert.AreEqual(2, filters.Count);
+        foreach (var filter in filters)
+        {
+            Assert.IsTrue(filter(mineRow), "The query must match A's Comment.");
+            Assert.IsFalse(filter(theirsRow), "The query must exclude B's Comment.");
+        }
+
+        Assert.IsNull(Stored(mine.Id));
+        Assert.IsNotNull(Stored(theirs.Id));
+    }
+
     // ---- edit
 
     [TestMethod]
@@ -283,7 +314,7 @@ public class ActivityCommentApiTests
         var result = await h.CommentApi.Update(request, activityId, comment.Id, default);
 
         Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(result));
-        var edited = ApiResults.Value<ActivityCommentEntity>(result);
+        var edited = ApiResults.Value<CommentEntity>(result);
         var stored = Stored(comment.Id)!;
         foreach (var actual in new[] { edited, stored })
         {
@@ -312,7 +343,7 @@ public class ActivityCommentApiTests
         Assert.IsExactInstanceOfType<NotFoundResult>(wrongActivity);
         Assert.IsExactInstanceOfType<NotFoundResult>(missing);
         Assert.AreEqual("Mine", Stored(comment.Id)!.Text);
-        Assert.ContainsSingle(h.ActivityComments);
+        Assert.ContainsSingle(h.Comments);
         Assert.AreEqual(1, CommentWrites());
     }
 
@@ -417,7 +448,7 @@ public class ActivityCommentApiTests
         Assert.IsExactInstanceOfType<NoContentResult>(await h.ActivityApi.Delete(Bare(doomedTag), doomed, default));
 
         Assert.IsFalse(h.Activities.ContainsKey(doomed.ToString("D")));
-        Assert.AreEqual(kept.Id, Assert.ContainsSingle(h.ActivityComments).Value.Id);
+        Assert.AreEqual(kept.Id, Assert.ContainsSingle(h.Comments).Value.Id);
         Assert.IsExactInstanceOfType<NotFoundResult>(await h.CommentApi.List(Bare(), doomed, default));
     }
 
@@ -433,7 +464,7 @@ public class ActivityCommentApiTests
 
         Assert.IsExactInstanceOfType<NoContentResult>(await h.ActivityApi.Delete(Bare(), gone, default));
 
-        Assert.AreEqual(kept.Id, Assert.ContainsSingle(h.ActivityComments).Value.Id);
+        Assert.AreEqual(kept.Id, Assert.ContainsSingle(h.Comments).Value.Id);
     }
 
     [TestMethod]
@@ -497,6 +528,6 @@ public class ActivityCommentApiTests
 
         Assert.IsEmpty(await List(copy.Id));
         Assert.ContainsSingle(await List(activityId));
-        Assert.ContainsSingle(h.ActivityComments);
+        Assert.ContainsSingle(h.Comments);
     }
 }

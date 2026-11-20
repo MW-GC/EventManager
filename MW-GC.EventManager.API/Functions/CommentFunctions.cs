@@ -11,21 +11,21 @@ namespace MW_GC.EventManager.API.Functions;
 /// <summary>
 /// An Activity's Comments (ADR 0001): each Comment is its own row in the <c>ActivityComments</c>
 /// table with its own eTag, read and written under its Activity. The API sets the added date
-/// (<see cref="ActivityCommentEntity.CreatedUtc"/>) and an edit changes only the text. Deleting the
+/// (<see cref="CommentEntity.CreatedUtc"/>) and an edit changes only the text. Deleting the
 /// Activity deletes its Comments (see <see cref="ActivityFunctions"/>); deleting an Event does not.
 /// </summary>
-internal sealed class ActivityCommentFunctions
+internal sealed class CommentFunctions
 {
-    private readonly TableStore<ActivityCommentEntity> _store;
+    private readonly TableStore<CommentEntity> _store;
     private readonly TableStore<ActivityEntity> _activities;
     private readonly TableStore<EventEntity> _events;
-    private readonly ILogger<ActivityCommentFunctions> _logger;
+    private readonly ILogger<CommentFunctions> _logger;
 
-    public ActivityCommentFunctions(
-        TableStore<ActivityCommentEntity> store,
+    public CommentFunctions(
+        TableStore<CommentEntity> store,
         TableStore<ActivityEntity> activities,
         TableStore<EventEntity> events,
-        ILogger<ActivityCommentFunctions> logger)
+        ILogger<CommentFunctions> logger)
     {
         _store = store;
         _activities = activities;
@@ -33,19 +33,19 @@ internal sealed class ActivityCommentFunctions
         _logger = logger;
     }
 
-    [Function("ListActivityComments")]
+    [Function("ListComments")]
     public Task<IActionResult> List(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "activities/{id:guid}/comments")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "ListActivityComments", ct, async () =>
+        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "ListComments", ct, async () =>
     {
         if (await _activities.GetAsync(id, ct) is null) return new NotFoundResult();
         return new OkObjectResult(await ForActivityAsync(_store, id, ct));
     });
 
-    [Function("AddActivityComment")]
+    [Function("AddComment")]
     public Task<IActionResult> Add(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "activities/{id:guid}/comments")] HttpRequest req,
-        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "AddActivityComment", ct, async () =>
+        Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "AddComment", ct, async () =>
     {
         if (await _activities.GetAsync(id, ct) is null) return new NotFoundResult();
 
@@ -56,7 +56,7 @@ internal sealed class ActivityCommentFunctions
             return new BadRequestObjectResult(CommentValidator.EventNotFoundMessage);
 
         // The id, the Activity and the added date come from the API, never from the body.
-        var comment = new ActivityCommentEntity
+        var comment = new CommentEntity
         {
             Id = Guid.NewGuid(),
             ActivityId = id,
@@ -68,10 +68,10 @@ internal sealed class ActivityCommentFunctions
         return EntityResults.Created(req, $"/api/activities/{id}/comments/{comment.Id}", comment);
     });
 
-    [Function("UpdateActivityComment")]
+    [Function("UpdateComment")]
     public Task<IActionResult> Update(
         [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "activities/{id:guid}/comments/{commentId:guid}")] HttpRequest req,
-        Guid id, Guid commentId, CancellationToken ct) => RouteFailures.RunAsync(_logger, "UpdateActivityComment", ct, async () =>
+        Guid id, Guid commentId, CancellationToken ct) => RouteFailures.RunAsync(_logger, "UpdateComment", ct, async () =>
     {
         var existing = await _store.GetAsync(commentId, ct);
         if (existing is null || existing.ActivityId != id) return new NotFoundResult();
@@ -81,7 +81,7 @@ internal sealed class ActivityCommentFunctions
         if (CommentValidator.ValidateText(body.Value.Text, out var text) is { } error) return new BadRequestObjectResult(error);
 
         // Only the text changes: the added date, the Activity and the Event are kept from the row.
-        var edited = new ActivityCommentEntity
+        var edited = new CommentEntity
         {
             Id = commentId,
             ActivityId = existing.ActivityId,
@@ -92,10 +92,10 @@ internal sealed class ActivityCommentFunctions
         return await EntityResults.UpdateAsync(_store, req, edited, ct);
     });
 
-    [Function("DeleteActivityComment")]
+    [Function("DeleteComment")]
     public Task<IActionResult> Delete(
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "activities/{id:guid}/comments/{commentId:guid}")] HttpRequest req,
-        Guid id, Guid commentId, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteActivityComment", ct, async () =>
+        Guid id, Guid commentId, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteComment", ct, async () =>
     {
         // Idempotent like every other delete: a missing Comment is a 204, and so is a Comment of
         // another Activity, which this route never deletes.
@@ -105,18 +105,17 @@ internal sealed class ActivityCommentFunctions
     });
 
     /// <summary>Deletes every Comment of the Activity. Used by the Activity delete.</summary>
-    internal static async Task DeleteAllForActivityAsync(TableStore<ActivityCommentEntity> store, Guid activityId, CancellationToken ct)
+    internal static async Task DeleteAllForActivityAsync(TableStore<CommentEntity> store, Guid activityId, CancellationToken ct)
     {
         foreach (var comment in await ForActivityAsync(store, activityId, ct))
             await store.DeleteAsync(comment.Id, ct: ct);
     }
 
-    // Reads the whole Comment partition and filters by Activity in memory: the data is small (a
-    // few Comments per Activity), so a server-side filter on ActivityId is not worth it yet.
-    private static async Task<List<ActivityCommentEntity>> ForActivityAsync(
-        TableStore<ActivityCommentEntity> store, Guid activityId, CancellationToken ct) =>
-        (await store.GetAllAsync(ct))
-            .Where(c => c.ActivityId == activityId)
+    // The ActivityId filter is part of the table query, so a list or an Activity delete reads only
+    // that Activity's Comments, not the whole Comment partition.
+    private static async Task<List<CommentEntity>> ForActivityAsync(
+        TableStore<CommentEntity> store, Guid activityId, CancellationToken ct) =>
+        (await store.GetWhereAsync(c => c.ActivityId == activityId, ct))
             .OrderBy(c => c.CreatedUtc)
             .ThenBy(c => c.Id)
             .ToList();

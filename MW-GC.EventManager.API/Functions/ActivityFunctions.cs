@@ -13,14 +13,14 @@ internal sealed class ActivityFunctions
 {
     private readonly TableStore<ActivityEntity> _store;
     private readonly TableStore<GameEntity> _games;
-    private readonly TableStore<ActivityCommentEntity> _comments;
+    private readonly TableStore<CommentEntity> _comments;
     private readonly ILogger<ActivityFunctions> _logger;
     private readonly CrudHandler<ActivityEntity> _crud;
 
     public ActivityFunctions(
         TableStore<ActivityEntity> store,
         TableStore<GameEntity> games,
-        TableStore<ActivityCommentEntity> comments,
+        TableStore<CommentEntity> comments,
         ILogger<ActivityFunctions> logger)
     {
         _store = store;
@@ -68,7 +68,7 @@ internal sealed class ActivityFunctions
         // answered 204: a stale If-Match (409) deletes nothing. A 204 for a row that was already
         // gone still cleans up, so retrying a delete whose cleanup failed removes what was left.
         if (result is NoContentResult)
-            await ActivityCommentFunctions.DeleteAllForActivityAsync(_comments, id, ct);
+            await CommentFunctions.DeleteAllForActivityAsync(_comments, id, ct);
         return result;
     });
 

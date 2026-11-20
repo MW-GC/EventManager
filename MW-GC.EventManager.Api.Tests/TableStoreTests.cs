@@ -194,4 +194,21 @@ public class TableStoreTests
         Assert.AreEqual(2, eventRows.Count);
         Assert.AreEqual(2, gameRows.Count);
     }
+
+    [TestMethod]
+    public async Task GetWhereAsyncReadsOnlyMatchingRowsOfThePartition()
+    {
+        // The filter and the partition both go to the table query: a matching row of another
+        // partition and a non-matching row of this one are both left out.
+        var match = new GameEntity { Name = "Alpha" };
+        await games.UpsertAsync(match);
+        await games.UpsertAsync(new GameEntity { Name = "Beta" });
+        var foreign = new GameEntity { Name = "Alpha", PartitionKey = "Other" };
+        gameRows[foreign.RowKey] = foreign;
+
+        var listed = await games.GetWhereAsync(g => g.Name == "Alpha");
+
+        Assert.AreEqual(match.Id, Assert.ContainsSingle(listed).Id);
+        Assert.AreEqual(3, gameRows.Count);
+    }
 }
