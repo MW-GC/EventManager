@@ -1,0 +1,358 @@
+@* The Event details dialog: its Selections as cards, Select Winner, the Like count and feedback
+   link (#101), and the Winner Activity's comment. It owns all of that state, its busy guard and its
+   own "Discard changes?" question, so later Event metrics and Comment entries grow here without
+   touching the list or the create-and-edit dialog. The page opens it (Open) and refreshes its list
+   when a Winner was saved. *@
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@inject EventService EventSvc
+@inject ActivityService ActivitySvc
+@inject FocusReturn Focus
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@if (_detailEvent is not null)
+{
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 800px; --dialog-height: 85vh;"
+                  AriaLabel="@_detailEvent.Name" @ondialogdismiss="@((DialogEventArgs _) => DismissDetails())">
+        <FluentDialogBody>
+            <FluentLabel aria-level="2" Typo="Typography.H3" Style="margin-bottom: 4px;">@_detailEvent.Name</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 16px;">
+                @_detailEvent.Date.ToLocalTime().ToString("f")
+            </FluentLabel>
+            @* #101: the like count and the anonymous feedback link (admin only). *@
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true" Style="margin-bottom: 16px;">
+                <span class="event-likes">@LikesText</span>
+                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Loading="@_copyingLink" OnClick="CopyFeedbackLink">Copy feedback link</FluentButton>
+                @if (_feedbackLinkStatus is not null)
+                {
+                    <span role="status">@_feedbackLinkStatus</span>
+                }
+                @if (_feedbackLinkError is not null)
+                {
+                    <span role="alert" style="color: var(--error);">@_feedbackLinkError</span>
+                }
+            </FluentStack>
+            @if (_feedbackLink is not null)
+            {
+                <input type="text" readonly value="@_feedbackLink" aria-label="Feedback link" style="width: 100%; margin-bottom: 16px;" />
+            }
+
+            <ApiErrorBar Message="@_winnerError" />
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding-right: 8px;">
+                @if (_detailEvent.Selections.Count == 1 && _detailEvent.WinnerActivityId == _detailEvent.Selections[0].Activity.Id)
+                {
+                    <FluentLabel>With one activity, the winner is selected automatically.</FluentLabel>
+                }
+                @foreach (var selection in _detailEvent.Selections)
+                {
+                    var isWinner = _detailEvent.WinnerActivityId.HasValue && _detailEvent.WinnerActivityId.Value == selection.Activity.Id;
+                    <FluentCard Style="@(isWinner ? "border: 2px solid var(--accent-fill-rest); background: color-mix(in srgb, var(--accent-fill-rest) 5%, transparent);" : "")" AreaRestricted="false">
+                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="padding: 8px;">
+                            @* Header: game + activity + winner *@
+                            <FluentStack Orientation="Orientation.Horizontal"
+                                         HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+                                         VerticalAlignment="VerticalAlignment.Top"
+                                         Wrap="true">
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="10" VerticalAlignment="VerticalAlignment.Center" Style="flex: 1;">
+                                    @{
+                                        var gameEntity = Games?.FirstOrDefault(g => g.Id == selection.Game.Id);
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(gameEntity?.IconUrl))
+                                    {
+                                        <img src="@gameEntity.IconUrl" alt="" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" />
+                                    }
+                                    else
+                                    {
+                                        <div style="width: 48px; height: 48px; border-radius: 8px; background: var(--neutral-layer-4); display: flex; align-items: center; justify-content: center;">
+                                            <FluentIcon Value="@(new Size24.XboxController())" Color="Color.Neutral" />
+                                        </div>
+                                    }
+                                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="2">
+                                        <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold">@selection.Game.Name</FluentLabel>
+                                        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" VerticalAlignment="VerticalAlignment.Center" Wrap="true">
+                                            <FluentIcon Value="@(new Size16.Flash())" Color="Color.Accent" />
+                                            <FluentLabel Style="font-size: 0.85rem; color: var(--accent-foreground-rest);">@selection.Activity.Name</FluentLabel>
+                                        </FluentStack>
+                                    </FluentStack>
+                                </FluentStack>
+
+                                @if (isWinner)
+                                {
+                                    <FluentBadge Appearance="Appearance.Accent">
+                                        <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> Winner
+                                    </FluentBadge>
+                                }
+                                else
+                                {
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_selectingWinner" OnClick="@(() => SelectWinner(selection.Activity.Id))"
+                                                  IconStart="@(new Size16.Trophy())">
+                                        Select Winner
+                                    </FluentButton>
+                                }
+                            </FluentStack>
+
+                            @* Activity details *@
+                            @if (!string.IsNullOrWhiteSpace(selection.Activity.Description))
+                            {
+                                <FluentLabel Style="color: var(--neutral-foreground-rest); line-height: 1.5;">@selection.Activity.Description</FluentLabel>
+                            }
+
+                            <FluentDivider />
+
+                            <FluentGrid Spacing="3">
+                                @if (!string.IsNullOrWhiteSpace(selection.Activity.Rules))
+                                {
+                                    <FluentGridItem xs="12" md="6">
+                                        <FluentLabel Typo="Typography.Body" Style="font-size: 0.75rem; color: var(--neutral-foreground-hint); margin-bottom: 4px;">Rules</FluentLabel>
+                                        <FluentLabel Style="font-size: 0.85rem; white-space: pre-wrap;">@selection.Activity.Rules</FluentLabel>
+                                    </FluentGridItem>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(selection.Activity.SetupRequirements))
+                                {
+                                    <FluentGridItem xs="12" md="6">
+                                        <FluentLabel Typo="Typography.Body" Style="font-size: 0.75rem; color: var(--neutral-foreground-hint); margin-bottom: 4px;">Setup Requirements</FluentLabel>
+                                        <FluentLabel Style="font-size: 0.85rem; white-space: pre-wrap;">@selection.Activity.SetupRequirements</FluentLabel>
+                                    </FluentGridItem>
+                                }
+                            </FluentGrid>
+
+                            @* Comments editing when this game is the winner *@
+                            @if (isWinner)
+                            {
+                                <FluentDivider />
+                                <div>
+                                    <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments (Activity note, shared across all Events)</FluentLabel>
+                                    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-bottom: 4px;">
+                                        Stored on the activity, not on this Event: every Event that uses this activity, and the Activities page, show the same note.
+                                    </FluentLabel>
+                                    <FluentTextArea Value="@GetDetailComment(selection.Activity.Id)" Immediate="true"
+                                                    ValueChanged="@(v => SetDetailComment(selection.Activity.Id, v))"
+                                                    Style="width: 100%;" Rows="3"
+                                                    Placeholder="Add notes about this activity's success, challenges, or improvements..." />
+                                    @if (_detailCommentError is not null)
+                                    {
+                                        <div role="alert" style="color: var(--error); margin-top: 6px;">@_detailCommentError</div>
+                                    }
+                                    <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Style="margin-top: 6px;"
+                                                  Disabled="@(!IsDetailCommentDirty(selection.Activity.Id))"
+                                                  OnClick="@(() => SaveDetailComment(selection.Activity.Id))">
+                                        Save Comments
+                                    </FluentButton>
+                                </div>
+                            }
+                        </FluentStack>
+                    </FluentCard>
+                }
+            </FluentStack>
+
+            <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" Style="margin-top: 16px;">
+                <FluentButton Appearance="Appearance.Neutral" Disabled="@_selectingWinner" OnClick="CancelDetails">Close</FluentButton>
+            </FluentStack>
+        </FluentDialogBody>
+    </FluentDialog>
+}
+
+@if (_confirm is { } confirm)
+{
+    <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
+                   CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
+}
+
+@code {
+    // The library, as the page loaded it: Game icons, and the Activities whose comment is edited here.
+    [Parameter] public List<GameEntity>? Games { get; set; }
+    [Parameter] public List<ActivityEntity>? Activities { get; set; }
+    // A Winner was saved: the page refreshes its list (never throws; a failure names Events in its error bar).
+    [Parameter] public EventCallback RefreshEvents { get; set; }
+    // The Event with this id in the page's list as it is now, or null when the list no longer has it.
+    [Parameter] public Func<Guid, EventEntity?> FindEvent { get; set; } = _ => null;
+    // A save that failed after its dialog was closed: the page's dismissable error bar.
+    [Parameter] public EventCallback<string> ActionError { get; set; }
+
+    private EventEntity? _detailEvent;
+    // The open details dialog: a late Select Winner or comment save never touches a newer one.
+    private readonly DialogSession _details = new();
+    // Set while one Select Winner runs; every Select Winner button is disabled meanwhile.
+    private bool _selectingWinner;
+    // The open question (Discard changes?), if any.
+    private ConfirmRequest? _confirm;
+    // A failed Select Winner, shown in the details dialog; the previous winner stays.
+    private string? _winnerError;
+
+    // Detail dialog comment editing
+    private Dictionary<Guid, string> _detailComments = [];
+    private string? _detailCommentError;
+
+    // A row's Details button.
+    internal void Open(EventEntity e) { ShowDetails(e); StateHasChanged(); }
+
+    private void ShowDetails(EventEntity e)
+    {
+        _detailEvent = e;
+        _detailComments = [];
+        _detailCommentError = null;
+        _winnerError = null;
+        _likesFor = null;
+        _feedbackLink = _feedbackLinkStatus = _feedbackLinkError = null;
+        _details.Open();
+        _ = Focus.RememberAsync($"details-{e.Id}");
+    }
+
+    // #101: the like count and feedback link in the details dialog (admin routes).
+    private Guid? _likesFor;
+    private int? _likes;
+    private bool _likesFailed;
+    private string? _feedbackLink;
+    private string? _feedbackLinkStatus;
+    private string? _feedbackLinkError;
+    private bool _copyingLink;
+
+    private string LikesText => _likes is { } n ? (n == 1 ? "1 like" : $"{n} likes")
+        : _likesFailed ? "Likes could not be loaded." : "Loading likes…";
+
+    // The count loads once the dialog has rendered, once per opening.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_detailEvent is not { } detail || _likesFor == detail.Id) return;
+        _likesFor = detail.Id;
+        _likes = null;
+        _likesFailed = false;
+        var token = _details.Current;
+        var (value, error) = await ApiResult.LoadAsync(() => EventSvc.GetLikesAsync(detail.Id));
+        if (!_details.IsCurrent(token)) return;
+        _likes = value?.Count;
+        _likesFailed = error is not null || value is null;
+        StateHasChanged();
+    }
+
+    private async Task CopyFeedbackLink()
+    {
+        if (_detailEvent is not { } detail || _copyingLink) return;
+        _copyingLink = true;
+        _feedbackLinkStatus = _feedbackLinkError = null;
+        var token = _details.Current;
+        try
+        {
+            var (link, error) = await ApiResult.LoadAsync(() => EventSvc.GetFeedbackLinkAsync(detail.Id));
+            if (!_details.IsCurrent(token)) return;
+            if (link is null)
+            {
+                _feedbackLinkError = $"The feedback link could not be loaded. {error ?? ApiResult.UnreadableMessage}";
+                return;
+            }
+            _feedbackLink = Nav.ToAbsoluteUri($"feedback/{link.Token}").ToString();
+            try
+            {
+                await JS.InvokeVoidAsync("navigator.clipboard.writeText", _feedbackLink);
+                if (_details.IsCurrent(token)) _feedbackLinkStatus = "Feedback link copied.";
+            }
+            catch (JSException)
+            {
+                if (_details.IsCurrent(token)) _feedbackLinkStatus = "Copy the feedback link from the box below.";
+            }
+        }
+        finally
+        {
+            _copyingLink = false;
+        }
+    }
+
+    // The Close button closes at once without asking, but never while Select Winner runs.
+    private void CancelDetails() { if (!_selectingWinner) CloseDetails(); }
+    private void CloseDetails() { _detailEvent = null; _details.Close(); _ = Focus.RestoreAsync(); }
+    // Overlay click or Escape: an unsaved comment asks first.
+    private void DismissDetails() =>
+        _confirm = ConfirmRequest.ForDismiss(_confirm, _selectingWinner, _detailComments.Keys.Any(IsDetailCommentDirty), CloseDetails);
+
+    // A Discard closes this dialog, which returns focus to its opener itself.
+    private async Task Confirmed(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        await confirm.OnConfirm();
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
+    }
+
+    // Keep editing leaves focus in the open dialog.
+    private void Cancelled(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
+    }
+
+    private async Task SelectWinner(Guid activityId)
+    {
+        if (_detailEvent is null || _selectingWinner) return;
+        _selectingWinner = true;
+        var token = _details.Current;
+        try
+        {
+            var detail = _detailEvent;
+            var previous = detail.WinnerActivityId;
+            detail.WinnerActivityId = activityId;
+            var error = await ApiResult.SendAsync(() => EventSvc.UpdateAsync(detail));
+            if (error is not null)
+            {
+                // Not saved: put the previous winner back so the dialog and the list stay truthful.
+                detail.WinnerActivityId = previous;
+                if (_details.IsCurrent(token)) _winnerError = $"The winner was not saved. {error}";
+                else await ActionError.InvokeAsync($"The winner was not saved. {error}");
+                return;
+            }
+            if (_details.IsCurrent(token)) _winnerError = null;
+            await RefreshEvents.InvokeAsync();
+            if (_details.IsCurrent(token)) _detailEvent = FindEvent(detail.Id);
+        }
+        finally { _selectingWinner = false; }
+    }
+
+    // The comment is stored on the Activity, so prefer the loaded Activity over the
+    // Event's snapshot, which keeps the text the Activity had when the Event was saved.
+    private string GetStoredComment(Guid activityId) =>
+        (Activities?.FirstOrDefault(a => a.Id == activityId) is { } activity
+            ? activity.Comments
+            : _detailEvent?.Selections.FirstOrDefault(s => s.Activity.Id == activityId)?.Activity.Comments)
+        ?? string.Empty;
+
+    private string GetDetailComment(Guid activityId) =>
+        _detailComments.TryGetValue(activityId, out var val) ? val : GetStoredComment(activityId);
+
+    private void SetDetailComment(Guid activityId, string value) => _detailComments[activityId] = value;
+
+    private bool IsDetailCommentDirty(Guid activityId) =>
+        _detailComments.TryGetValue(activityId, out var val) && val != GetStoredComment(activityId);
+
+    private async Task SaveDetailComment(Guid activityId)
+    {
+        if (!_detailComments.TryGetValue(activityId, out var val)) return;
+        _detailCommentError = null;
+        var token = _details.Current;
+        var detailEvent = _detailEvent;
+        if (await ApiResult.SendAsync(() => ActivitySvc.UpdateCommentsAsync(activityId, val)) is { } error)
+        {
+            // Keep the typed text in the buffer so the user can retry.
+            if (_details.IsCurrent(token)) _detailCommentError = ApiResult.CommentsNotSaved(error);
+            else await ActionError.InvokeAsync(ApiResult.CommentsNotSaved(error));
+            return;
+        }
+
+        // Saved: update the loaded Activity and the Event's snapshot so the box, the
+        // dirty check and a reopened dialog all show the saved text.
+        if (Activities?.FirstOrDefault(a => a.Id == activityId) is { } activity)
+            activity.Comments = val;
+        if (detailEvent is not null)
+        {
+            var index = detailEvent.Selections.FindIndex(s => s.Activity.Id == activityId);
+            if (index >= 0)
+            {
+                var selection = detailEvent.Selections[index];
+                detailEvent.Selections[index] = selection with { Activity = selection.Activity with { Comments = val } };
+            }
+        }
+        // A newer details dialog keeps its own buffer; this one only drops the text it saved.
+        if (_details.IsCurrent(token) && _detailComments.TryGetValue(activityId, out var now) && now == val)
+            _detailComments.Remove(activityId);
+    }
+}

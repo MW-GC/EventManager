@@ -1,14 +1,15 @@
 @page "/events"
 @page "/"
-@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject EventService EventSvc
 @inject GameService GameSvc
 @inject ActivityService ActivitySvc
 @inject ThemeService ThemeSvc
 @inject HolidayService HolidaySvc
 @inject FocusReturn Focus
-@inject NavigationManager Nav
-@inject IJSRuntime JS
+
+@* The routed Events page: it loads the Events and the library, shows the list (EventList), runs a
+   row's Delete, and opens the create-and-edit dialog (EventEditDialog) and the details dialog
+   (EventDetailsDialog), which keep their own state and report back through callbacks. *@
 
 <PageHeader Title="Events" Subtitle="Generate, view, and manage gaming events" />
 <ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
@@ -33,437 +34,15 @@
     }
     else
     {
-        <FluentCard Style="overflow: visible;" AreaRestricted="false">
-            <FluentStack Orientation="Orientation.Horizontal"
-                         HorizontalAlignment="HorizontalAlignment.SpaceBetween"
-                         VerticalAlignment="VerticalAlignment.Center"
-                         Style="margin-bottom: 16px;"
-                         Wrap="true">
-                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Immediate="true" ImmediateDelay="300" Placeholder="Search events..." aria-label="Search events" />
-                <FluentButton Appearance="Appearance.Accent" OnClick="ShowCustomize" IconStart="@(new Size16.Add())" data-focus-key="add">
-                    Create Event
-                </FluentButton>
-            </FluentStack>
-
-            <FluentDataGrid Items="@Filtered" TGridItem="EventEntity" Virtualize="true" ItemSize="44" GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 120px">
-                <PropertyColumn Property="@(e => e.Name)" Title="Name" Sortable="true" />
-                <TemplateColumn Title="Date" Sortable="true" SortBy="@_dateSort" IsDefaultSortColumn="true" InitialSortDirection="SortDirection.Descending">
-                    @context.Date.ToLocalTime().ToString("g")
-                </TemplateColumn>
-                <TemplateColumn Title="Selections">
-                    <FluentBadge Appearance="Appearance.Neutral">@context.Selections.Count</FluentBadge>
-                </TemplateColumn>
-                <TemplateColumn Title="Winner">
-                    @if (context.WinnerActivityId.HasValue)
-                    {
-                        var winner = context.Selections.FirstOrDefault(s => s.Activity.Id == context.WinnerActivityId.Value);
-                        @if (winner is not null)
-                        {
-                            <FluentBadge Appearance="Appearance.Accent">
-                                <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> @winner.Game.Name — @winner.Activity.Name
-                            </FluentBadge>
-                        }
-                        else
-                        {
-                            <FluentBadge Appearance="Appearance.Accent">
-                                <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> Selected
-                            </FluentBadge>
-                        }
-                    }
-                    else
-                    {
-                        <FluentLabel Style="color: var(--neutral-foreground-hint);">None</FluentLabel>
-                    }
-                </TemplateColumn>
-                <TemplateColumn Title="Actions">
-                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" aria-label="@($"Details {context.Name}")" data-focus-key="@($"details-{context.Id}")"
-                                      Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowDetails(context))">
-                            <FluentIcon Value="@(new Size16.Eye())" />
-                        </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {context.Name}")" data-focus-key="@($"edit-{context.Id}")"
-                                      Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEditEvent(context))">
-                            <FluentIcon Value="@(new Size16.Edit())" />
-                        </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {context.Name}")" data-focus-key="@($"delete-{context.Id}")"
-                                      Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
-                            <FluentIcon Value="@(new Size16.Delete())" />
-                        </FluentButton>
-                    </FluentStack>
-                </TemplateColumn>
-            </FluentDataGrid>
-        </FluentCard>
+        <EventList Events="_events" Rows="_rows" OnCreate="OpenCreate" OnDetails="OpenDetails" OnEdit="OpenEdit" OnDelete="AskDelete" />
     }
 </FluentStack>
 
-@* Customize / Create / Edit Event dialog *@
-@if (_showCustomize)
-{
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 860px; --dialog-height: 85vh;"
-                  AriaLabel="@(_editingEvent is not null ? "Edit Event" : "Customize Event")" @ondialogdismiss="@((DialogEventArgs _) => DismissCustomize())">
-        <FluentDialogBody>
-            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 4px;">@(_editingEvent is not null ? "Edit Event" : "Customize Event")</FluentLabel>
-            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 16px;">
-                @(_editingEvent is not null ? "Update the event details and game/activity selections" : "Customize the event name and game/activity selections before creating")
-            </FluentLabel>
+<EventEditDialog @ref="_edit" Games="_games" Activities="_activities" Themes="_themes" Holidays="_holidays"
+                 Saved="OnEventSaved" PageError="SetPageError" ActionError="SetActionError" />
 
-            <FluentStack Orientation="Orientation.Vertical" VerticalGap="16" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding: 0 12px;">
-                @* Event name and date *@
-                <FluentGrid Spacing="3">
-                    <FluentGridItem xs="12" sm="6">
-                        <FluentTextField @bind-Value="_custName" Immediate="true" Label="Event Name" Style="width: 100%;" Placeholder="Enter event name..." />
-                    </FluentGridItem>
-                    <FluentGridItem xs="12" sm="3">
-                        <FluentDatePicker @bind-Value="_custDate" Label="Event Date" Style="width: 100%;" />
-                    </FluentGridItem>
-                    <FluentGridItem xs="12" sm="3">
-                        <FluentTimePicker @bind-Value="_custTime" Immediate="true" Label="Event Time" aria-label="Event Time" Style="width: 100%;" />
-                    </FluentGridItem>
-                </FluentGrid>
-
-                @* Themed-only toggle *@
-                <FluentCard Style="padding: 12px;" AreaRestricted="false">
-                    <FluentSwitch @bind-Value="_custThemedOnly" @bind-Value:after="SyncFilter" Label="Themed Activities Only" />
-                </FluentCard>
-
-                @* Game / Theme / Holiday filters *@
-                <FluentGrid Spacing="3">
-                    <FluentGridItem xs="12" sm="4">
-                        <FluentCard Style="padding: 12px;" AreaRestricted="false">
-                            <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Games</FluentLabel>
-                            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Only randomize from specific games</FluentLabel>
-                            @if (_games is not null)
-                            {
-                                <FluentStack Orientation="Orientation.Vertical" VerticalGap="4" Style="max-height: 160px; overflow-y: auto;"
-                                             role="group" aria-label="Filter by games">
-                                    @foreach (var game in _games.OrderBy(g => g.Name))
-                                    {
-                                        <FluentCheckbox Label="@game.Name"
-                                                        Value="@_custGameIds.Contains(game.Id)"
-                                                        ValueChanged="@(v => ToggleId(_custGameIds, game.Id, v))" />
-                                    }
-                                </FluentStack>
-                            }
-                        </FluentCard>
-                    </FluentGridItem>
-                    <FluentGridItem xs="12" sm="4">
-                        <FluentCard Style="padding: 12px;" AreaRestricted="false">
-                            <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Themes</FluentLabel>
-                            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific themes</FluentLabel>
-                            @if (_themes is not null)
-                            {
-                                <div style="max-height: 160px; overflow-y: auto;" role="group" aria-label="Filter by themes">
-                                    @foreach (var theme in _themes)
-                                    {
-                                        <FluentCheckbox Label="@theme.Name"
-                                                        Value="@_custThemeIds.Contains(theme.Id)"
-                                                        ValueChanged="@(v => ToggleId(_custThemeIds, theme.Id, v))" />
-                                    }
-                                </div>
-                            }
-                        </FluentCard>
-                    </FluentGridItem>
-                    <FluentGridItem xs="12" sm="4">
-                        <FluentCard Style="padding: 12px;" AreaRestricted="false">
-                            <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Filter by Holidays</FluentLabel>
-                            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px; font-size: 0.8rem;">Select specific holidays</FluentLabel>
-                            @if (_holidays is not null)
-                            {
-                                <div style="max-height: 160px; overflow-y: auto;" role="group" aria-label="Filter by holidays">
-                                    @foreach (var holiday in _holidays)
-                                    {
-                                        <FluentCheckbox Label="@holiday.Name"
-                                                        Value="@_custHolidayIds.Contains(holiday.Id)"
-                                                        ValueChanged="@(v => ToggleId(_custHolidayIds, holiday.Id, v))" />
-                                    }
-                                </div>
-                            }
-                        </FluentCard>
-                    </FluentGridItem>
-                </FluentGrid>
-
-                @* Selections header with controls *@
-                <FluentStack Orientation="Orientation.Horizontal"
-                             HorizontalAlignment="HorizontalAlignment.SpaceBetween"
-                             VerticalAlignment="VerticalAlignment.Center"
-                             Wrap="true">
-                    <div>
-                        <FluentLabel Weight="FontWeight.Bold">Game & Activity Selections (@_planner.Slots.Count)</FluentLabel>
-                        <FluentLabel Typo="Typography.Body">Select 1–5 activities. If only one activity is selected when saved, it automatically becomes the winner.</FluentLabel>
-                        @if (_planner.Slots.Count == 1)
-                        {
-                            <FluentLabel role="status">Single activity: this activity will automatically win when you save.</FluentLabel>
-                        }
-                        @if (_custThemedOnly || _custGameIds.Count > 0 || _custThemeIds.Count > 0 || _custHolidayIds.Count > 0)
-                        {
-                            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Filters apply when randomizing all selections or re-rolling a slot</FluentLabel>
-                        }
-                    </div>
-                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center">
-                        <FluentSwitch @bind-Value="_custUniqueGames" @bind-Value:after="SyncFilter" Label="Unique games only" />
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="_planner.RandomizeAll" IconStart="@(new Size16.ArrowShuffle())">
-                            Randomize All
-                        </FluentButton>
-                    </FluentStack>
-                </FluentStack>
-
-                @if (_planner.GenerationError is not null)
-                {
-                    <div role="alert">@_planner.GenerationError</div>
-                }
-
-                @* Selection slots *@
-                <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
-                    @for (var i = 0; i < _planner.Slots.Count; i++)
-                    {
-                        var idx = i;
-                        var sel = _planner.Slots[idx];
-                        <FluentCard Style="padding: 12px;" AreaRestricted="false">
-                            <FluentGrid Spacing="3">
-                                <FluentGridItem xs="12" sm="5">
-                                    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-bottom: 4px;">
-                                        <FluentIcon Value="@(new Size16.XboxController())" Style="margin-right: 2px;" /> Game @(idx + 1)
-                                    </FluentLabel>
-                                    <FluentSelect TOption="GameEntity"
-                                                  Items="@WithCurrent(_planner.GetAvailableGames(idx), SlotGame(sel))"
-                                                  OptionValue="@(g => g.Id.ToString())"
-                                                  OptionText="@(g => g.Name)"
-                                                  SelectedOption="@SlotGame(sel)"
-                                                  SelectedOptionChanged="@(g => _planner.ChangeSlotGame(idx, g))"
-                                                  aria-label="@($"Game for slot {idx + 1}")"
-                                                  Style="width: 100%;" />
-                                </FluentGridItem>
-                                <FluentGridItem xs="12" sm="5">
-                                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="4" Style="margin-bottom: 4px;" Wrap="true">
-                                        <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">
-                                            <FluentIcon Value="@(new Size16.Flash())" Style="margin-right: 2px;" /> Activity
-                                        </FluentLabel>
-                                        @if (sel.ActivityId != Guid.Empty)
-                                        {
-                                            var act = _activities?.FirstOrDefault(a => a.Id == sel.ActivityId);
-                                            if (act is not null)
-                                            {
-                                                @foreach (var tid in act.ThemeIds)
-                                                {
-                                                    <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveName(_themes, tid)" Style="font-size: 0.65rem;" />
-                                                }
-                                                @foreach (var hid in act.HolidayIds)
-                                                {
-                                                    <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveName(_holidays, hid)" Style="font-size: 0.65rem;" />
-                                                }
-                                            }
-                                        }
-                                    </FluentStack>
-                                    <FluentSelect TOption="ActivityEntity"
-                                                  Items="@WithCurrent(_planner.GetAvailableActivities(sel.GameId, idx), SlotActivity(sel))"
-                                                  OptionValue="@(a => a.Id.ToString())"
-                                                  OptionText="@(a => a.Name)"
-                                                  SelectedOption="@SlotActivity(sel)"
-                                                  SelectedOptionChanged="@(a => _planner.ChangeSlotActivity(idx, a))"
-                                                  aria-label="@($"Activity for slot {idx + 1}")"
-                                                  Style="width: 100%;" />
-                                    @if (ReplacesWinner(sel))
-                                    {
-                                        <FluentLabel role="status" Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-top: 4px;">Replacing this activity clears the Winner.</FluentLabel>
-                                    }
-                                </FluentGridItem>
-                                <FluentGridItem xs="12" sm="2" Style="display: flex; align-items: flex-end; justify-content: flex-end;">
-                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
-                                                  Title="@(_planner.GetRerollCandidates(idx).Count > 0 ? "Re-roll this slot" : "No alternative matches the current filters")"
-                                                  aria-label="@($"Re-roll slot {idx + 1}")"
-                                                  Disabled="@(_planner.GetRerollCandidates(idx).Count == 0)"
-                                                  OnClick="@(() => _planner.RerollSlot(idx))">
-                                        <FluentIcon Value="@(new Size16.ArrowShuffle())" />
-                                    </FluentButton>
-                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" Title="Remove slot"
-                                                  aria-label="@($"Remove slot {idx + 1}")"
-                                                  Disabled="@(_planner.Slots.Count <= 1)"
-                                                  OnClick="@(() => _planner.RemoveSlot(idx))">
-                                        <FluentIcon Value="@(new Size16.Delete())" Color="Color.Error" />
-                                    </FluentButton>
-                                </FluentGridItem>
-                            </FluentGrid>
-                        </FluentCard>
-                    }
-
-                    @if (_planner.Slots.Count < 5)
-                    {
-                        var addSlotBlocked = _planner.GetAddSlotBlockedReason();
-                        <FluentButton Appearance="Appearance.Outline" Style="width: 100%;" OnClick="_planner.AddSlot" IconStart="@(new Size16.Add())"
-                                      Title="@(addSlotBlocked ?? "Add an activity slot")"
-                                      Disabled="@(addSlotBlocked is not null)">
-                            Add Activity Slot
-                        </FluentButton>
-                        @* Show the live reason; a click that found nothing to add raises it to an alert. *@
-                        @if (addSlotBlocked is not null && addSlotBlocked == _planner.AddSlotError)
-                        {
-                            <div role="alert" style="color: var(--error); font-size: 0.75rem;">@addSlotBlocked</div>
-                        }
-                        else if (addSlotBlocked is not null)
-                        {
-                            <FluentLabel role="status" Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">@addSlotBlocked</FluentLabel>
-                        }
-                    }
-                </FluentStack>
-            </FluentStack>
-
-            @if (_customizeError is not null)
-            {
-                <div role="alert" style="color: var(--error); margin-top: 12px;">@_customizeError</div>
-            }
-            <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
-                <FluentButton Appearance="Appearance.Neutral" Disabled="@_generating" OnClick="CancelCustomize">Cancel</FluentButton>
-                <FluentButton Appearance="Appearance.Accent" Loading="@_generating" OnClick="SaveCustomizedEvent"
-                              Disabled="@(string.IsNullOrWhiteSpace(_custName))">
-                    @(_editingEvent is not null ? "Update Event" : "Create Event")
-                </FluentButton>
-            </FluentStack>
-        </FluentDialogBody>
-    </FluentDialog>
-}
-
-@* Event Details dialog — shows selections as cards with winner selection and comments *@
-@if (_detailEvent is not null)
-{
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 800px; --dialog-height: 85vh;"
-                  AriaLabel="@_detailEvent.Name" @ondialogdismiss="@((DialogEventArgs _) => DismissDetails())">
-        <FluentDialogBody>
-            <FluentLabel aria-level="2" Typo="Typography.H3" Style="margin-bottom: 4px;">@_detailEvent.Name</FluentLabel>
-            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 16px;">
-                @_detailEvent.Date.ToLocalTime().ToString("f")
-            </FluentLabel>
-            @* #101: the like count and the anonymous feedback link (admin only). *@
-            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true" Style="margin-bottom: 16px;">
-                <span class="event-likes">@LikesText</span>
-                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Loading="@_copyingLink" OnClick="CopyFeedbackLink">Copy feedback link</FluentButton>
-                @if (_feedbackLinkStatus is not null)
-                {
-                    <span role="status">@_feedbackLinkStatus</span>
-                }
-                @if (_feedbackLinkError is not null)
-                {
-                    <span role="alert" style="color: var(--error);">@_feedbackLinkError</span>
-                }
-            </FluentStack>
-            @if (_feedbackLink is not null)
-            {
-                <input type="text" readonly value="@_feedbackLink" aria-label="Feedback link" style="width: 100%; margin-bottom: 16px;" />
-            }
-
-            <ApiErrorBar Message="@_winnerError" />
-            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding-right: 8px;">
-                @if (_detailEvent.Selections.Count == 1 && _detailEvent.WinnerActivityId == _detailEvent.Selections[0].Activity.Id)
-                {
-                    <FluentLabel>With one activity, the winner is selected automatically.</FluentLabel>
-                }
-                @foreach (var selection in _detailEvent.Selections)
-                {
-                    var isWinner = _detailEvent.WinnerActivityId.HasValue && _detailEvent.WinnerActivityId.Value == selection.Activity.Id;
-                    <FluentCard Style="@(isWinner ? "border: 2px solid var(--accent-fill-rest); background: color-mix(in srgb, var(--accent-fill-rest) 5%, transparent);" : "")" AreaRestricted="false">
-                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="padding: 8px;">
-                            @* Header: game + activity + winner *@
-                            <FluentStack Orientation="Orientation.Horizontal"
-                                         HorizontalAlignment="HorizontalAlignment.SpaceBetween"
-                                         VerticalAlignment="VerticalAlignment.Top"
-                                         Wrap="true">
-                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="10" VerticalAlignment="VerticalAlignment.Center" Style="flex: 1;">
-                                    @{
-                                        var gameEntity = _games?.FirstOrDefault(g => g.Id == selection.Game.Id);
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(gameEntity?.IconUrl))
-                                    {
-                                        <img src="@gameEntity.IconUrl" alt="" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" />
-                                    }
-                                    else
-                                    {
-                                        <div style="width: 48px; height: 48px; border-radius: 8px; background: var(--neutral-layer-4); display: flex; align-items: center; justify-content: center;">
-                                            <FluentIcon Value="@(new Size24.XboxController())" Color="Color.Neutral" />
-                                        </div>
-                                    }
-                                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="2">
-                                        <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold">@selection.Game.Name</FluentLabel>
-                                        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" VerticalAlignment="VerticalAlignment.Center" Wrap="true">
-                                            <FluentIcon Value="@(new Size16.Flash())" Color="Color.Accent" />
-                                            <FluentLabel Style="font-size: 0.85rem; color: var(--accent-foreground-rest);">@selection.Activity.Name</FluentLabel>
-                                        </FluentStack>
-                                    </FluentStack>
-                                </FluentStack>
-
-                                @if (isWinner)
-                                {
-                                    <FluentBadge Appearance="Appearance.Accent">
-                                        <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> Winner
-                                    </FluentBadge>
-                                }
-                                else
-                                {
-                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_selectingWinner" OnClick="@(() => SelectWinner(selection.Activity.Id))"
-                                                  IconStart="@(new Size16.Trophy())">
-                                        Select Winner
-                                    </FluentButton>
-                                }
-                            </FluentStack>
-
-                            @* Activity details *@
-                            @if (!string.IsNullOrWhiteSpace(selection.Activity.Description))
-                            {
-                                <FluentLabel Style="color: var(--neutral-foreground-rest); line-height: 1.5;">@selection.Activity.Description</FluentLabel>
-                            }
-
-                            <FluentDivider />
-
-                            <FluentGrid Spacing="3">
-                                @if (!string.IsNullOrWhiteSpace(selection.Activity.Rules))
-                                {
-                                    <FluentGridItem xs="12" md="6">
-                                        <FluentLabel Typo="Typography.Body" Style="font-size: 0.75rem; color: var(--neutral-foreground-hint); margin-bottom: 4px;">Rules</FluentLabel>
-                                        <FluentLabel Style="font-size: 0.85rem; white-space: pre-wrap;">@selection.Activity.Rules</FluentLabel>
-                                    </FluentGridItem>
-                                }
-                                @if (!string.IsNullOrWhiteSpace(selection.Activity.SetupRequirements))
-                                {
-                                    <FluentGridItem xs="12" md="6">
-                                        <FluentLabel Typo="Typography.Body" Style="font-size: 0.75rem; color: var(--neutral-foreground-hint); margin-bottom: 4px;">Setup Requirements</FluentLabel>
-                                        <FluentLabel Style="font-size: 0.85rem; white-space: pre-wrap;">@selection.Activity.SetupRequirements</FluentLabel>
-                                    </FluentGridItem>
-                                }
-                            </FluentGrid>
-
-                            @* Comments editing when this game is the winner *@
-                            @if (isWinner)
-                            {
-                                <FluentDivider />
-                                <div>
-                                    <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments (Activity note, shared across all Events)</FluentLabel>
-                                    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-bottom: 4px;">
-                                        Stored on the activity, not on this Event: every Event that uses this activity, and the Activities page, show the same note.
-                                    </FluentLabel>
-                                    <FluentTextArea Value="@GetDetailComment(selection.Activity.Id)" Immediate="true"
-                                                    ValueChanged="@(v => SetDetailComment(selection.Activity.Id, v))"
-                                                    Style="width: 100%;" Rows="3"
-                                                    Placeholder="Add notes about this activity's success, challenges, or improvements..." />
-                                    @if (_detailCommentError is not null)
-                                    {
-                                        <div role="alert" style="color: var(--error); margin-top: 6px;">@_detailCommentError</div>
-                                    }
-                                    <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Style="margin-top: 6px;"
-                                                  Disabled="@(!IsDetailCommentDirty(selection.Activity.Id))"
-                                                  OnClick="@(() => SaveDetailComment(selection.Activity.Id))">
-                                        Save Comments
-                                    </FluentButton>
-                                </div>
-                            }
-                        </FluentStack>
-                    </FluentCard>
-                }
-            </FluentStack>
-
-            <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" Style="margin-top: 16px;">
-                <FluentButton Appearance="Appearance.Neutral" Disabled="@_selectingWinner" OnClick="CancelDetails">Close</FluentButton>
-            </FluentStack>
-        </FluentDialogBody>
-    </FluentDialog>
-}
+<EventDetailsDialog @ref="_details" Games="_games" Activities="_activities"
+                    RefreshEvents="RefreshEvents" FindEvent="FindEvent" ActionError="SetActionError" />
 
 @if (_confirm is { } confirm)
 {
@@ -478,450 +57,60 @@
     private List<ActivityEntity>? _activities;
     private List<ThemeEntity>? _themes;
     private List<HolidayEntity>? _holidays;
-    private string _search = string.Empty;
-    private EventEntity? _detailEvent;
 
-    // Sorts the grid by the underlying instant while the column renders local time.
-    private static readonly GridSort<EventEntity> _dateSort = GridSort<EventEntity>.ByAscending(e => e.Date);
+    private EventEditDialog? _edit;
+    private EventDetailsDialog? _details;
 
-    // Customize dialog state
-    private bool _showCustomize;
-    // Set by the save that runs; only that save clears it, never a dismiss.
-    private bool _generating;
-    // The open customize dialog: a save only closes the dialog it started from.
-    private readonly DialogSession _customize = new();
-    // The open details dialog: a late Select Winner or comment save never touches a newer one.
-    private readonly DialogSession _details = new();
-    // Set while one Select Winner runs; every Select Winner button is disabled meanwhile.
-    private bool _selectingWinner;
     // The row whose Delete is running.
     private readonly RowAction _rows = new();
-    // The open question (delete or discard), if any.
+    // The open delete question, if any. The dialogs ask their own "Discard changes?".
     private ConfirmRequest? _confirm;
-    private string? _customizeError;
     private string? _pageError;
-    private EventEntity? _editingEvent;
-    // Retain across ambiguous failures and edits in this dialog; only a new create resets it.
-    private Guid _createKey = Guid.NewGuid();
-    private string _custName = string.Empty;
-    private DateTime? _custDate = DateTime.Today;
-    private DateTime? _custTime = DateTime.Today.AddHours(19);
-    private bool _custThemedOnly;
-    private List<Guid> _custGameIds = [];
-    private List<Guid> _custThemeIds = [];
-    private List<Guid> _custHolidayIds = [];
-    private bool _custUniqueGames = true;
-    // The slots and every rule that fills them; the page keeps only what its inputs bind.
-    private readonly SlotPlanner _planner = new(Random.Shared);
-
-    // Detail dialog comment editing
-    private Dictionary<Guid, string> _detailComments = [];
-    private string? _detailCommentError;
-
-    private IQueryable<EventEntity> Filtered => string.IsNullOrWhiteSpace(_search)
-        ? _events!.AsQueryable()
-        : _events!.Where(e => e.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)).AsQueryable();
-
-    private void HandleSearch() { }
-
-    private static string ResolveName<T>(List<T>? list, Guid id) where T : EntityBase =>
-        list?.FirstOrDefault(x => x.Id == id) is { } match
-            ? ((dynamic)match).Name
-            : id.ToString()[..8];
-
-    private void ToggleId(List<Guid> list, Guid id, bool add)
-    {
-        if (add && !list.Contains(id)) list.Add(id);
-        else if (!add) list.Remove(id);
-        SyncFilter();
-    }
-
-    // Hands the filter inputs to the planner; called whenever one of them changes.
-    private void SyncFilter() => _planner.Filter =
-        new SlotFilter(_custThemedOnly, _custGameIds, _custThemeIds, _custHolidayIds, _custUniqueGames);
 
     // Each list loads on its own: a failed Theme or Holiday list never hides the Events, and
     // the error bar names what failed, with Retry.
     private readonly LoadErrors _loads = new();
-    // A failed Delete, shown above the list; the list stays as it was.
+    // A failed Delete, or a save that failed after its dialog was closed, shown above the list;
+    // the list stays as it was.
     private string? _actionError;
-    // A failed Select Winner, shown in the details dialog; the previous winner stays.
-    private string? _winnerError;
 
     protected override Task OnInitializedAsync() => LoadAll();
 
     private Task LoadAll() => Task.WhenAll(
         _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
-        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => { _games = v ?? []; _planner.SetLibrary(_games, _activities); }),
-        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => { _activities = v ?? []; _planner.SetLibrary(_games, _activities); }),
+        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
+        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []),
         _loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? []),
         _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []));
 
-    // Throws on failure: SaveCustomizedEvent reports a saved-but-not-refreshed Event itself.
+    // Throws on failure: OnEventSaved reports a saved-but-not-refreshed Event itself.
     private async Task Reload() => _events = await EventSvc.GetAllAsync() ?? [];
 
     // Never throws: a failed refresh keeps the current list and names Events in the error bar.
     private Task RefreshEvents() => _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []);
 
-    #region Customize Dialog
+    // The Event with this id in the list as it is now.
+    private EventEntity? FindEvent(Guid id) => _events?.FirstOrDefault(ev => ev.Id == id);
 
-    private void ShowCustomize()
+    private void OpenCreate() => _edit?.OpenCreate();
+    private void OpenEdit(EventEntity e) => _edit?.OpenEdit(e);
+    private void OpenDetails(EventEntity e) => _details?.Open(e);
+
+    // The create-and-edit dialog saved an Event; the list shows it once it is read back.
+    private async Task OnEventSaved()
     {
-        _customizeError = null;
-        _editingEvent = null;
-        _createKey = Guid.NewGuid();
-        _custName = string.Empty;
-        _custDate = DateTime.Today;
-        _custTime = DateTime.Today.AddHours(19);
-        _custThemedOnly = false;
-        _custGameIds = [];
-        _custThemeIds = [];
-        _custHolidayIds = [];
-        _custUniqueGames = true;
-        SyncFilter();
-        _planner.SetSlots([]);
-        _planner.AddSlotError = null;
-        _planner.RandomizeAll();
-        _showCustomize = true;
-        _customize.Open(CustomizeFields);
-        _ = Focus.RememberAsync("add");
-    }
-
-    private void ShowEditEvent(EventEntity e)
-    {
-        _customizeError = null;
-        _editingEvent = e;
-        _planner.GenerationError = null;
-        _custName = e.Name;
-        var localStart = e.Date.ToLocalTime().DateTime;
-        _custDate = localStart.Date;
-        _custTime = localStart;
-        _custUniqueGames = e.UniqueGamesOnly;
-        _custThemedOnly = false;
-        _custGameIds = [];
-        _custThemeIds = [];
-        _custHolidayIds = [];
-        SyncFilter();
-        _planner.SetSlots(e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id, Stored = s }));
-        _shownGames.Clear();
-        _shownActivities.Clear();
-        _planner.AddSlotError = null;
-        _showCustomize = true;
-        _customize.Open(CustomizeFields);
-        _ = Focus.RememberAsync($"edit-{e.Id}");
-    }
-
-    // Everything the customize dialog binds, compared to tell unsaved changes. Slots count by their
-    // Game and Activity ids only, so an untouched edit of an Event whose Activity was deleted is clean.
-    // Date and time count as the parts BuildEventDate saves: the picked day (not the DateTime's Kind,
-    // which differs between DateTime.Today and a picked day) and the time of day (a time typed after
-    // clearing the box sits on another date).
-    private object CustomizeFields() => new
-    {
-        _custName,
-        Date = _custDate is { } date ? DateOnly.FromDateTime(date) : (DateOnly?)null,
-        Time = _custTime?.TimeOfDay,
-        _custThemedOnly, _custUniqueGames,
-        _custGameIds, _custThemeIds, _custHolidayIds,
-        Slots = _planner.Slots.Select(s => new { s.GameId, s.ActivityId })
-    };
-
-    // The Cancel button closes at once without asking, but never while the save runs.
-    private void CancelCustomize() { if (!_generating) CloseCustomize(); }
-    private void CloseCustomize() { _showCustomize = false; _customize.Close(); _ = Focus.RestoreAsync(); }
-    // Overlay click or Escape. A clean dialog closes once the slot selects are done with the same Escape (#105).
-    private Task DismissCustomize()
-    {
-        var closing = Task.CompletedTask;
-        _confirm = ConfirmRequest.ForDismiss(_confirm, _generating, _customize.IsDirty, CloseCustomize,
-            closeNow: () => closing = _customize.CloseAfterKeyAsync(CloseCustomize));
-        return closing;
-    }
-
-    // An edited slot is its stored snapshot until the user changes its Game or Activity, so a
-    // later library edit or delete never rewrites it. Null when the slot has been changed.
-    private static Selection? Unchanged(SlotSelection s) =>
-        s.Stored is { } stored && stored.Game.Id == s.GameId && stored.Activity.Id == s.ActivityId ? stored : null;
-
-    // What a slot saves: its snapshot while unchanged, otherwise rebuilt from the library.
-    // Null when a changed slot names a Game or Activity the library does not offer.
-    private Selection? BuildSelection(SlotSelection s)
-    {
-        if (Unchanged(s) is { } stored) return stored;
-        var game = _games?.FirstOrDefault(g => g.Id == s.GameId);
-        var act = _activities?.FirstOrDefault(a => a.Id == s.ActivityId && a.GameId == s.GameId);
-        if (game is null || act is null) return null;
-        return SelectionSnapshot.From(game, act);
-    }
-
-    // Stand-ins for a stored Game or Activity the library no longer has. They are shown only as
-    // the current value of their own slot, and kept per id so the picker sees the same option.
-    private readonly Dictionary<Guid, GameEntity> _shownGames = [];
-    private readonly Dictionary<Guid, ActivityEntity> _shownActivities = [];
-
-    private static string StoredName(string name, bool libraryLoaded) => libraryLoaded ? $"(deleted) {name}" : name;
-
-    private GameEntity? SlotGame(SlotSelection s)
-    {
-        if (_games?.FirstOrDefault(g => g.Id == s.GameId) is { } game) return game;
-        if (Unchanged(s) is not { } stored) return null;
-        var shown = _shownGames.TryGetValue(stored.Game.Id, out var known) ? known : _shownGames[stored.Game.Id] = new GameEntity { Id = stored.Game.Id };
-        shown.Name = StoredName(stored.Game.Name, _games is not null);
-        return shown;
-    }
-
-    private ActivityEntity? SlotActivity(SlotSelection s)
-    {
-        if (_activities?.FirstOrDefault(a => a.Id == s.ActivityId) is { } act) return act;
-        if (Unchanged(s) is not { } stored) return null;
-        var shown = _shownActivities.TryGetValue(stored.Activity.Id, out var known) ? known : _shownActivities[stored.Activity.Id] = new ActivityEntity { Id = stored.Activity.Id, GameId = stored.Game.Id };
-        shown.Name = StoredName(stored.Activity.Name, _activities is not null);
-        return shown;
-    }
-
-    // A picker's live choices, plus the slot's own current value when the library lacks it.
-    private static List<T> WithCurrent<T>(List<T> choices, T? current) where T : EntityBase =>
-        current is null || choices.Any(c => c.Id == current.Id) ? choices : [current, .. choices];
-
-    // The slot held the Event's Winner and its Activity has been changed. One slot always wins.
-    private bool ReplacesWinner(SlotSelection s) =>
-        _editingEvent?.WinnerActivityId is { } winner && _planner.Slots.Count > 1 &&
-        s.Stored?.Activity.Id == winner && s.ActivityId != winner;
-
-    // Combines the selected date and time, then resolves the user's local UTC offset so the
-    // stored DateTimeOffset represents the correct instant for downstream consumers such as
-    // the planned Discord scheduled-event integration.
-    private DateTimeOffset BuildEventDate()
-    {
-        if (!_custDate.HasValue) return DateTimeOffset.Now;
-        var wallClock = _custDate.Value.Date + (_custTime?.TimeOfDay ?? TimeSpan.Zero);
-        return new DateTimeOffset(DateTime.SpecifyKind(wallClock, DateTimeKind.Local));
-    }
-
-    private async Task SaveCustomizedEvent()
-    {
-        if (_generating || string.IsNullOrWhiteSpace(_custName)) return;
-        _customizeError = null;
-        var slots = _planner.Slots;
-        if (slots.Count is < 1 or > EventEntity.MaximumSelections)
-        {
-            _customizeError = "Select 1–5 activities before saving. Adjust the filters or add an activity slot.";
-            return;
-        }
-        // Unchanged slots save their stored snapshot; a changed slot must be a library choice.
-        var built = slots.Select(BuildSelection).ToList();
-        if (slots.Any(s => s.GameId == Guid.Empty || s.ActivityId == Guid.Empty) || built.Any(s => s is null))
-        {
-            _customizeError = "Choose a valid game and activity for every slot before saving.";
-            return;
-        }
-        var entity = new EventEntity
-        {
-            Id = _editingEvent?.Id ?? Guid.Empty,
-            Name = _custName,
-            Date = BuildEventDate(),
-            Selections = built.OfType<Selection>().ToList(),
-            UniqueGamesOnly = _custUniqueGames,
-            // Replacing the Winner's slot clears the Winner, as its notice says.
-            WinnerActivityId = slots.Any(ReplacesWinner) ? null : _editingEvent?.WinnerActivityId
-        };
-        if (entity.ValidateSelections() is not null)
-        {
-            _customizeError = "Activities must be distinct, and games must be distinct when Unique games only is enabled.";
-            return;
-        }
-        _generating = true;
-        var saved = false;
-        _pageError = null;
-        // The dialog this save belongs to; a dismissed or replaced dialog is left alone.
-        var token = _customize.Current;
         try
         {
-            entity.NormalizeWinner();
-
-            using var response = _editingEvent is not null
-                ? await EventSvc.UpdateAsync(entity)
-                : await EventSvc.SaveAsync(entity, _createKey);
-            if (await ApiResult.ErrorAsync(response) is { } error)
-            {
-                if (_customize.IsCurrent(token)) _customizeError = $"The event was not saved. {error}";
-                else _actionError = $"The event was not saved. {error}";
-                return;
-            }
-
-            saved = true;
-            if (_customize.IsCurrent(token)) CloseCustomize();
             await Reload();
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
         {
-            if (saved)
-                _pageError = "The event was saved, but the list could not be refreshed. Reload the page to see the saved event.";
-            else if (_customize.IsCurrent(token))
-                _customizeError = "The save could not be confirmed. Retry in this dialog to avoid creating a duplicate. If you changed the details, reload the event list and check for the saved event first.";
-            else
-                _pageError = "An event save could not be confirmed. Reload the event list and check for the event before creating it again.";
-        }
-        finally { _generating = false; }
-    }
-
-    #endregion
-
-    #region Details Dialog
-
-    private void ShowDetails(EventEntity e)
-    {
-        _detailEvent = e;
-        _detailComments = [];
-        _detailCommentError = null;
-        _winnerError = null;
-        _likesFor = null;
-        _feedbackLink = _feedbackLinkStatus = _feedbackLinkError = null;
-        _details.Open();
-        _ = Focus.RememberAsync($"details-{e.Id}");
-    }
-
-    // #101: the like count and feedback link in the details dialog (admin routes).
-    private Guid? _likesFor;
-    private int? _likes;
-    private bool _likesFailed;
-    private string? _feedbackLink;
-    private string? _feedbackLinkStatus;
-    private string? _feedbackLinkError;
-    private bool _copyingLink;
-
-    private string LikesText => _likes is { } n ? (n == 1 ? "1 like" : $"{n} likes")
-        : _likesFailed ? "Likes could not be loaded." : "Loading likes…";
-
-    // The count loads once the dialog has rendered, once per opening.
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (_detailEvent is not { } detail || _likesFor == detail.Id) return;
-        _likesFor = detail.Id;
-        _likes = null;
-        _likesFailed = false;
-        var token = _details.Current;
-        var (value, error) = await ApiResult.LoadAsync(() => EventSvc.GetLikesAsync(detail.Id));
-        if (!_details.IsCurrent(token)) return;
-        _likes = value?.Count;
-        _likesFailed = error is not null || value is null;
-        StateHasChanged();
-    }
-
-    private async Task CopyFeedbackLink()
-    {
-        if (_detailEvent is not { } detail || _copyingLink) return;
-        _copyingLink = true;
-        _feedbackLinkStatus = _feedbackLinkError = null;
-        var token = _details.Current;
-        try
-        {
-            var (link, error) = await ApiResult.LoadAsync(() => EventSvc.GetFeedbackLinkAsync(detail.Id));
-            if (!_details.IsCurrent(token)) return;
-            if (link is null)
-            {
-                _feedbackLinkError = $"The feedback link could not be loaded. {error ?? ApiResult.UnreadableMessage}";
-                return;
-            }
-            _feedbackLink = Nav.ToAbsoluteUri($"feedback/{link.Token}").ToString();
-            try
-            {
-                await JS.InvokeVoidAsync("navigator.clipboard.writeText", _feedbackLink);
-                if (_details.IsCurrent(token)) _feedbackLinkStatus = "Feedback link copied.";
-            }
-            catch (JSException)
-            {
-                if (_details.IsCurrent(token)) _feedbackLinkStatus = "Copy the feedback link from the box below.";
-            }
-        }
-        finally
-        {
-            _copyingLink = false;
+            _pageError = "The event was saved, but the list could not be refreshed. Reload the page to see the saved event.";
         }
     }
 
-    // The Close button closes at once without asking, but never while Select Winner runs.
-    private void CancelDetails() { if (!_selectingWinner) CloseDetails(); }
-    private void CloseDetails() { _detailEvent = null; _details.Close(); _ = Focus.RestoreAsync(); }
-    // Overlay click or Escape: an unsaved comment asks first.
-    private void DismissDetails() =>
-        _confirm = ConfirmRequest.ForDismiss(_confirm, _selectingWinner, _detailComments.Keys.Any(IsDetailCommentDirty), CloseDetails);
-
-    private async Task SelectWinner(Guid activityId)
-    {
-        if (_detailEvent is null || _selectingWinner) return;
-        _selectingWinner = true;
-        var token = _details.Current;
-        try
-        {
-            var detail = _detailEvent;
-            var previous = detail.WinnerActivityId;
-            detail.WinnerActivityId = activityId;
-            var error = await ApiResult.SendAsync(() => EventSvc.UpdateAsync(detail));
-            if (error is not null)
-            {
-                // Not saved: put the previous winner back so the dialog and the list stay truthful.
-                detail.WinnerActivityId = previous;
-                if (_details.IsCurrent(token)) _winnerError = $"The winner was not saved. {error}";
-                else _actionError = $"The winner was not saved. {error}";
-                return;
-            }
-            if (_details.IsCurrent(token)) _winnerError = null;
-            await RefreshEvents();
-            if (_details.IsCurrent(token)) _detailEvent = _events?.FirstOrDefault(ev => ev.Id == detail.Id);
-        }
-        finally { _selectingWinner = false; }
-    }
-
-    // The comment is stored on the Activity, so prefer the loaded Activity over the
-    // Event's snapshot, which keeps the text the Activity had when the Event was saved.
-    private string GetStoredComment(Guid activityId) =>
-        (_activities?.FirstOrDefault(a => a.Id == activityId) is { } activity
-            ? activity.Comments
-            : _detailEvent?.Selections.FirstOrDefault(s => s.Activity.Id == activityId)?.Activity.Comments)
-        ?? string.Empty;
-
-    private string GetDetailComment(Guid activityId) =>
-        _detailComments.TryGetValue(activityId, out var val) ? val : GetStoredComment(activityId);
-
-    private void SetDetailComment(Guid activityId, string value) => _detailComments[activityId] = value;
-
-    private bool IsDetailCommentDirty(Guid activityId) =>
-        _detailComments.TryGetValue(activityId, out var val) && val != GetStoredComment(activityId);
-
-    private async Task SaveDetailComment(Guid activityId)
-    {
-        if (!_detailComments.TryGetValue(activityId, out var val)) return;
-        _detailCommentError = null;
-        var token = _details.Current;
-        var detailEvent = _detailEvent;
-        if (await ApiResult.SendAsync(() => ActivitySvc.UpdateCommentsAsync(activityId, val)) is { } error)
-        {
-            // Keep the typed text in the buffer so the user can retry.
-            if (_details.IsCurrent(token)) _detailCommentError = ApiResult.CommentsNotSaved(error);
-            else _actionError = ApiResult.CommentsNotSaved(error);
-            return;
-        }
-
-        // Saved: update the loaded Activity and the Event's snapshot so the box, the
-        // dirty check and a reopened dialog all show the saved text.
-        if (_activities?.FirstOrDefault(a => a.Id == activityId) is { } activity)
-            activity.Comments = val;
-        if (detailEvent is not null)
-        {
-            var index = detailEvent.Selections.FindIndex(s => s.Activity.Id == activityId);
-            if (index >= 0)
-            {
-                var selection = detailEvent.Selections[index];
-                detailEvent.Selections[index] = selection with { Activity = selection.Activity with { Comments = val } };
-            }
-        }
-        // A newer details dialog keeps its own buffer; this one only drops the text it saved.
-        if (_details.IsCurrent(token) && _detailComments.TryGetValue(activityId, out var now) && now == val)
-            _detailComments.Remove(activityId);
-    }
-
-    #endregion
+    private void SetPageError(string? message) => _pageError = message;
+    private void SetActionError(string message) => _actionError = message;
 
     private void AskDelete(EventEntity e)
     {
@@ -935,12 +124,12 @@
         if (_confirm != confirm) return;
         _confirm = null;
         await confirm.OnConfirm();
-        // A Discard closed its dialog, which returned focus itself. After a delete the row is
-        // gone (focus goes to the heading) or, when it failed, its Delete button is enabled again.
+        // After a delete the row is gone (focus goes to the heading) or, when it failed, its
+        // Delete button is enabled again.
         if (!confirm.OverDialog) _ = Focus.RestoreAsync();
     }
 
-    // Keep editing leaves focus in the open dialog; a cancelled delete returns it to the Delete button.
+    // A cancelled delete returns focus to the Delete button.
     private void Cancelled(ConfirmRequest confirm)
     {
         if (_confirm != confirm) return;
@@ -956,4 +145,3 @@
         await RefreshEvents();
     }
 }
-

@@ -66,7 +66,9 @@ public class SingleActivityApiTests
             .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(activityRows, null, Mock.Of<Response>())]));
         service.Setup(s => s.GetTableClient("games")).Returns(games.Object);
         service.Setup(s => s.GetTableClient("activities")).Returns(activities.Object);
-        functions = new EventFunctions(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
+        // Its own empty metrics table, so the Event delete cascade never touches the events rows.
+        service.Setup(s => s.GetTableClient("metrics")).Returns(TableMocks.Table(new System.Collections.Concurrent.ConcurrentDictionary<string, TableEntity>()).Object);
+        functions = new EventFunctions(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(service.Object, "metrics", "metrics"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
     }
 
     private EventEntity Event(params Activity[] activities) => new()
