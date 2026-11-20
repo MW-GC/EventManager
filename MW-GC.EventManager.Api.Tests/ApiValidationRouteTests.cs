@@ -190,6 +190,80 @@ public class ApiValidationRouteTests
         Assert.IsEmpty(h.Games);
     }
 
+    // ---- Game Website: an http or https address when given (#127), on create and update alike.
+
+    [TestMethod]
+    [DataRow("ftp://x")]
+    [DataRow("javascript:alert(1)")]
+    [DataRow("example.com")]
+    public async Task NonHttpWebsiteIs400OnCreateAndUpdateAndNothingIsStored(string website)
+    {
+        var game = h.SeedGame("Alpha");
+        game.Website = "https://alpha.test";
+
+        var create = await h.GameApi.Create(TestRequests.Json(new { name = "Beta", website }), default);
+        var update = await h.GameApi.Update(TestRequests.Json(new { name = "Alpha", website }), game.Id, default);
+
+        foreach (var result in new[] { create, update })
+        {
+            Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(result));
+            Assert.AreEqual("Website must be an http or https address.", ApiResults.Message(result));
+        }
+        Assert.AreEqual("https://alpha.test", Assert.ContainsSingle(h.Games).Value.Website);
+        Assert.AreEqual(0, h.Writes());
+    }
+
+    [TestMethod]
+    [DataRow("http://x")]
+    [DataRow("HTTPS://x")]
+    [DataRow("")]
+    [DataRow("   ")]
+    [DataRow(null)]
+    public async Task HttpOrEmptyWebsiteIsAcceptedOnCreateAndUpdate(string? website)
+    {
+        var game = h.SeedGame("Alpha");
+
+        var create = await h.GameApi.Create(TestRequests.Json(new { name = "Beta", website }), default);
+        var update = await h.GameApi.Update(TestRequests.Json(new { name = "Alpha", website }), game.Id, default);
+
+        Assert.AreEqual(StatusCodes.Status201Created, ApiResults.Status(create));
+        Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(update));
+        var created = ApiResults.Value<GameEntity>(create);
+        Assert.AreEqual(website, created.Website);
+        Assert.AreEqual(website, h.Games[created.RowKey].Website);
+        Assert.AreEqual(website, h.Games[game.RowKey].Website);
+    }
+
+    // A Website stored before the rule still loads; only a save checks it.
+    [TestMethod]
+    public async Task OldStoredWebsiteWithoutAnHttpSchemeIsStillReturnedByGet()
+    {
+        var old = h.SeedGame("Old");
+        old.Website = "example.com";
+
+        var one = await h.GameApi.Get(TestRequests.Empty(), old.Id, default);
+        var all = await h.GameApi.GetAll(TestRequests.Empty(), default);
+
+        Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(one));
+        Assert.AreEqual("example.com", ApiResults.Value<GameEntity>(one).Website);
+        Assert.AreEqual("example.com", Assert.ContainsSingle(ApiResults.Value<List<GameEntity>>(all)).Website);
+    }
+
+    [TestMethod]
+    public async Task OldStoredWebsiteIsCheckedWhenTheGameIsSavedAgain()
+    {
+        var old = h.SeedGame("Old");
+        old.Website = "example.com";
+
+        var unchanged = await h.GameApi.Update(TestRequests.Json(new { name = "Renamed", website = "example.com" }), old.Id, default);
+        var fixedUp = await h.GameApi.Update(TestRequests.Json(new { name = "Renamed", website = "https://example.com" }), old.Id, default);
+
+        Assert.AreEqual("Website must be an http or https address.", ApiResults.Message(unchanged));
+        Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(fixedUp));
+        Assert.AreEqual("https://example.com", h.Games[old.RowKey].Website);
+        Assert.AreEqual("Renamed", h.Games[old.RowKey].Name);
+    }
+
     // ---- Activities: GameId, id lists, text caps, the comments PATCH.
 
     [TestMethod]

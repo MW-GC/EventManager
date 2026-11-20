@@ -14,6 +14,7 @@ internal static class GameValidator
         game.Name = name;
         return error
             ?? FieldRules.MaxLength(game.Website, nameof(GameEntity.Website), FieldRules.UrlMaxLength)
+            ?? FieldRules.HttpAddress(game.Website, nameof(GameEntity.Website))
             ?? FieldRules.MaxLength(game.ImageUrl, nameof(GameEntity.ImageUrl), FieldRules.UrlMaxLength)
             ?? FieldRules.MaxLength(game.IconUrl, nameof(GameEntity.IconUrl), FieldRules.UrlMaxLength);
     }

@@ -24,6 +24,17 @@ internal static class FieldRules
         value is not null && value.Length > max ? $"{field} must be {max} characters or fewer." : null;
 
     /// <summary>
+    /// An optional web address: empty or whitespace, or an absolute <c>http</c> or <c>https</c> URI (any case).
+    /// Anything else (<c>ftp://</c>, <c>javascript:</c>, a bare <c>example.com</c>) returns an error naming
+    /// the field. Check the length first; this rule does not.
+    /// </summary>
+    public static string? HttpAddress(string? value, string field) =>
+        string.IsNullOrWhiteSpace(value)
+        || (Uri.TryCreate(value, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            ? null
+            : $"{field} must be an http or https address.";
+
+    /// <summary>
     /// An optional count: null, or a whole number from 0 to <paramref name="max"/>. A fractional
     /// JSON number never gets here; it fails to read into an <c>int?</c> and is a malformed body.
     /// </summary>

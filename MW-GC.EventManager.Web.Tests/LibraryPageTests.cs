@@ -5,6 +5,7 @@ using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
+using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
@@ -282,6 +283,192 @@ public sealed class LibraryPageTests : IDisposable
             Assert.AreEqual(FieldRules.Name(name, out _), LibraryRules.Name(name), $"name of {name.Length} characters");
     }
 
+    // ---- Extra field rules (Rules), #127 ---------------------------------------------------------
+    // A page gives the editor rules for its own fields. These use a made-up rule on a Website field the
+    // test adds itself, so they pin the shared hook and not the Games page's Website rule.
+
+    private const string RuleMessage = "Website must not be bad.";
+
+    private static IEnumerable<LibraryFieldError> NotBad(GameEntity g) =>
+        g.Website == "bad" ? [new LibraryFieldError(nameof(GameEntity.Website), RuleMessage)] : [];
+
+    [TestMethod]
+    public async Task Rules_AFailingRule_ShowsItsMessageUnderItsField_AndBlocksTheSave()
+    {
+        var page = RuledGames(NotBad);
+        await page.Button("Add Game").ClickAsync(new());
+        await page.Find(GameNameField).ChangeAsync(new ChangeEventArgs { Value = "Ghost Race" });
+        await RuleField(page).ChangeAsync(new ChangeEventArgs { Value = "bad" });
+
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+
+        Assert.AreEqual("Add Game", page.DialogTitle());
+        Assert.AreEqual(RuleMessage, Assert.ContainsSingle(page.FormDialog().Alerts()));
+        Assert.AreEqual(RuleMessage, Assert.ContainsSingle(RuleField(page).ParentElement!.Alerts()));
+        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
+    }
+
+    [TestMethod]
+    public async Task Rules_APassingRule_LetsTheSaveThrough()
+    {
+        var page = RuledGames(NotBad);
+        api.Status(HttpMethod.Post, "/api/games", HttpStatusCode.Created);
+        await page.Button("Add Game").ClickAsync(new());
+        await page.Find(GameNameField).ChangeAsync(new ChangeEventArgs { Value = "Ghost Race" });
+        await RuleField(page).ChangeAsync(new ChangeEventArgs { Value = "good" });
+
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+
+        Assert.AreEqual("good", Json(Assert.ContainsSingle(api.Bodies(HttpMethod.Post, "/api/games"))).GetProperty("website").GetString());
+        Assert.IsFalse(page.HasFormDialog());
+    }
+
+    [TestMethod]
+    public async Task Rules_ChangingTheField_ClearsItsMessage_AndTheSaveThenSends()
+    {
+        var page = RuledGames(NotBad);
+        api.Status(HttpMethod.Post, "/api/games", HttpStatusCode.Created);
+        await page.Button("Add Game").ClickAsync(new());
+        await page.Find(GameNameField).ChangeAsync(new ChangeEventArgs { Value = "Ghost Race" });
+        await RuleField(page).ChangeAsync(new ChangeEventArgs { Value = "bad" });
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+        Assert.AreEqual(RuleMessage, Assert.ContainsSingle(page.FormDialog().Alerts()));
+
+        // Changing another field leaves the message; changing its own field checks it again.
+        await page.Find(GameNameField).InputAsync(new ChangeEventArgs { Value = "Ghost Racer" });
+        Assert.AreEqual(RuleMessage, Assert.ContainsSingle(page.FormDialog().Alerts()));
+        await RuleField(page).InputAsync(new ChangeEventArgs { Value = "fine" });
+        Assert.IsEmpty(page.FormDialog().Alerts());
+
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+        Assert.AreEqual(1, api.Count(HttpMethod.Post, "/api/games"));
+        Assert.IsFalse(page.HasFormDialog());
+    }
+
+    [TestMethod]
+    public async Task Rules_AndTheNameRule_BothRunOnSubmit_EachMessageUnderItsOwnField()
+    {
+        var page = RuledGames(NotBad);
+        await page.Button("Add Game").ClickAsync(new());
+        await RuleField(page).ChangeAsync(new ChangeEventArgs { Value = "bad" });
+
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+
+        CollectionAssert.AreEqual(new[] { "Name is required.", RuleMessage }, page.FormDialog().Alerts());
+        Assert.AreEqual("Name is required.", Assert.ContainsSingle(page.Find(GameNameField).ParentElement!.Alerts()));
+        Assert.AreEqual(RuleMessage, Assert.ContainsSingle(RuleField(page).ParentElement!.Alerts()));
+        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
+    }
+
+    // ---- The Games Website (#127): the API's rule, and old values that break it --------------------
+
+    private const string WebsiteMessage = "Website must be an http or https address.";
+    private const string WebsiteField = "fluent-dialog fluent-text-field[placeholder^='https://']";
+
+    [TestMethod]
+    [DataRow("ftp://x")]
+    [DataRow("javascript:alert(1)")]
+    [DataRow("example.com")]
+    public async Task GamesAdd_RefusesANonHttpWebsite_WithTheApisMessage_AndSendsNothing(string website)
+    {
+        var page = Games();
+        await page.Button("Add Game").ClickAsync(new());
+        await page.Find(GameNameField).ChangeAsync(new ChangeEventArgs { Value = "Ghost Race" });
+        await page.Find(WebsiteField).ChangeAsync(new ChangeEventArgs { Value = website });
+
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+
+        Assert.AreEqual("Add Game", page.DialogTitle());
+        Assert.AreEqual(WebsiteMessage, Assert.ContainsSingle(page.FormDialog().Alerts()));
+        Assert.AreEqual(WebsiteMessage, Assert.ContainsSingle(page.Find(WebsiteField).ParentElement!.Alerts()));
+        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
+    }
+
+    [TestMethod]
+    [DataRow("https://store.steampowered.com/app/1")]
+    [DataRow("HTTP://example.test")]
+    [DataRow("")]
+    public async Task GamesAdd_AnHttpOrEmptyWebsite_Saves(string website)
+    {
+        var page = Games();
+        api.Status(HttpMethod.Post, "/api/games", HttpStatusCode.Created);
+        await page.Button("Add Game").ClickAsync(new());
+        await page.Find(GameNameField).ChangeAsync(new ChangeEventArgs { Value = "Ghost Race" });
+        await page.Find(WebsiteField).ChangeAsync(new ChangeEventArgs { Value = website });
+
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+
+        Assert.AreEqual(website, Json(Assert.ContainsSingle(api.Bodies(HttpMethod.Post, "/api/games"))).GetProperty("website").GetString());
+        Assert.IsFalse(page.HasFormDialog());
+    }
+
+    // A Website stored before the rule still loads and shows, as text: only an http(s) value is a link,
+    // so a javascript: value can never run from the list.
+    [TestMethod]
+    public async Task Games_AnOldNonHttpWebsite_ShowsAsTextWithNoLink_InTheGridAndTheCards()
+    {
+        var page = OldWebsiteGames();
+
+        AssertWebsites(page);
+        await page.Find("fluent-button[title='Card view']").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.HasCount(3, page.FindAll("fluent-card fluent-card")));
+        AssertWebsites(page);
+
+        static void AssertWebsites(IRenderedComponent<Games> page)
+        {
+            var links = page.FindAll("[href]").Where(a => a.Closest("fluent-dialog") is null).Select(a => a.GetAttribute("href")).ToList();
+            CollectionAssert.AreEqual(new[] { "https://example.test/kart" }, links);
+            Assert.Contains("javascript:alert(1)", page.Markup);
+            Assert.Contains("example.com", page.Markup);
+        }
+    }
+
+    [TestMethod]
+    public async Task GamesEdit_AnOldNonHttpWebsite_IsFlaggedOnSave_NotWhenTheEditorOpens()
+    {
+        var page = OldWebsiteGames();
+        var old = $"/api/games/{OldId}";
+        api.Status(HttpMethod.Put, old, HttpStatusCode.NoContent);
+
+        await RowButton(page, "Old site", "Edit").ClickAsync(new());
+        Assert.AreEqual("Edit Game", page.DialogTitle());
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        // Renaming does not touch the Website, so it is still not flagged.
+        await page.Find(GameNameField).InputAsync(new ChangeEventArgs { Value = "Old site renamed" });
+        Assert.IsEmpty(page.FormDialog().Alerts());
+
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+        Assert.AreEqual(WebsiteMessage, Assert.ContainsSingle(page.FormDialog().Alerts()));
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, old));
+
+        await page.Find(WebsiteField).InputAsync(new ChangeEventArgs { Value = "https://example.com" });
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+        Assert.AreEqual("https://example.com", Json(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, old))).GetProperty("website").GetString());
+    }
+
+    [TestMethod]
+    public async Task GamesEdit_TouchingAnOldNonHttpWebsite_FlagsItBeforeTheSave()
+    {
+        var page = OldWebsiteGames();
+
+        await RowButton(page, "Old site", "Edit").ClickAsync(new());
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        await page.Find(WebsiteField).InputAsync(new ChangeEventArgs { Value = "example.co" });
+
+        Assert.AreEqual(WebsiteMessage, Assert.ContainsSingle(page.FormDialog().Alerts()));
+        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
+    }
+
+    // The form's Website rule is the API's own (FieldRules.HttpAddress), value for value.
+    [TestMethod]
+    public void WebsiteRule_MatchesTheApi()
+    {
+        foreach (var website in new[] { null, "", "   ", "http://x", "https://x", "HTTPS://x", "https://store.steampowered.com/app/1",
+                     "ftp://x", "javascript:alert(1)", "example.com", "/games/1", "mailto:a@b.test", "file:///etc/passwd", "not a url" })
+            Assert.AreEqual(FieldRules.HttpAddress(website, "Website"), LibraryRules.Website(website), $"website {website}");
+    }
+
     // ---- The generic client ------------------------------------------------------------------------
 
     // The client the other Library pages will move to sends what their own service sends today:
@@ -377,6 +564,56 @@ public sealed class LibraryPageTests : IDisposable
         page.WaitForRows(1);
         return page;
     }
+
+    private static readonly Guid OldId = Guid.Parse("1a2b3c4d-5e6f-4a5b-8c7d-9e0f1a2b3c4d");
+
+    // The Games page over a library with one good Website and two stored before the rule.
+    private IRenderedComponent<Games> OldWebsiteGames()
+    {
+        api.Json(HttpMethod.Get, "/api/games", new[]
+        {
+            new GameEntity { Name = "Kart", Website = "https://example.test/kart" },
+            new GameEntity { Id = OldId, Name = "Old site", Website = "example.com" },
+            new GameEntity { Name = "Script", Website = "javascript:alert(1)" },
+        });
+        var page = harness.Render<Games>();
+        page.WaitForRows(3);
+        return page;
+    }
+
+    // The shared page for Games with a Website field the test adds itself and the rules it is given.
+    private IRenderedComponent<LibraryPage<GameEntity>> RuledGames(Func<GameEntity, IEnumerable<LibraryFieldError>> rules)
+    {
+        RenderFragment<LibraryEdit<GameEntity>> website = edit => b =>
+        {
+            b.OpenElement(0, "div");
+            b.OpenComponent<FluentTextField>(1);
+            b.AddComponentParameter(2, nameof(FluentTextField.Value), edit.Item.Website);
+            b.AddComponentParameter(3, nameof(FluentTextField.ValueChanged), EventCallback.Factory.Create<string?>(this, v => edit.Item.Website = v));
+            b.AddComponentParameter(4, nameof(FluentTextField.ValueExpression), (Expression<Func<string?>>)(() => edit.Item.Website));
+            b.AddComponentParameter(5, nameof(FluentTextField.Immediate), true);
+            b.AddComponentParameter(6, nameof(FluentTextField.Placeholder), "rule-field");
+            b.CloseComponent();
+            b.OpenComponent<LibraryFieldMessage>(7);
+            b.AddComponentParameter(8, nameof(LibraryFieldMessage.Field), nameof(GameEntity.Website));
+            b.CloseComponent();
+            b.CloseElement();
+        };
+        var page = harness.Render<LibraryPage<GameEntity>>(p => p
+            .Add(x => x.Title, "Games")
+            .Add(x => x.Singular, "Game")
+            .Add(x => x.Client, new LibraryClient<GameEntity>(api.Client(), "games"))
+            .Add(x => x.Name, (Expression<Func<GameEntity, string>>)(g => g.Name))
+            .Add(x => x.NewItem, () => new GameEntity { Name = string.Empty })
+            .Add(x => x.CopyItem, g => new GameEntity { Id = g.Id, Name = g.Name, Website = g.Website })
+            .Add(x => x.EditorFields, website)
+            .Add(x => x.Rules, rules));
+        page.WaitForRows(1);
+        return page;
+    }
+
+    private static IElement RuleField<T>(IRenderedComponent<T> page) where T : IComponent =>
+        page.Find("fluent-dialog fluent-text-field[placeholder='rule-field']");
 
     private static string BadName(string kind) => kind switch
     {
