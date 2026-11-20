@@ -54,7 +54,10 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         api.Json(HttpMethod.Get, "/api/games", new[] { kart })
            .Json(HttpMethod.Get, "/api/activities", new[] { race })
            .Json(HttpMethod.Get, "/api/themes", Array.Empty<ThemeEntity>())
-           .Json(HttpMethod.Get, "/api/holidays", Array.Empty<HolidayEntity>());
+           .Json(HttpMethod.Get, "/api/holidays", Array.Empty<HolidayEntity>())
+           // The details dialog's Performance section (#137) reads these too; answered so it loads quietly.
+           .Json(HttpMethod.Get, "/api/events", Array.Empty<EventEntity>())
+           .Json(HttpMethod.Get, "/api/event-metrics", Array.Empty<object>());
         List(a, b);
         harness = new PageHarness(api);
     }

@@ -1,5 +1,5 @@
 @page "/stats"
-@using System.Globalization
+@using static MW_GC.EventManager.Web.Services.PerformanceFormat
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject EventService EventSvc
 @inject GameService GameSvc
@@ -89,16 +89,7 @@
     private const string PerformanceNote =
         "Performance cannot tell a weak Activity from a weak night: an Event has several Selections, so its numbers belong to all of them.";
 
-    // Shown for a performance number that has no value (never offered, or no attendees recorded).
-    private const string NoValue = "—";
-
-    // A whole percent ("50%") and one decimal ("1.0"), the same in every culture.
-    private static string? Percent(decimal? rate) =>
-        rate is { } r ? (r * 100).ToString("0", CultureInfo.InvariantCulture) + "%" : null;
-
-    private static string? OneDecimal(decimal? value) => value?.ToString("0.0", CultureInfo.InvariantCulture);
-
-    // One performance number, or a dimmed dash when it has none.
+    // One performance number (PerformanceFormat, shared with the Activity details), or a dimmed dash when it has none.
     private static readonly RenderFragment<(string Class, string? Text)> PerformanceCell = cell =>
         @<span class="@cell.Class">
             @if (cell.Text is { } text)

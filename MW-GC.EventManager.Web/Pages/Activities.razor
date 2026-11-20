@@ -191,6 +191,16 @@
 
                 <FluentDivider />
 
+                @* #137: the Activity's performance, its row of the Stats page. Keyed by the Activity, so a load that
+                   ends after the dialog closed or moved on never shows in another Activity; wrapped, because sibling
+                   keys must differ and the Comments panel uses the same one. It only reads, so it takes no part in
+                   the busy guard or the Discard question. *@
+                <div>
+                    <ActivityPerformancePanel @key="_detailActivity.Id" ActivityId="_detailActivity.Id" />
+                </div>
+
+                <FluentDivider />
+
                 @* #131: the Activity's Comments, read and written through their own routes (ADR 0001). Keyed by
                    the Activity, so another Activity gets a new panel. *@
                 <ActivityCommentsPanel @key="_detailActivity.Id" @ref="_comments" ActivityId="_detailActivity.Id"

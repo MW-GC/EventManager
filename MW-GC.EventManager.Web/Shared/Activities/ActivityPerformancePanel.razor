@@ -1,0 +1,91 @@
+@* Activity performance in the Activity details dialog (#137): this Activity's row of the Stats page. It loads the
+   four lists the Stats page loads and runs the same PlayStats computation, so its numbers cannot differ from the
+   Stats row; nothing is stored (ADR 0001). It only reads, so it never holds the dialog open and has nothing to
+   discard. The dialog keys it by the Activity, so a load that ends after the dialog closed or moved to another
+   Activity lands in a panel that is no longer shown. *@
+@using static MW_GC.EventManager.Web.Services.PerformanceFormat
+@inject EventService EventSvc
+@inject GameService GameSvc
+@inject LibraryClient<ActivityEntity> ActivityClient
+@inject EventMetricsClient MetricsClient
+
+<div class="activity-performance">
+    <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 6px;">Performance</FluentLabel>
+    @if (_row is { } row)
+    {
+        <dl style="display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0 0 8px 0;">
+            <div><dt style="display: inline;">Offered in</dt> <dd style="display: inline; margin: 0;"><span class="performance-offered">@row.Offered</span> Events</dd></div>
+            <div><dt style="display: inline;">Won</dt> <dd style="display: inline; margin: 0;" class="performance-wins">@row.Wins</dd></div>
+            <div><dt style="display: inline;">Win rate</dt> @Value(("performance-win-rate", Percent(row.WinRate)))</div>
+            <div><dt style="display: inline;">Avg Likes</dt> @Value(("performance-avg-likes", OneDecimal(row.AverageLikes)))</div>
+            <div><dt style="display: inline;">Avg attendees</dt> @Value(("performance-avg-attendees", OneDecimal(row.AverageAttendees)))</div>
+        </dl>
+        <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint);">@Sentence</FluentLabel>
+    }
+    else if (_loads.Message is { } message)
+    {
+        @* Not an alert, as in the Comments panel: nothing the user did here failed. *@
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true">
+            <span role="status">Performance could not be loaded. @message</span>
+            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Loading="@_loading" OnClick="Load">Retry</FluentButton>
+        </FluentStack>
+    }
+    else
+    {
+        <FluentProgressRing aria-label="Loading performance..." />
+    }
+</div>
+
+@code {
+    // The Activity whose performance this panel shows.
+    [Parameter] public Guid ActivityId { get; set; }
+
+    private const string Sentence =
+        "Performance cannot tell a weak Activity from a weak night: an Event has several Selections, so its numbers belong to all of them.";
+
+    // One number as the Stats cell shows it, or a dimmed dash when it has none.
+    private static readonly RenderFragment<(string Class, string? Text)> Value = cell =>
+        @<dd style="display: inline; margin: 0;" class="@cell.Class">
+            @if (cell.Text is { } text)
+            {
+                @text
+            }
+            else
+            {
+                <span style="color: var(--neutral-foreground-hint);">@NoValue</span>
+            }
+        </dd>;
+
+    private readonly LoadErrors _loads = new();
+    private List<EventEntity>? _events;
+    private List<GameEntity>? _games;
+    private List<ActivityEntity>? _activities;
+    private List<EventMetricsWithLikes>? _metrics;
+    private ActivityPlayStats? _row;
+    private bool _loading;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    // The Stats page's four lists. The first load reads all four; Retry reads only those that failed, the
+    // others keep what they loaded.
+    private async Task Load()
+    {
+        if (_loading) return;
+        _loading = true;
+        try
+        {
+            await Task.WhenAll(
+                _events is null ? _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []) : Task.CompletedTask,
+                _games is null ? _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []) : Task.CompletedTask,
+                _activities is null ? _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []) : Task.CompletedTask,
+                _metrics is null ? _loads.LoadAsync("Event metrics", MetricsClient.GetAllAsync, v => _metrics = v ?? []) : Task.CompletedTask);
+            // Every Activity in the library or in a past Selection has a row; one that is neither (deleted
+            // meanwhile and never offered) has the row of an Activity never offered.
+            if (_events is not null && _games is not null && _activities is not null && _metrics is not null)
+                _row = new PlayStats(TimeProvider.System).Compute(_events, _games, _activities, _metrics)
+                    .Activities.FirstOrDefault(a => a.Id == ActivityId)
+                    ?? new ActivityPlayStats(ActivityId, string.Empty, string.Empty, 0, 0, null, true);
+        }
+        finally { _loading = false; }
+    }
+}
