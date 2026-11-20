@@ -1,0 +1,39 @@
+@* The editor's messages for one field of the item in the form, shown where this sits (under that field).
+   The name rule and a page's own Rules (LibraryRulesValidator) both show their messages through it. *@
+@implements IDisposable
+
+@if (_context is not null)
+{
+    @foreach (var message in _context.GetValidationMessages(new FieldIdentifier(_context.Model, Field)))
+    {
+        <div role="alert" class="validation-message" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@message</div>
+    }
+}
+
+@code {
+    [CascadingParameter] private EditContext? CurrentEditContext { get; set; }
+
+    /// <summary>The property name on the form's item, such as nameof(GameEntity.Website).</summary>
+    [Parameter, EditorRequired] public string Field { get; set; } = string.Empty;
+
+    private EditContext? _context;
+
+    protected override void OnParametersSet()
+    {
+        if (CurrentEditContext is null)
+            throw new InvalidOperationException($"{nameof(LibraryFieldMessage)} must sit inside an EditForm.");
+        if (ReferenceEquals(CurrentEditContext, _context)) return;
+        Detach();
+        _context = CurrentEditContext;
+        _context.OnValidationStateChanged += StateChanged;
+    }
+
+    private void StateChanged(object? sender, ValidationStateChangedEventArgs e) => StateHasChanged();
+
+    private void Detach()
+    {
+        if (_context is not null) _context.OnValidationStateChanged -= StateChanged;
+    }
+
+    public void Dispose() => Detach();
+}

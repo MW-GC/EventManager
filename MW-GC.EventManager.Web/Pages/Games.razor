@@ -9,7 +9,7 @@
    adds what is Games-only: the Website field, the icon, Activity counts and the Activities in the Edit dialog. *@
 <LibraryPage TItem="GameEntity" Title="Games" Subtitle="Manage your game library" Singular="Game"
              Client="@GameClient" Name="@(g => g.Name)" NewItem="NewGame" CopyItem="CopyGame"
-             DirtyFields="@(g => new { g.Name, g.Website })" DeleteMessage="DeleteMessage" Lookups="_lookups"
+             DirtyFields="@(g => new { g.Name, g.Website })" DeleteMessage="DeleteMessage" Lookups="_lookups" Rules="Rules"
              NameLabel="Game Name" DialogWidth="DialogWidth"
              GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 88px">
     <Columns>
@@ -27,11 +27,16 @@
             </FluentStack>
         </TemplateColumn>
         <TemplateColumn TGridItem="GameEntity" Title="Website">
-            @if (!string.IsNullOrWhiteSpace(context.Website))
+            @* Only an http(s) Website is a link. One stored before that rule shows as text, never as a live link. *@
+            @if (LibraryRules.IsHttpAddress(context.Website))
             {
                 <FluentAnchor Href="@context.Website" Target="_blank" Appearance="Appearance.Hypertext">
-                    @TruncateUrl(context.Website)
+                    @TruncateUrl(context.Website!)
                 </FluentAnchor>
+            }
+            else if (!string.IsNullOrWhiteSpace(context.Website))
+            {
+                <FluentLabel>@TruncateUrl(context.Website)</FluentLabel>
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="GameEntity" Title="Activities">
@@ -61,11 +66,15 @@
                         </FluentStack>
                     </FluentStack>
 
-                    @if (!string.IsNullOrWhiteSpace(card.Item.Website))
+                    @if (LibraryRules.IsHttpAddress(card.Item.Website))
                     {
                         <FluentAnchor Href="@card.Item.Website" Target="_blank" Appearance="Appearance.Hypertext" Style="font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            @TruncateUrl(card.Item.Website)
+                            @TruncateUrl(card.Item.Website!)
                         </FluentAnchor>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(card.Item.Website))
+                    {
+                        <FluentLabel Style="font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@TruncateUrl(card.Item.Website)</FluentLabel>
                     }
 
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Style="margin-top: auto;">
@@ -79,6 +88,7 @@
     <EditorFields Context="edit">
         <div>
             <FluentTextField @bind-Value="edit.Item.Website" Immediate="true" Label="Website (Optional)" Style="width: 100%;" Placeholder="https://store.steampowered.com/app/123456" />
+            <LibraryFieldMessage Field="@nameof(GameEntity.Website)" />
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-top: 4px;">
                 Paste a Steam store URL or game website to auto-fetch the icon
             </FluentLabel>
@@ -128,6 +138,10 @@
     ];
 
     private static GameEntity NewGame() => new() { Name = string.Empty };
+
+    // The API's Website rule, checked by the editor before anything is sent.
+    private static IEnumerable<LibraryFieldError> Rules(GameEntity g) =>
+        LibraryRules.Website(g.Website) is { } message ? [new LibraryFieldError(nameof(GameEntity.Website), message)] : [];
 
     private static GameEntity CopyGame(GameEntity g) => new()
     {

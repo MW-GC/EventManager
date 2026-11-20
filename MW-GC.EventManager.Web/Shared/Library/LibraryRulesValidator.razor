@@ -1,0 +1,59 @@
+@* A page's own field rules (LibraryPage.Rules) as a form validator, next to the name rule. EditForm asks it on
+   submit, so a failing rule sends nothing. When a field changes it checks that field again, so a message goes
+   once the field is fixed, and a field that breaks a rule is flagged as soon as it is touched; other fields'
+   messages stay as they were. Nothing is checked when the editor opens, so a value stored before a rule
+   existed is flagged only once it is touched or saved. Each message shows through a LibraryFieldMessage
+   with the same field name. *@
+@implements IDisposable
+
+@code {
+    [CascadingParameter] private EditContext? CurrentEditContext { get; set; }
+
+    /// <summary>The page's rules for the item in the form (LibraryPage.Rules); null checks nothing.</summary>
+    [Parameter] public Func<IEnumerable<LibraryFieldError>>? Rules { get; set; }
+
+    private EditContext? _context;
+    private ValidationMessageStore? _store;
+
+    protected override void OnParametersSet()
+    {
+        if (CurrentEditContext is null)
+            throw new InvalidOperationException($"{nameof(LibraryRulesValidator)} must sit inside an EditForm.");
+        if (ReferenceEquals(CurrentEditContext, _context)) return;
+        Detach();
+        _context = CurrentEditContext;
+        _store = new ValidationMessageStore(_context);
+        _context.OnValidationRequested += Requested;
+        _context.OnFieldChanged += Changed;
+    }
+
+    private IEnumerable<LibraryFieldError> Errors() => Rules?.Invoke() ?? [];
+
+    private FieldIdentifier FieldOf(LibraryFieldError error) => new(_context!.Model, error.Field);
+
+    private void Requested(object? sender, ValidationRequestedEventArgs e)
+    {
+        _store!.Clear();
+        foreach (var error in Errors()) _store.Add(FieldOf(error), error.Message);
+        _context!.NotifyValidationStateChanged();
+    }
+
+    private void Changed(object? sender, FieldChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.FieldIdentifier.Model, _context!.Model)) return;
+        _store!.Clear(e.FieldIdentifier);
+        foreach (var error in Errors().Where(error => error.Field == e.FieldIdentifier.FieldName))
+            _store.Add(e.FieldIdentifier, error.Message);
+        _context.NotifyValidationStateChanged();
+    }
+
+    private void Detach()
+    {
+        if (_context is null) return;
+        _context.OnValidationRequested -= Requested;
+        _context.OnFieldChanged -= Changed;
+        _store?.Clear();
+    }
+
+    public void Dispose() => Detach();
+}

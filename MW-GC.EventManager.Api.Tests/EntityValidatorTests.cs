@@ -56,10 +56,9 @@ public class EntityValidatorTests
     }
 
     [TestMethod]
-    [DataRow(nameof(GameEntity.Website))]
     [DataRow(nameof(GameEntity.ImageUrl))]
     [DataRow(nameof(GameEntity.IconUrl))]
-    public void GameUrlsAreCappedByLengthOnly(string field)
+    public void GameImageAndIconUrlsAreCappedByLengthOnly(string field)
     {
         GameEntity With(string value)
         {
@@ -69,10 +68,49 @@ public class EntityValidatorTests
         }
 
         Assert.IsNull(GameValidator.Validate(With(new string('u', 2048))));
-        // Length only: no scheme check here (a later ticket owns that).
+        // Length only: the image and icon have no scheme check (only the Website has, #127).
         Assert.IsNull(GameValidator.Validate(With("not even a url")));
         Assert.IsNull(GameValidator.Validate(With(null!)));
         Assert.AreEqual($"{field} must be 2048 characters or fewer.", GameValidator.Validate(With(new string('u', 2049))));
+    }
+
+    private const string WebsiteMessage = "Website must be an http or https address.";
+
+    [TestMethod]
+    [DataRow("http://x", null)]
+    [DataRow("https://x", null)]
+    [DataRow("HTTPS://x", null)]
+    [DataRow("https://store.steampowered.com/app/1", null)]
+    [DataRow(null, null)]
+    [DataRow("", null)]
+    [DataRow("   ", null)]
+    [DataRow("ftp://x", WebsiteMessage)]
+    [DataRow("javascript:alert(1)", WebsiteMessage)]
+    [DataRow("example.com", WebsiteMessage)]
+    [DataRow("/games/1", WebsiteMessage)]
+    [DataRow("not even a url", WebsiteMessage)]
+    public void GameWebsiteMustBeAnHttpOrHttpsAddressWhenGiven(string? website, string? expected)
+    {
+        Assert.AreEqual(expected, GameValidator.Validate(new GameEntity { Name = "Alpha", Website = website }));
+    }
+
+    [TestMethod]
+    public void GameWebsiteLengthIsCheckedBeforeTheScheme()
+    {
+        var longHttp = "https://x.test/" + new string('u', 2048 - 15);
+        Assert.AreEqual(2048, longHttp.Length);
+
+        Assert.IsNull(GameValidator.Validate(new GameEntity { Name = "Alpha", Website = longHttp }));
+        Assert.AreEqual("Website must be 2048 characters or fewer.", GameValidator.Validate(new GameEntity { Name = "Alpha", Website = longHttp + "u" }));
+        // Not an address and too long: the length message wins.
+        Assert.AreEqual("Website must be 2048 characters or fewer.", GameValidator.Validate(new GameEntity { Name = "Alpha", Website = new string('u', 2049) }));
+    }
+
+    [TestMethod]
+    public void HttpAddressRuleNamesTheFieldItIsGiven()
+    {
+        Assert.IsNull(FieldRules.HttpAddress("https://x", "Link"));
+        Assert.AreEqual("Link must be an http or https address.", FieldRules.HttpAddress("ftp://x", "Link"));
     }
 
     [TestMethod]
