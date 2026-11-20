@@ -12,8 +12,8 @@ namespace MW_GC.EventManager.API.Services;
 /// Turns each Activity's old single note (<see cref="ActivityEntity.Comments"/>) into that
 /// Activity's first Comment (#130, ADR 0001). A non-empty note (after trimming) becomes one
 /// Comment with no Event, dated by the Activity row's last write (its <c>Timestamp</c>), and
-/// cut to <see cref="FieldRules.CommentTextMaxLength"/> characters only when it is longer
-/// (with a warning naming the Activity). The Activity row is only read, never written.
+/// cut to at most <see cref="FieldRules.CommentTextMaxLength"/> characters and trimmed again only
+/// when it is longer (with a warning naming the Activity). The Activity row is only read, never written.
 /// <para>
 /// It runs on every host start (<see cref="ActivityNoteConversionStartup"/>) and is safe to
 /// repeat: each Comment's id comes from its Activity's id and is inserted, never replaced, so a
@@ -83,10 +83,13 @@ internal sealed class ActivityNoteConversion
             {
                 var length = FieldRules.CommentTextMaxLength;
                 if (char.IsHighSurrogate(note[length - 1])) length--;
+                // The cut can end in whitespace; a Comment's Text is stored trimmed, so trim again.
+                var kept = note[..length].Trim();
                 _logger.LogWarning(
                     "The old note of Activity {ActivityId} is {Length} characters; its Comment keeps the first {Kept}.",
-                    activity.Id, note.Length, length);
-                note = note[..length];
+                    activity.Id, note.Length, kept.Length);
+                note = kept;
+                if (note.Length == 0) continue;
             }
 
             var comment = new CommentEntity

@@ -1,5 +1,7 @@
 using Azure;
 using Azure.Data.Tables;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
 using MW_GC.EventManager.API.Services;
@@ -94,6 +96,19 @@ public class ActivityNoteConversionTests
         await h.NoteConversion.RunAsync(default);
 
         Assert.AreEqual(new string('a', 999), Assert.ContainsSingle(CommentsOf(activityId)).Text);
+    }
+
+    [TestMethod]
+    [DataRow(999, " ", "after the cut")]
+    [DataRow(995, "          ", "after the cut")]
+    public async Task WhitespaceLeftAtTheEndOfTheCutIsTrimmedFromTheComment(int letters, string gap, string tail)
+    {
+        // The cut at 1000 characters lands on (or inside) the whitespace between the letters and the tail.
+        var activityId = SeedActivity(new string('a', letters) + gap + tail);
+
+        await h.NoteConversion.RunAsync(default);
+
+        Assert.AreEqual(new string('a', letters), Assert.ContainsSingle(CommentsOf(activityId)).Text);
     }
 
     // ---- runs again on every host start: idempotent, and done once
@@ -217,11 +232,16 @@ public class ActivityNoteConversionTests
 
     // ---- started with the host
 
+    // The startup service resolves the conversion from the host's services when it runs.
+    private ServiceProvider HostServices() =>
+        new ServiceCollection().AddSingleton(h.NoteConversion).BuildServiceProvider();
+
     [TestMethod]
     public async Task TheStartupServiceRunsTheConversion()
     {
         var activityId = SeedActivity("Converted at start");
-        var startup = new ActivityNoteConversionStartup(h.NoteConversion, new ListLogger<ActivityNoteConversionStartup>());
+        await using var services = HostServices();
+        var startup = new ActivityNoteConversionStartup(services, new ListLogger<ActivityNoteConversionStartup>());
 
         await startup.StartAsync(default);
         await startup.ExecuteTask!;
@@ -237,7 +257,8 @@ public class ActivityNoteConversionTests
         var outage = new RequestFailedException(503, "Storage unavailable");
         h.CommentTable.Setup(t => t.AddEntityAsync(It.IsAny<CommentEntity>(), It.IsAny<CancellationToken>())).ThrowsAsync(outage);
         var log = new ListLogger<ActivityNoteConversionStartup>();
-        var startup = new ActivityNoteConversionStartup(h.NoteConversion, log);
+        await using var services = HostServices();
+        var startup = new ActivityNoteConversionStartup(services, log);
 
         await startup.StartAsync(default);
         await startup.ExecuteTask!;
@@ -247,6 +268,39 @@ public class ActivityNoteConversionTests
         Assert.AreEqual(LogLevel.Error, entry.Level);
         Assert.AreSame(outage, entry.Exception);
         Assert.IsFalse(MarkerStored());
+        await startup.StopAsync(default);
+    }
+
+    [TestMethod]
+    public async Task AStoreThatFailsWhileTheHostBuildsItIsLoggedAndNeverStopsTheHost()
+    {
+        // Registered as Program.cs registers them; creating the Comment table fails (storage or auth down).
+        var outage = new RequestFailedException(403, "This request is not authorized to perform this operation.");
+        var commentTable = new Mock<TableClient>();
+        commentTable.Setup(t => t.CreateIfNotExists(It.IsAny<CancellationToken>())).Throws(outage);
+        var service = new Mock<TableServiceClient>();
+        service.Setup(s => s.GetTableClient(It.IsAny<string>())).Returns(new Mock<TableClient>().Object);
+        service.Setup(s => s.GetTableClient("ActivityComments")).Returns(commentTable.Object);
+        var log = new ListLogger<ActivityNoteConversionStartup>();
+        var services = new ServiceCollection();
+        services.AddSingleton(service.Object);
+        services.AddSingleton(sp => new TableStore<ActivityEntity>(sp.GetRequiredService<TableServiceClient>(), "Activities", "Activity"));
+        services.AddSingleton(sp => new TableStore<CommentEntity>(sp.GetRequiredService<TableServiceClient>(), "ActivityComments", "Comment"));
+        services.AddSingleton<ILogger<ActivityNoteConversion>>(new ListLogger<ActivityNoteConversion>());
+        services.AddSingleton<ILogger<ActivityNoteConversionStartup>>(log);
+        services.AddSingleton<ActivityNoteConversion>();
+        services.AddHostedService<ActivityNoteConversionStartup>();
+        await using var provider = services.BuildServiceProvider();
+
+        // The host resolves every hosted service before it starts them: that must not throw.
+        var startup = provider.GetServices<IHostedService>().OfType<ActivityNoteConversionStartup>().Single();
+        await startup.StartAsync(default);
+        await startup.ExecuteTask!;
+
+        Assert.IsTrue(startup.ExecuteTask!.IsCompletedSuccessfully, "The failure must not fault the hosted service.");
+        var entry = Assert.ContainsSingle(log.Entries);
+        Assert.AreEqual(LogLevel.Error, entry.Level);
+        Assert.AreSame(outage, entry.Exception);
         await startup.StopAsync(default);
     }
 
