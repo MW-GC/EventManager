@@ -124,27 +124,6 @@ public sealed class LibraryPageRequestTests : IDisposable
         Assert.IsEmpty(page.PageAlerts());
     }
 
-    // ActivitiesFailedCommentSaveKeepsTextAndButton pins the PATCH path and that the text is sent;
-    // this pins the body shape the API reads, {"comments": ...}, and nothing else.
-    [TestMethod]
-    public async Task ActivitiesSaveCommentsSendsPatchWithOnlyTheCommentsProperty()
-    {
-        var page = Open("activities");
-        var path = $"/api/activities/{race.Id}/comments";
-        api.Status(HttpMethod.Patch, path, HttpStatusCode.NoContent);
-
-        await RowButton(page, "Race", "Details").ClickAsync(new());
-        await page.Find("fluent-dialog fluent-text-area").ChangeAsync(new ChangeEventArgs { Value = "Ran long" });
-        await page.Dialog().Button("Save Comments").ClickAsync(new());
-
-        var sent = Json(Assert.ContainsSingle(api.Bodies(HttpMethod.Patch, path)));
-        var property = Assert.ContainsSingle(sent.EnumerateObject().ToList());
-        Assert.AreEqual("comments", property.Name);
-        Assert.AreEqual("Ran long", property.Value.GetString());
-        Assert.AreEqual(0, api.Count(HttpMethod.Put, $"/api/activities/{race.Id}"));
-        Assert.IsEmpty(page.Dialog().Alerts());
-    }
-
     // The failure tests pin each DELETE path; a confirmed delete that succeeds and reloads is pinned
     // only for Themes (DialogSafetyTests.Delete_ConfirmRunsDelete_AndReloads). These are the other three.
     [TestMethod]

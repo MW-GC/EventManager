@@ -62,7 +62,9 @@ public sealed class DialogSafetyTests : IDisposable
            .Json(HttpMethod.Get, "/api/activities", new[] { grandPrix, timeTrial, stock })
            .Json(HttpMethod.Get, "/api/themes", new[] { spooky })
            .Json(HttpMethod.Get, "/api/holidays", new[] { halloween })
-           .Json(HttpMethod.Get, "/api/events", new[] { night, party });
+           .Json(HttpMethod.Get, "/api/events", new[] { night, party })
+           // The Activity details dialog's Comments panel (#131): none yet, so its first text box is New Comment.
+           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>());
         harness = new PageHarness(api);
     }
 

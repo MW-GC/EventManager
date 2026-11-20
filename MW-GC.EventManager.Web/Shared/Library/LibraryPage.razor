@@ -279,23 +279,6 @@
 
     private Task LoadItems() => _loads.LoadAsync(Title, Client.GetAllAsync, v => _items = v ?? []);
 
-    /// <summary>
-    /// After a write the using page sends itself (such as the Activities Save Comments): reloads the list and
-    /// the lookups that follow writes, as a save or delete here does. A failed load shows in the error bar.
-    /// </summary>
-    public async Task ReloadAsync()
-    {
-        await Reload();
-        StateHasChanged();
-    }
-
-    /// <summary>Shows a failure of such a write above the list, where a failed Delete shows; the list stays as it was.</summary>
-    public void ShowActionError(string message)
-    {
-        _actionError = message;
-        StateHasChanged();
-    }
-
     private void ShowCreate() => Open(new LibraryEdit<TItem>(NewItem(), false), "add");
 
     private void ShowEdit(TItem item) => Open(new LibraryEdit<TItem>(CopyItem(item), true), $"edit-{item.Id}");

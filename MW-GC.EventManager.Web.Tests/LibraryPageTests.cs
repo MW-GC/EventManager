@@ -89,26 +89,6 @@ public sealed class LibraryPageTests : IDisposable
         Assert.ContainsSingle(games.FindAll("fluent-button[title='Card view']"));
     }
 
-    // ---- A write the using page sends itself (#126: the Activities Save Comments) -----------------
-
-    [TestMethod]
-    public async Task ReloadAsync_ReadsTheListAgain_AndShowActionError_ShowsAboveTheList()
-    {
-        var page = Themes();
-        var reads = api.Count(HttpMethod.Get, "/api/themes");
-        api.Json(HttpMethod.Get, "/api/themes", new[] { cozy });
-
-        await page.InvokeAsync(() => page.Instance.ReloadAsync());
-
-        Assert.AreEqual(reads + 1, api.Count(HttpMethod.Get, "/api/themes"));
-        page.WaitForAssertion(() => Assert.Contains("Cozy", Assert.ContainsSingle(page.Rows())));
-        Assert.IsEmpty(page.PageAlerts());
-
-        await page.InvokeAsync(() => page.Instance.ShowActionError("The comments were not saved."));
-        Assert.AreEqual("The comments were not saved.", Assert.ContainsSingle(page.PageAlerts()));
-        Assert.Contains("Cozy", Assert.ContainsSingle(page.Rows()));
-    }
-
     // ---- Delete confirmation and the busy guard ----------------------------------------------------
 
     [TestMethod]

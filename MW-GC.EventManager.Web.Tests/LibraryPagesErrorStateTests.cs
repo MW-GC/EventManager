@@ -226,46 +226,6 @@ public sealed class LibraryPagesErrorStateTests : IDisposable
         Assert.AreEqual($"The activity was not {verb}. {ServerError}", Assert.ContainsSingle(page.PageAlerts()));
     }
 
-    [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task ActivitiesFailedCommentSaveKeepsTextAndButton(bool offline)
-    {
-        var (page, api, existing) = ActivitiesPage();
-        var path = $"/api/activities/{existing.Id}/comments";
-        if (offline) api.Offline(HttpMethod.Patch, path);
-        else api.Status(HttpMethod.Patch, path, HttpStatusCode.InternalServerError);
-        await page.Find("fluent-button[title=Details]").ClickAsync(new());
-        Assert.AreEqual("Old note", page.Find("fluent-dialog fluent-text-area").GetAttribute("value"));
-        Assert.IsTrue(page.Dialog().Button("Save Comments").IsBusy());
-        await page.Find("fluent-dialog fluent-text-area").ChangeAsync(new ChangeEventArgs { Value = "Typed but not saved" });
-        var reads = api.Count(HttpMethod.Get, "/api/activities");
-
-        await page.Dialog().Button("Save Comments").ClickAsync(new());
-
-        Assert.Contains("Typed but not saved", Assert.ContainsSingle(api.Bodies(HttpMethod.Patch, path))!);
-        Assert.AreEqual("Typed but not saved", page.Find("fluent-dialog fluent-text-area").GetAttribute("value"));
-        Assert.IsFalse(page.Dialog().Button("Save Comments").IsBusy());
-        Assert.AreEqual(reads, api.Count(HttpMethod.Get, "/api/activities"));
-        Assert.AreEqual(ApiResult.CommentsNotSaved(offline ? Unreachable : ServerError), Assert.ContainsSingle(page.Dialog().Alerts()));
-
-        // No false success: the stored comment is unchanged, so reopening the dialog shows the old note.
-        await page.Dialog().Button("Close").ClickAsync(new());
-        await page.Find("fluent-button[title=Details]").ClickAsync(new());
-        Assert.AreEqual("Old note", page.Find("fluent-dialog fluent-text-area").GetAttribute("value"));
-        await page.Find("fluent-dialog fluent-text-area").ChangeAsync(new ChangeEventArgs { Value = "Typed but not saved" });
-
-        // A retry that succeeds clears the error and stores the text.
-        api.Status(HttpMethod.Patch, path, HttpStatusCode.NoContent);
-        await page.Dialog().Button("Save Comments").ClickAsync(new());
-        Assert.AreEqual(2, api.Count(HttpMethod.Patch, path));
-        Assert.Contains("Typed but not saved", api.Bodies(HttpMethod.Patch, path)[1]!);
-        Assert.IsEmpty(page.Dialog().Alerts());
-        Assert.AreEqual("Typed but not saved", page.Find("fluent-dialog fluent-text-area").GetAttribute("value"));
-        Assert.IsTrue(page.Dialog().Button("Save Comments").IsBusy());
-        Assert.AreEqual(reads + 1, api.Count(HttpMethod.Get, "/api/activities"));
-    }
-
     private static IElement RulesBox(IRenderedComponent<Activities> page) =>
         page.Find("fluent-dialog fluent-text-area[placeholder='Rules for this activity...']");
 }

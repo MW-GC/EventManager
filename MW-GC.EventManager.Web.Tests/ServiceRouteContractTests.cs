@@ -17,6 +17,7 @@ namespace MW_GC.EventManager.Web.Tests;
 public sealed class ServiceRouteContractTests
 {
     private static readonly Guid Id = Guid.Parse("0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0");
+    private static readonly Guid CommentId = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
     private sealed record Row(Type Service, string Method, string Verb, string Path, Func<HttpClient, Task> Call)
     {
@@ -28,7 +29,8 @@ public sealed class ServiceRouteContractTests
         ? $"{service.Name[..service.Name.IndexOf('`')]}<{string.Join(",", service.GetGenericArguments().Select(a => a.Name))}>"
         : service.Name;
 
-    // {id} stands for the Guid the call passes; the API declares the same segment as {id:guid}.
+    // {id} and {commentId} stand for the Guids the call passes; the API declares the same segments as {id:guid}
+    // and {commentId:guid}.
     private static readonly Row[] Table =
     [
         new(typeof(GameService), nameof(GameService.GetAllAsync), "GET", "api/games", h => new GameService(h).GetAllAsync()),
@@ -50,6 +52,12 @@ public sealed class ServiceRouteContractTests
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.GetAsync), "GET", "api/events/{id}/metrics", h => new EventMetricsClient(h).GetAsync(Id)),
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.SaveAsync), "PUT", "api/events/{id}/metrics", h => new EventMetricsClient(h).SaveAsync(Id, new EventMetricsEntity(), null)),
 
+        // An Activity's Comments, each its own row under its Activity (#131, ADR 0001).
+        new(typeof(CommentClient), nameof(CommentClient.GetAllAsync), "GET", "api/activities/{id}/comments", h => new CommentClient(h).GetAllAsync(Id)),
+        new(typeof(CommentClient), nameof(CommentClient.AddAsync), "POST", "api/activities/{id}/comments", h => new CommentClient(h).AddAsync(Id, "Ran long")),
+        new(typeof(CommentClient), nameof(CommentClient.UpdateAsync), "PUT", "api/activities/{id}/comments/{commentId}", h => new CommentClient(h).UpdateAsync(Id, CommentId, "Ran long", null)),
+        new(typeof(CommentClient), nameof(CommentClient.DeleteAsync), "DELETE", "api/activities/{id}/comments/{commentId}", h => new CommentClient(h).DeleteAsync(Id, CommentId, null)),
+
         // The shared Library client, once per list it serves. It has no get-one call: no Library page reads one item.
         .. LibraryRows<GameEntity>("games"),
         .. LibraryRows<ThemeEntity>("themes"),
@@ -67,7 +75,7 @@ public sealed class ServiceRouteContractTests
 
     private static readonly Type[] Services =
     [
-        typeof(GameService), typeof(ActivityService), typeof(EventService), typeof(EventMetricsClient),
+        typeof(GameService), typeof(ActivityService), typeof(EventService), typeof(EventMetricsClient), typeof(CommentClient),
         typeof(LibraryClient<GameEntity>), typeof(LibraryClient<ThemeEntity>), typeof(LibraryClient<HolidayEntity>),
         typeof(LibraryClient<ActivityEntity>)
     ];
@@ -81,7 +89,7 @@ public sealed class ServiceRouteContractTests
             var (client, recorder) = Client(row);
             await row.Call(client);
 
-            var expected = $"{row.Verb} {row.Path.Replace("{id}", Id.ToString("D"))}";
+            var expected = $"{row.Verb} {Concrete(row.Path)}";
             var sent = recorder.Sent.Select(r => $"{r.Method.Method} {r.Path}").ToList();
             if (sent.Count != 1 || sent[0] != expected)
                 wrong.Add($"{Display(row.Service)}.{row.Method}: expected {expected}, sent [{string.Join(", ", sent)}]");
@@ -131,7 +139,7 @@ public sealed class ServiceRouteContractTests
         Assert.IsNotEmpty(routes);
 
         var unmatched = Table
-            .Where(r => !routes.Contains((r.Verb, r.Path.Replace("{id}", "{id:guid}"))))
+            .Where(r => !routes.Contains((r.Verb, r.Path.Replace("{id}", "{id:guid}").Replace("{commentId}", "{commentId:guid}"))))
             .Select(r => r.ToString())
             .ToList();
         Assert.IsEmpty(unmatched, "Route table rows with no matching API HttpTrigger:\n" + string.Join("\n", unmatched));
@@ -156,12 +164,16 @@ public sealed class ServiceRouteContractTests
         return routes;
     }
 
+    // The row's path with the Guids the call passes.
+    private static string Concrete(string path) =>
+        path.Replace("{id}", Id.ToString("D")).Replace("{commentId}", CommentId.ToString("D"));
+
     // A stub API that answers the row's own route with JSON null (so the Get methods return
     // instead of throwing on a 404), behind a handler that records what was sent.
     private static (HttpClient Client, RequestRecorder Recorder) Client(Row row)
     {
         var api = new StubApiHandler();
-        api.On(new HttpMethod(row.Verb), "/" + row.Path.Replace("{id}", Id.ToString("D")),
+        api.On(new HttpMethod(row.Verb), "/" + Concrete(row.Path),
             () => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("null", Encoding.UTF8, "application/json") });
         var recorder = new RequestRecorder(api);
         return (new HttpClient(recorder) { BaseAddress = new Uri("https://example.test/") }, recorder);

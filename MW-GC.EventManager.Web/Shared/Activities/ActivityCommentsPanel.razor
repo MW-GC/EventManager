@@ -1,0 +1,311 @@
+@* The Comments panel in the Activity details dialog (#131): every Comment of the Activity, oldest first as
+   the API returns them, each with its added date, and add, edit and delete one Comment at a time. Each
+   Comment is its own row with its own eTag (ADR 0001), so an edit or delete sends that Comment's tag as
+   If-Match: two Comments never conflict, and a stale tag on one shows the stale-edit message beside it with
+   Reload. The details dialog asks before discarding unsaved text (IsDirty), keeps itself open while a
+   request runs (SavingChanged), and shows the delete question for the panel (Ask). *@
+@using System.Globalization
+@inject CommentClient Client
+
+<div class="activity-comments">
+    <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Comments</FluentLabel>
+    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px;">
+        How this Activity went, oldest first. Each Comment keeps the date it was added.
+    </FluentLabel>
+    @if (_comments is null)
+    {
+        @if (_loadError is null)
+        {
+            <FluentProgressRing aria-label="Loading Comments..." />
+        }
+        else
+        {
+            @* Not an alert: like the Event metrics form, it is not a result of anything the user did here. *@
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true">
+                <span role="status">@_loadError</span>
+                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Loading="@_loading" OnClick="Load">Retry</FluentButton>
+            </FluentStack>
+        }
+    }
+    else
+    {
+        @if (_reloadError is not null)
+        {
+            <div role="alert" style="color: var(--error); margin-bottom: 8px;">@_reloadError</div>
+        }
+        @if (_comments.Count == 0)
+        {
+            <FluentLabel Style="color: var(--neutral-foreground-hint);">No Comments yet.</FluentLabel>
+        }
+        else
+        {
+            <ul aria-label="Comments" style="list-style: none; margin: 0; padding: 0;">
+                @foreach (var comment in _comments)
+                {
+                    var c = comment;
+                    var date = DateText(c);
+                    <li @key="c.Id" class="comment" style="padding: 8px 0; border-top: 1px solid var(--neutral-stroke-divider-rest);">
+                        <time datetime="@IsoDate(c)" style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">@date</time>
+                        @if (_editing?.Id == c.Id)
+                        {
+                            <div style="margin-top: 4px;">
+                                <FluentTextArea Value="@_editText" ValueChanged="@((string? v) => SetEditText(v))" Immediate="true"
+                                                Rows="3" Style="width: 100%;" Disabled="@Busy" aria-label="@($"Edit Comment from {date}")" />
+                                @if (_editError is not null)
+                                {
+                                    <div role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@_editError</div>
+                                }
+                            </div>
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" Style="margin-top: 6px;">
+                                <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Loading="@(_running == Request.Save)"
+                                              Disabled="@Busy" OnClick="SaveEdit">Save</FluentButton>
+                                <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" Disabled="@Busy" OnClick="CancelEdit">Cancel</FluentButton>
+                            </FluentStack>
+                        }
+                        else
+                        {
+                            <div class="comment-text" style="white-space: pre-wrap; line-height: 1.5; margin-top: 2px;">@c.Text</div>
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Style="margin-top: 4px;">
+                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" aria-label="@($"Edit Comment from {date}")"
+                                              Disabled="@(Busy || _editing is not null)" OnClick="@(() => StartEdit(c))">Edit</FluentButton>
+                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" aria-label="@($"Delete Comment from {date}")"
+                                              Loading="@(_running == Request.Delete && _deleting == c.Id)"
+                                              Disabled="@(Busy || _editing is not null)" OnClick="@(() => AskDelete(c))">Delete</FluentButton>
+                            </FluentStack>
+                        }
+                        @if (_row is { } row && row.Id == c.Id)
+                        {
+                            <div role="alert" style="color: var(--error); margin-top: 6px;">@row.Message</div>
+                            @if (row.Reload)
+                            {
+                                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Style="margin-top: 6px;"
+                                              Loading="@_loading" Disabled="@Busy" OnClick="Load">Reload</FluentButton>
+                            }
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        <div style="margin-top: 12px;">
+            <FluentTextArea Value="@_newText" ValueChanged="@((string? v) => SetNewText(v))" Immediate="true" Rows="3" Style="width: 100%;"
+                            Disabled="@Busy" aria-label="New Comment" Placeholder="How did it go?" />
+            @if (_addError is not null)
+            {
+                <div role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@_addError</div>
+            }
+        </div>
+        <FluentStack Orientation="Orientation.Horizontal" Style="margin-top: 8px;">
+            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Loading="@(_running == Request.Add)"
+                          Disabled="@Busy" OnClick="Add">Add Comment</FluentButton>
+        </FluentStack>
+    }
+</div>
+
+@code {
+    // The Activity whose Comments this panel shows. The dialog keys the panel by it, so another Activity gets a new panel.
+    [Parameter] public Guid ActivityId { get; set; }
+    // True while an add, save or delete runs and false when it ends: the dialog neither closes nor asks meanwhile.
+    [Parameter] public EventCallback<bool> SavingChanged { get; set; }
+    // Shows a question (the delete confirmation) in the dialog's own ConfirmDialog.
+    [Parameter] public EventCallback<ConfirmRequest> Ask { get; set; }
+
+    public const string StaleMessage = "This Comment was changed by someone else. Reload and try again.";
+
+    // The API's limit and messages (CommentValidator, FieldRules.CommentTextMaxLength, docs/api-validation.md), copied, not shared.
+    private const int MaxLength = 1000;
+    private const string RequiredMessage = "Comment text is required.";
+    private const string TooLongMessage = "Comment text must be 1000 characters or fewer.";
+
+    private enum Request { None, Add, Save, Delete }
+
+    // A message beside one Comment, with Reload when the list must be read again (409 or 404).
+    private sealed record RowMessage(Guid Id, string Message, bool Reload);
+
+    // The list as the API returned it, oldest first; null until the first read succeeds.
+    private List<CommentEntity>? _comments;
+    private bool _loading;
+    private string? _loadError;
+    private string? _reloadError;
+    private Request _running;
+    private Guid? _deleting;
+    private RowMessage? _row;
+    private string _newText = string.Empty;
+    private string? _addError;
+    // The Comment being edited (one at a time) and the text typed for it.
+    private CommentEntity? _editing;
+    private string _editText = string.Empty;
+    private string? _editError;
+
+    private bool Busy => _running != Request.None || _loading;
+
+    /// <summary>Text typed that is not saved: anything in the add box, or an edit that differs from the stored text.</summary>
+    internal bool IsDirty => _newText.Length > 0 || (_editing is { } c && _editText != c.Text);
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private static string DateText(CommentEntity c) => c.CreatedUtc.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
+
+    private static string IsoDate(CommentEntity c) =>
+        c.CreatedUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+
+    // The tag as the API sent it in the body, sent back as If-Match; null when the API sent none.
+    private static string? Tag(CommentEntity c) => c.ETag == default ? null : c.ETag.ToString();
+
+    // The API's text rule: trimmed, required, at most MaxLength characters. Null when the text may be sent.
+    private static string? Check(string typed, out string text)
+    {
+        text = typed.Trim();
+        if (text.Length == 0) return RequiredMessage;
+        return text.Length > MaxLength ? TooLongMessage : null;
+    }
+
+    private void SetNewText(string? value)
+    {
+        _newText = value ?? string.Empty;
+        _addError = null;
+    }
+
+    private void SetEditText(string? value)
+    {
+        _editText = value ?? string.Empty;
+        _editError = null;
+    }
+
+    // The first read, Retry after a failed one, and Reload after a stale edit or delete: replaces the list and
+    // drops an open edit, the only way typed edit text is dropped without the user choosing Cancel.
+    private async Task Load()
+    {
+        if (Busy) return;
+        _loading = true;
+        try
+        {
+            var result = await Client.GetAllAsync(ActivityId);
+            if (result.Error is { } error)
+            {
+                if (_comments is null) _loadError = $"Comments could not be loaded. {error}";
+                else _reloadError = $"Comments could not be reloaded. {error}";
+                return;
+            }
+            _comments = result.Comments!;
+            _loadError = _reloadError = null;
+            _row = null;
+            _editing = null;
+            _editText = string.Empty;
+            _editError = null;
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task Add()
+    {
+        // One request at a time: a second click while one runs sends nothing.
+        if (Busy || _comments is null) return;
+        if (Check(_newText, out var text) is { } message)
+        {
+            _addError = message;
+            return;
+        }
+        _addError = null;
+        await RunAsync(Request.Add, async () =>
+        {
+            var result = await Client.AddAsync(ActivityId, text);
+            if (result.Comment is not { } added)
+            {
+                _addError = $"The Comment was not added. {result.Error}";
+                return;
+            }
+            _comments.Add(added);
+            _newText = string.Empty;
+        });
+    }
+
+    private void StartEdit(CommentEntity c)
+    {
+        if (Busy || _editing is not null) return;
+        _editing = c;
+        _editText = c.Text;
+        _editError = null;
+        if (_row?.Id == c.Id && !_row.Reload) _row = null;
+    }
+
+    private void CancelEdit()
+    {
+        if (Busy) return;
+        if (_editing is { } c && _row?.Id == c.Id && !_row.Reload) _row = null;
+        _editing = null;
+        _editText = string.Empty;
+        _editError = null;
+    }
+
+    private async Task SaveEdit()
+    {
+        if (Busy || _editing is not { } c || _comments is null) return;
+        if (Check(_editText, out var text) is { } message)
+        {
+            _editError = message;
+            return;
+        }
+        _editError = null;
+        _row = null;
+        await RunAsync(Request.Save, async () =>
+        {
+            var result = await Client.UpdateAsync(ActivityId, c.Id, text, Tag(c));
+            if (Failed(c, result, "saved")) return;
+            // The API keeps the added date; the returned Comment carries it and the new tag.
+            var index = _comments.FindIndex(x => x.Id == c.Id);
+            if (index >= 0) _comments[index] = result.Comment!;
+            _editing = null;
+            _editText = string.Empty;
+        });
+    }
+
+    private Task AskDelete(CommentEntity c)
+    {
+        if (Busy || _editing is not null) return Task.CompletedTask;
+        return Ask.InvokeAsync(ConfirmRequest.Delete("Delete Comment", $"Delete Comment from {DateText(c)}?", () => Delete(c)));
+    }
+
+    private async Task Delete(CommentEntity c)
+    {
+        if (Busy || _comments is null) return;
+        _row = null;
+        _deleting = c.Id;
+        await RunAsync(Request.Delete, async () =>
+        {
+            var result = await Client.DeleteAsync(ActivityId, c.Id, Tag(c));
+            if (Failed(c, result, "deleted")) return;
+            _comments.RemoveAll(x => x.Id == c.Id);
+        });
+        _deleting = null;
+    }
+
+    // A failed edit or delete: the message beside that Comment. A 409 or 404 also offers Reload; typed text stays.
+    private bool Failed(CommentEntity c, CommentResult result, string verb)
+    {
+        if (result.Conflict) _row = new(c.Id, StaleMessage, true);
+        else if (result.NotFound) _row = new(c.Id, result.Error!, true);
+        else if (result.Error is { } error) _row = new(c.Id, $"The Comment was not {verb}. {error}", false);
+        else return false;
+        return true;
+    }
+
+    // Runs one write with every button disabled and the dialog held open. A delete starts from the dialog's
+    // question rather than this panel's own button, so the panel renders itself before and after.
+    private async Task RunAsync(Request request, Func<Task> write)
+    {
+        _running = request;
+        StateHasChanged();
+        await SavingChanged.InvokeAsync(true);
+        try
+        {
+            await write();
+        }
+        finally
+        {
+            _running = Request.None;
+            await SavingChanged.InvokeAsync(false);
+            StateHasChanged();
+        }
+    }
+}

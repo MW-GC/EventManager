@@ -11,8 +11,8 @@ using MW_GC.EventManager.Web.Shared.Library;
 namespace MW_GC.EventManager.Web.Tests;
 
 // Issue #126: the Activities page on the shared Library page. A new Activity needs a Game: the form says so
-// under the Game field and sends nothing until one is chosen. The rest is the page as it was: the details
-// dialog with its single Comments note, search with the Game filter, and no card view.
+// under the Game field and sends nothing until one is chosen. The rest is the page as it was: search with
+// the Game filter, and no card view.
 [TestClass]
 public sealed class ActivitiesPageTests : IDisposable
 {
@@ -129,68 +129,7 @@ public sealed class ActivitiesPageTests : IDisposable
         Assert.IsNull(ActivityValidator.Validate(new ActivityEntity { Name = "Ghost lap", GameId = Guid.NewGuid() }));
     }
 
-    // ---- Details and the old Comments note -----------------------------------------------------
-
-    [TestMethod]
-    public async Task Details_ShowTheActivity_AndSaveComments_StoresTheNote_ReloadsTheList_AndReadsItBack()
-    {
-        var page = Open();
-        var path = $"/api/activities/{race.Id}/comments";
-        api.Status(HttpMethod.Patch, path, HttpStatusCode.NoContent);
-        await RowButton(page, "Race", "Details").ClickAsync(new());
-
-        var dialog = page.FormDialog();
-        Assert.AreEqual("Race", dialog.GetAttribute("aria-label"));
-        Assert.Contains("Kart", dialog.TextContent);
-        Assert.Contains("Three laps", dialog.TextContent);
-        Assert.Contains("Spooky", dialog.TextContent);
-        Assert.AreEqual("Old note", CommentsBox(page).GetAttribute("value"));
-        Assert.IsTrue(page.FormDialog().Button("Save Comments").IsBusy());
-
-        var stored = new ActivityEntity { Id = race.Id, Name = race.Name, GameId = kart.Id, Description = race.Description, ThemeIds = [spooky.Id], Comments = "Ran long" };
-        api.Json(HttpMethod.Get, "/api/activities", new[] { stored, sprint, stock });
-        var reads = api.Count(HttpMethod.Get, "/api/activities");
-        await CommentsBox(page).ChangeAsync(new ChangeEventArgs { Value = "Ran long" });
-        await page.FormDialog().Button("Save Comments").ClickAsync(new());
-
-        Assert.Contains("Ran long", Assert.ContainsSingle(api.Bodies(HttpMethod.Patch, path))!);
-        Assert.IsTrue(page.HasFormDialog());
-        Assert.IsEmpty(page.FormDialog().Alerts());
-        Assert.IsTrue(page.FormDialog().Button("Save Comments").IsBusy());
-        Assert.AreEqual(reads + 1, api.Count(HttpMethod.Get, "/api/activities"));
-        Assert.AreEqual(0, api.Count(HttpMethod.Put, $"/api/activities/{race.Id}"));
-
-        await page.FormDialog().Button("Close").ClickAsync(new());
-        Assert.IsFalse(page.HasFormDialog());
-        await RowButton(page, "Race", "Details").ClickAsync(new());
-        Assert.AreEqual("Ran long", CommentsBox(page).GetAttribute("value"));
-        Assert.IsEmpty(page.PageAlerts());
-    }
-
-    // A comment save that fails after its details dialog was closed says so above the list, through the shared
-    // page's error bar, as the old page did. The page itself never lets the dialog close while the save runs, so
-    // the test closes it through the page's own close method to reach that path.
-    [TestMethod]
-    public async Task CommentSaveFailingAfterItsDialogClosed_ShowsAboveTheList()
-    {
-        var page = Open();
-        var path = $"/api/activities/{race.Id}/comments";
-        var gate = api.Hold(HttpMethod.Patch, path, () => new HttpResponseMessage(HttpStatusCode.InternalServerError));
-        await RowButton(page, "Race", "Details").ClickAsync(new());
-        await CommentsBox(page).ChangeAsync(new ChangeEventArgs { Value = "Ran long" });
-        var save = page.FormDialog().Button("Save Comments").ClickAsync(new());
-        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Close").IsBusy()));
-
-        await page.InvokeAsync(() => typeof(Activities).GetMethod("CloseDetails", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(page.Instance, null));
-        gate.SetResult();
-        await save;
-
-        page.WaitForAssertion(() => Assert.AreEqual(
-            "The comments were not saved. The server had a problem (HTTP 500). Try again. Your text is kept.",
-            Assert.ContainsSingle(page.PageAlerts())));
-        Assert.IsFalse(page.HasFormDialog());
-        Assert.HasCount(3, page.Rows());
-    }
+    // The details dialog and its Comments panel are covered in ActivityCommentsPanelTests (#131).
 
     // ---- Search, the Game filter and the view --------------------------------------------------
 
@@ -246,8 +185,6 @@ public sealed class ActivitiesPageTests : IDisposable
 
     private static IElement GameFilter(IRenderedComponent<Activities> page) =>
         page.FindAll("fluent-select").Single(s => s.Closest("fluent-dialog") is null);
-
-    private static IElement CommentsBox(IRenderedComponent<Activities> page) => page.FormDialog().QuerySelector("fluent-text-area")!;
 
     private static IElement Search(IRenderedComponent<Activities> page) =>
         page.FindAll("fluent-search").Single(s => s.Closest("fluent-dialog") is null);
