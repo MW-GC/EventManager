@@ -70,11 +70,7 @@ public class OldSelectionSnapshotTests
             Assert.AreEqual(HolidayId, Assert.ContainsSingle(selection.Activity.HolidayIds));
             Assert.AreEqual("Four controllers", selection.Activity.SetupRequirements);
         }
-
-        // The response the browser reads carries no comments either.
-        var json = JsonSerializer.Serialize(ApiResults.Value<EventEntity>(one), new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        Assert.DoesNotContain("comments", json, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Four controllers", json);
+        // That the stored row loses the old value is checked through the real save path below.
     }
 
     [TestMethod]

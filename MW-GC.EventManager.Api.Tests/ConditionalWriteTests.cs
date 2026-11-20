@@ -5,6 +5,7 @@ using Azure.Data.Tables;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
+using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
@@ -28,6 +29,10 @@ public class ConditionalWriteTests
     {
         game = h.SeedGame("Owner");
         game.ETag = TableMocks.NextETag(); // as if storage had written it
+        // The old-text conversion already finished here (its marker is stored), so an Activity PUT
+        // writes nothing but the Activity; a PUT before the conversion is covered in ActivityNoteConversionTests.
+        h.CommentTableOtherRows[$"{ActivityNoteConversion.MarkerPartitionKey}|{ActivityNoteConversion.MarkerRowKey}"] =
+            new TableEntity(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey);
     }
 
     public static IEnumerable<object?[]> Kinds => [["game"], ["theme"], ["holiday"], ["activity"], ["event"]];

@@ -7,7 +7,7 @@ using MW_GC.EventManager.Shared.Entities;
 namespace MW_GC.EventManager.Api.Tests;
 
 /// <summary>
-/// The old-note conversion (#130) against real Table Storage (Azurite). Skipped unless
+/// The old-text conversion (#130) against real Table Storage (Azurite). Skipped unless
 /// <c>EM_AZURITE_CONNECTION</c> names the Azurite connection string, so <c>dotnet test</c> on the
 /// solution needs no emulator. When <c>EM_API_URL</c> also names a running API on the same Azurite
 /// (ending in <c>/api</c>), the converted Comments are read back through its list route too.
@@ -70,7 +70,7 @@ public class ActivityNoteConversionAzuriteTests
             Flow(before == 0, "list route before the conversion", $"{before} Comments for the seeded Activities");
         }
 
-        // The upgrade case: the marker is removed so this pass sees the old notes, as a first start over old data would.
+        // The upgrade case: the marker is removed so this pass sees the old texts, as a first start over old data would.
         await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
         await conversion.RunAsync(ct);
 
@@ -130,6 +130,52 @@ public class ActivityNoteConversionAzuriteTests
             foreach (var id in seeded.Keys) total += (await ListAsync(apiUrl, id, ct)).Count;
             Flow(total == 2, "list route after the reruns", $"{total} Comments for the seeded Activities");
         }
+    }
+
+    [TestMethod]
+    public async Task APutBeforeAnyPassKeepsTheOldTextAsACommentInRealStorage()
+    {
+        var connection = Environment.GetEnvironmentVariable(ConnectionVariable);
+        if (string.IsNullOrWhiteSpace(connection))
+            Assert.Inconclusive($"Azurite test skipped: set {ConnectionVariable} to an Azurite connection string.");
+        var ct = TestContext.CancellationToken;
+
+        // A fresh conversion and Activity routes over real storage, as a host that has not run its startup pass.
+        var service = new TableServiceClient(connection);
+        var games = new TableStore<GameEntity>(service, "Games", "Game");
+        var activities = new TableStore<ActivityEntity>(service, "Activities", "Activity");
+        var comments = new TableStore<CommentEntity>(service, "ActivityComments", "Comment");
+        var conversion = new ActivityNoteConversion(activities, comments, service, new ListLogger<ActivityNoteConversion>());
+        var activityApi = new MW_GC.EventManager.API.Functions.ActivityFunctions(
+            activities, games, comments, conversion, new ListLogger<MW_GC.EventManager.API.Functions.ActivityFunctions>());
+        var commentApi = new MW_GC.EventManager.API.Functions.CommentFunctions(
+            comments, activities, new TableStore<EventEntity>(service, "Events", "Event"),
+            new ListLogger<MW_GC.EventManager.API.Functions.CommentFunctions>());
+
+        var game = new GameEntity { Id = Guid.NewGuid(), Name = "Azurite game" };
+        await games.UpsertAsync(game, ct);
+        var activityTable = service.GetTableClient("Activities");
+        var activityId = await SeedRawAsync(activityTable, game.Id, "Old activity", "  Old text  ", ct);
+        var seeded = (await activityTable.GetEntityAsync<TableEntity>("Activity", activityId.ToString("D"), cancellationToken: ct)).Value;
+        var raw = service.GetTableClient("ActivityComments");
+        await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
+        var markerBefore = await raw.GetEntityIfExistsAsync<TableEntity>(
+            ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
+        Flow(!markerBefore.HasValue, "no marker before the PUT", $"Activity {activityId} holds \"{seeded.GetString("Comments")}\"");
+
+        var put = await activityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, ct);
+        var stored = (await activityTable.GetEntityAsync<TableEntity>("Activity", activityId.ToString("D"), cancellationToken: ct)).Value;
+        Flow(ApiResults.Status(put) == 200 && stored.GetString("Name") == "Renamed" && !stored.ContainsKey("Comments"),
+            "PUT replaced the row", $"status {ApiResults.Status(put)}, name \"{stored.GetString("Name")}\", Comments column present: {stored.ContainsKey("Comments")}");
+
+        var listed = ApiResults.Value<List<CommentEntity>>(await commentApi.List(TestRequests.Empty(), activityId, ct));
+        Flow(listed.Count == 1 && listed[0].Text == "Old text" && listed[0].CreatedUtc == seeded.Timestamp && listed[0].EventId is null,
+            "old text kept as a Comment", string.Join("; ", listed.Select(c => $"text \"{c.Text}\", createdUtc {c.CreatedUtc:O}")));
+
+        var again = await activityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed again" }), activityId, ct);
+        var afterSecond = ApiResults.Value<List<CommentEntity>>(await commentApi.List(TestRequests.Empty(), activityId, ct));
+        Flow(ApiResults.Status(again) == 200 && afterSecond.Count == 1 && afterSecond[0].Id == listed[0].Id,
+            "second PUT", $"status {ApiResults.Status(again)}, {afterSecond.Count} Comments");
     }
 
     // An Activity row as an older version stored it, with the old single text (or another value) in its

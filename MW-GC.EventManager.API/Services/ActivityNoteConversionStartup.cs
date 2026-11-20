@@ -7,9 +7,12 @@ namespace MW_GC.EventManager.API.Services;
 /// <summary>
 /// Runs <see cref="ActivityNoteConversion"/> once each time the Function App host starts, so the
 /// conversion needs no manual step. It runs in the background: the host does not wait for it,
-/// and a failure is logged and never stops the host. The next start retries an unfinished pass.
-/// The conversion is resolved inside the guard, not injected, because building it builds the
-/// table stores, which create their tables and can fail when storage or its auth is down.
+/// and a failure is logged and never stops the host. Until the marker is stored, every Activity
+/// write that replaces a row also runs the pass first (<see cref="ActivityNoteConversion.EnsureConvertedAsync"/>),
+/// waiting for this one when it is still running, so a request served before this pass finishes,
+/// or after it failed, never drops an old text. The next start or Activity write retries an
+/// unfinished pass. The conversion is resolved inside the guard, not injected, because building
+/// it builds the table stores, which create their tables and can fail when storage or its auth is down.
 /// </summary>
 internal sealed class ActivityNoteConversionStartup(
     IServiceProvider services,
@@ -28,7 +31,7 @@ internal sealed class ActivityNoteConversionStartup(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Converting old Activity notes into Comments failed; the next host start retries it.");
+            logger.LogError(ex, "Converting old Activity texts into Comments failed; the next host start or Activity write retries it.");
         }
     }
 }

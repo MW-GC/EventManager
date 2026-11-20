@@ -28,7 +28,8 @@ builder.Services.AddSingleton(sp =>
     new TableStore<EventMetricsEntity>(sp.GetRequiredService<TableServiceClient>(), "EventMetrics", "Metrics"));
 builder.Services.AddSingleton(sp =>
     new TableStore<CommentEntity>(sp.GetRequiredService<TableServiceClient>(), "ActivityComments", "Comment"));
-// Each old Activity note becomes that Activity's first Comment (#130), once, in the background at host start.
+// Each old Activity text becomes that Activity's first Comment (#130), once: in the background at host
+// start, and before any Activity PUT until the pass has finished (#133).
 builder.Services.AddSingleton<ActivityNoteConversion>();
 builder.Services.AddHostedService<ActivityNoteConversionStartup>();
 // The anonymous Event feedback page (#101): its own tables, and a per-instance like rate limit.
