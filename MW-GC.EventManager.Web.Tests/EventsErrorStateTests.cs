@@ -10,7 +10,7 @@ using MW_GC.EventManager.Web.Services;
 namespace MW_GC.EventManager.Web.Tests;
 
 // The Events page rendered with bUnit against a stub API: lookups fail independently, and Select
-// Winner, Delete and Save Comments never report a success the API did not confirm.
+// Winner and Delete never report a success the API did not confirm.
 [TestClass]
 public sealed class EventsErrorStateTests : IDisposable
 {
@@ -42,7 +42,9 @@ public sealed class EventsErrorStateTests : IDisposable
            .Json(HttpMethod.Get, "/api/games", new[] { new GameEntity { Id = gameA, Name = "A" }, new GameEntity { Id = gameB, Name = "B" } })
            .Json(HttpMethod.Get, "/api/activities", new[] { first, second })
            .Json(HttpMethod.Get, "/api/themes", new[] { new ThemeEntity { Name = "Spooky" } })
-           .Json(HttpMethod.Get, "/api/holidays", new[] { new HolidayEntity { Name = "Halloween" } });
+           .Json(HttpMethod.Get, "/api/holidays", new[] { new HolidayEntity { Name = "Halloween" } })
+           // The Winner's Comments panel in Event details (#132): none yet.
+           .Json(HttpMethod.Get, $"/api/activities/{first.Id}/comments", Array.Empty<CommentEntity>());
         harness = new PageHarness(api);
     }
 
@@ -151,24 +153,6 @@ public sealed class EventsErrorStateTests : IDisposable
         Assert.Contains("Game night", Assert.ContainsSingle(page.Rows()));
         Assert.AreEqual(reads, api.Count(HttpMethod.Get, "/api/events"));
         Assert.AreEqual($"The event was not deleted. {ServerError}", Assert.ContainsSingle(page.PageAlerts()));
-    }
-
-    [TestMethod]
-    public async Task FailedCommentSaveUsesTheSharedMessageAndKeepsTheText()
-    {
-        var page = Loaded();
-        await page.Find("fluent-button[title=Details]").ClickAsync(new());
-        var path = $"/api/activities/{first.Id}/comments";
-        api.Status(HttpMethod.Patch, path, HttpStatusCode.InternalServerError);
-        await page.Find("fluent-dialog fluent-text-area").ChangeAsync(new ChangeEventArgs { Value = "Typed but not saved" });
-
-        await page.Dialog().Button("Save Comments").ClickAsync(new());
-
-        Assert.Contains("Typed but not saved", Assert.ContainsSingle(api.Bodies(HttpMethod.Patch, path))!);
-        Assert.AreEqual(ApiResult.CommentsNotSaved(ServerError), Assert.ContainsSingle(page.Dialog().Alerts()));
-        Assert.AreEqual("Typed but not saved", page.Find("fluent-dialog fluent-text-area").GetAttribute("value"));
-        // Still dirty: Save Comments stays enabled for a retry.
-        Assert.IsFalse(page.Dialog().Button("Save Comments").IsBusy());
     }
 
     [TestMethod]

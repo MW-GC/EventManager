@@ -1,12 +1,14 @@
 @* The Event details dialog: its Selections as cards, Select Winner, the Like count and feedback
-   link (#101), the Winner Activity's comment, and the Event metrics form (EventMetricsForm, #135,
-   whose unsaved values join the Discard question). It owns all of that state, its busy guard and its
-   own "Discard changes?" question, so the later Comment entry grows here without
-   touching the list or the create-and-edit dialog. The page opens it (Open) and refreshes its list
-   when a Winner was saved. *@
+   link (#101), the Comments panel of the Winner Activity (ActivityCommentsPanel, #132), and the Event
+   metrics form (EventMetricsForm, #135). A Comment added here lands on the Winner Activity and records
+   this Event; the panel reads the Activity's Comments live each time it opens, never this Event's
+   Selection snapshot. The dialog owns its busy guard (Select Winner, a metrics save, a Comment request)
+   and its own question (Discard changes?, which unsaved metrics or Comment text raise, and the panel's
+   Delete Comment), without touching the list or the create-and-edit dialog. The page opens it (Open)
+   and refreshes its list when a Winner was saved. *@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@using MW_GC.EventManager.Web.Shared.Activities
 @inject EventService EventSvc
-@inject ActivityService ActivitySvc
 @inject FocusReturn Focus
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -117,29 +119,17 @@
                                 }
                             </FluentGrid>
 
-                            @* Comments editing when this game is the winner *@
+                            @* #132: the Winner's Comments, read live from the Activity's own route every time the
+                               panel opens, never from this Event's Selection snapshot. A Comment added here lands on
+                               the Winner Activity and records this Event. Keyed by the Activity, so a new Winner gets
+                               a new panel; an Event with no Winner shows none. *@
                             @if (isWinner)
                             {
                                 <FluentDivider />
-                                <div>
-                                    <FluentLabel Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Event Manager Comments (Activity note, shared across all Events)</FluentLabel>
-                                    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-bottom: 4px;">
-                                        Stored on the activity, not on this Event: every Event that uses this activity, and the Activities page, show the same note.
-                                    </FluentLabel>
-                                    <FluentTextArea Value="@GetDetailComment(selection.Activity.Id)" Immediate="true"
-                                                    ValueChanged="@(v => SetDetailComment(selection.Activity.Id, v))"
-                                                    Style="width: 100%;" Rows="3"
-                                                    Placeholder="Add notes about this activity's success, challenges, or improvements..." />
-                                    @if (_detailCommentError is not null)
-                                    {
-                                        <div role="alert" style="color: var(--error); margin-top: 6px;">@_detailCommentError</div>
-                                    }
-                                    <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Style="margin-top: 6px;"
-                                                  Disabled="@(!IsDetailCommentDirty(selection.Activity.Id))"
-                                                  OnClick="@(() => SaveDetailComment(selection.Activity.Id))">
-                                        Save Comments
-                                    </FluentButton>
-                                </div>
+                                <ActivityCommentsPanel @key="selection.Activity.Id" @ref="_comments" ActivityId="selection.Activity.Id"
+                                                       EventId="_detailEvent.Id"
+                                                       SavingChanged="@((bool saving) => _savingComments = saving)"
+                                                       Ask="@((ConfirmRequest question) => _confirm = question)" />
                             }
                         </FluentStack>
                     </FluentCard>
@@ -165,7 +155,8 @@
 }
 
 @code {
-    // The library, as the page loaded it: Game icons, and the Activities whose comment is edited here.
+    // The library, as the page loaded it: Game icons. Activities is passed but not read here since #132
+    // (the Winner's Comments are read live through the Comments panel).
     [Parameter] public List<GameEntity>? Games { get; set; }
     [Parameter] public List<ActivityEntity>? Activities { get; set; }
     // A Winner was saved: the page refreshes its list (never throws; a failure names Events in its error bar).
@@ -176,22 +167,21 @@
     [Parameter] public EventCallback<string> ActionError { get; set; }
 
     private EventEntity? _detailEvent;
-    // The open details dialog: a late Select Winner or comment save never touches a newer one.
+    // The open details dialog: a late Select Winner never touches a newer one.
     private readonly DialogSession _details = new();
     // Set while one Select Winner runs; every Select Winner button is disabled meanwhile.
     private bool _selectingWinner;
-    // The open question (Discard changes?), if any.
+    // The open question (Discard changes?, or the Comments panel's Delete Comment), if any.
     private ConfirmRequest? _confirm;
     // A failed Select Winner, shown in the details dialog; the previous winner stays.
     private string? _winnerError;
     // The open Event's metrics form (#135), and whether its save is running.
     private EventMetricsForm? _metrics;
     private bool _savingMetrics;
-    private bool Busy => _selectingWinner || _savingMetrics;
-
-    // Detail dialog comment editing
-    private Dictionary<Guid, string> _detailComments = [];
-    private string? _detailCommentError;
+    // The Winner's Comments panel (#132), and whether one of its adds, saves or deletes is running.
+    private ActivityCommentsPanel? _comments;
+    private bool _savingComments;
+    private bool Busy => _selectingWinner || _savingMetrics || _savingComments;
 
     // A row's Details button.
     internal void Open(EventEntity e) { ShowDetails(e); StateHasChanged(); }
@@ -199,8 +189,6 @@
     private void ShowDetails(EventEntity e)
     {
         _detailEvent = e;
-        _detailComments = [];
-        _detailCommentError = null;
         _winnerError = null;
         _likesFor = null;
         _feedbackLink = _feedbackLinkStatus = _feedbackLinkError = null;
@@ -267,29 +255,28 @@
         }
     }
 
-    // The Close button closes at once without asking, but never while Select Winner or a metrics save runs.
+    // The Close button closes at once without asking, but never while Select Winner, a metrics save or a
+    // Comment request runs.
     private void CancelDetails() { if (!Busy) CloseDetails(); }
-    private void CloseDetails() { _detailEvent = null; _details.Close(); _ = Focus.RestoreAsync(); }
-    // Overlay click or Escape: an unsaved comment or unsaved Event metrics ask first.
+    private void CloseDetails() { _detailEvent = null; _comments = null; _details.Close(); _ = Focus.RestoreAsync(); }
+    // Overlay click or Escape: unsaved Comment text or unsaved Event metrics ask first.
     private void DismissDetails() =>
-        _confirm = ConfirmRequest.ForDismiss(_confirm, Busy,
-            _detailComments.Keys.Any(IsDetailCommentDirty) || _metrics?.IsDirty == true, CloseDetails);
+        _confirm = ConfirmRequest.ForDismiss(_confirm, Busy, _comments?.IsDirty == true || _metrics?.IsDirty == true, CloseDetails);
 
-    // A Discard closes this dialog, which returns focus to its opener itself.
+    // A Discard closes this dialog, which returns focus to its opener itself; a Delete Comment leaves it open,
+    // and the question gives focus back to it as it closes.
     private async Task Confirmed(ConfirmRequest confirm)
     {
         if (_confirm != confirm) return;
         _confirm = null;
         await confirm.OnConfirm();
-        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
     }
 
-    // Keep editing leaves focus in the open dialog.
+    // Keep editing, or Cancel on a Delete Comment, leaves focus in the open dialog.
     private void Cancelled(ConfirmRequest confirm)
     {
         if (_confirm != confirm) return;
         _confirm = null;
-        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
     }
 
     private async Task SelectWinner(Guid activityId)
@@ -316,53 +303,5 @@
             if (_details.IsCurrent(token)) _detailEvent = FindEvent(detail.Id);
         }
         finally { _selectingWinner = false; }
-    }
-
-    // The comment is stored on the Activity, so prefer the loaded Activity over the
-    // Event's snapshot, which keeps the text the Activity had when the Event was saved.
-    private string GetStoredComment(Guid activityId) =>
-        (Activities?.FirstOrDefault(a => a.Id == activityId) is { } activity
-            ? activity.Comments
-            : _detailEvent?.Selections.FirstOrDefault(s => s.Activity.Id == activityId)?.Activity.Comments)
-        ?? string.Empty;
-
-    private string GetDetailComment(Guid activityId) =>
-        _detailComments.TryGetValue(activityId, out var val) ? val : GetStoredComment(activityId);
-
-    private void SetDetailComment(Guid activityId, string value) => _detailComments[activityId] = value;
-
-    private bool IsDetailCommentDirty(Guid activityId) =>
-        _detailComments.TryGetValue(activityId, out var val) && val != GetStoredComment(activityId);
-
-    private async Task SaveDetailComment(Guid activityId)
-    {
-        if (!_detailComments.TryGetValue(activityId, out var val)) return;
-        _detailCommentError = null;
-        var token = _details.Current;
-        var detailEvent = _detailEvent;
-        if (await ApiResult.SendAsync(() => ActivitySvc.UpdateCommentsAsync(activityId, val)) is { } error)
-        {
-            // Keep the typed text in the buffer so the user can retry.
-            if (_details.IsCurrent(token)) _detailCommentError = ApiResult.CommentsNotSaved(error);
-            else await ActionError.InvokeAsync(ApiResult.CommentsNotSaved(error));
-            return;
-        }
-
-        // Saved: update the loaded Activity and the Event's snapshot so the box, the
-        // dirty check and a reopened dialog all show the saved text.
-        if (Activities?.FirstOrDefault(a => a.Id == activityId) is { } activity)
-            activity.Comments = val;
-        if (detailEvent is not null)
-        {
-            var index = detailEvent.Selections.FindIndex(s => s.Activity.Id == activityId);
-            if (index >= 0)
-            {
-                var selection = detailEvent.Selections[index];
-                detailEvent.Selections[index] = selection with { Activity = selection.Activity with { Comments = val } };
-            }
-        }
-        // A newer details dialog keeps its own buffer; this one only drops the text it saved.
-        if (_details.IsCurrent(token) && _detailComments.TryGetValue(activityId, out var now) && now == val)
-            _detailComments.Remove(activityId);
     }
 }

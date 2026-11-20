@@ -55,6 +55,21 @@ public sealed class CommentClientTests
         Assert.AreEqual(Tag, result.Comment.ETag.ToString());
     }
 
+    // #132: a Comment written from an Event's details names that Event; the API checks it exists.
+    [TestMethod]
+    public async Task Add_WithAnEventId_SendsTheTextAndTheEventId()
+    {
+        var eventId = Guid.Parse("99999999-8888-7777-6666-555555555555");
+        api.On(HttpMethod.Post, ListPath, () => Response(HttpStatusCode.Created, CommentId, "Ran long", Tag));
+
+        var result = await Client().AddAsync(ActivityId, "Ran long", eventId);
+
+        Assert.AreEqual("{\"text\":\"Ran long\",\"eventId\":\"99999999-8888-7777-6666-555555555555\"}",
+            Assert.ContainsSingle(api.Bodies(HttpMethod.Post, ListPath)));
+        Assert.IsNull(Assert.ContainsSingle(api.IfMatches(HttpMethod.Post, ListPath)));
+        Assert.AreEqual(CommentId, result.Comment!.Id);
+    }
+
     [TestMethod]
     public async Task Update_SendsPutWithOnlyTheText_AndTheWeakTagAsReadAsIfMatch()
     {
