@@ -112,7 +112,9 @@ Package restore requires access to NuGet or a populated local package cache.
 Playwright for .NET. Its tests are reported as skipped (inconclusive) unless
 `EM_E2E_URL` names the app, so the solution-wide `dotnet test` needs no browsers
 and no stack. The `E2E - Browser tests` workflow runs them on pushes and pull
-requests; it is separate from the main CI and not a required check.
+requests; it is separate from the main CI and not a required check. It also sets
+`EM_E2E_REQUIRED=1`, which makes a test fail instead of skip when `EM_E2E_URL`
+is missing, so the check cannot pass without running a flow.
 
 To run them locally:
 

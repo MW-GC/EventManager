@@ -78,6 +78,8 @@ jobs:
       - name: Run browser tests
         env:
           EM_E2E_URL: http://127.0.0.1:4280
+          # Without EM_E2E_URL the tests skip and the step would pass with no flow run (#149); this makes them fail.
+          EM_E2E_REQUIRED: 1
         run: dotnet test MW-GC.EventManager.E2ETests/MW-GC.EventManager.E2ETests.csproj --no-build -c Release --logger "console;verbosity=normal"
 
       - name: Upload stack logs
