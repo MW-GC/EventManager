@@ -26,7 +26,10 @@ public static class ApiResult
     public static bool IsSessionExpired(string? message) =>
         message is not null && message.Contains(SessionExpiredMessage, StringComparison.Ordinal);
 
-    /// <summary>The Save Comments failure, worded the same on the Activities page and in Event details.</summary>
+    /// <summary>
+    /// The failure message of the old single-text Save Comments. Since #132 nothing in the app shows it; #133
+    /// removes it with that field and its PATCH route.
+    /// </summary>
     public static string CommentsNotSaved(string error) => $"The comments were not saved. {error} Your text is kept.";
 
     /// <summary>

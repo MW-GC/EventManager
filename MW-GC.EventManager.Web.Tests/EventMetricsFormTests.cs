@@ -53,7 +53,9 @@ public sealed class EventMetricsFormTests : IDisposable
            .Json(HttpMethod.Get, "/api/activities", new[] { grandPrix, timeTrial })
            .Json(HttpMethod.Get, "/api/themes", Array.Empty<ThemeEntity>())
            .Json(HttpMethod.Get, "/api/holidays", Array.Empty<HolidayEntity>())
-           .Json(HttpMethod.Get, "/api/events", new[] { past });
+           .Json(HttpMethod.Get, "/api/events", new[] { past })
+           // The Winner's Comments panel (#132): none yet.
+           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>());
         // No row yet: every field null and no ETag header, as the API answers.
         Stored(null, null, null, null, null);
         harness = new PageHarness(api);

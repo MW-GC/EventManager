@@ -3,9 +3,14 @@
    Comment is its own row with its own eTag (ADR 0001), so an edit or delete sends that Comment's tag as
    If-Match: two Comments never conflict, and a stale tag on one shows the stale-edit message beside it with
    Reload. The details dialog asks before discarding unsaved text (IsDirty), keeps itself open while a
-   request runs (SavingChanged), and shows the delete question for the panel (Ask). *@
+   request runs (SavingChanged), and shows the delete question for the panel (Ask).
+   #132: the Event details dialog shows the same panel for the winning Activity and passes EventId, so a
+   Comment added there records that Event. A Comment that names an Event shows "from {Event name}" beside
+   its date in both dialogs; the names come from the Events list, read once per panel and only when a
+   Comment names an Event. *@
 @using System.Globalization
 @inject CommentClient Client
+@inject EventService EventSvc
 
 <div class="activity-comments">
     <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Comments</FluentLabel>
@@ -46,6 +51,10 @@
                     var date = DateText(c);
                     <li @key="c.Id" class="comment" style="padding: 8px 0; border-top: 1px solid var(--neutral-stroke-divider-rest);">
                         <time datetime="@IsoDate(c)" style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">@date</time>
+                        @if (Origin(c) is { } origin)
+                        {
+                            <span class="comment-origin" style="font-size: 0.8rem; color: var(--neutral-foreground-hint); margin-left: 6px;">@origin</span>
+                        }
                         @if (_editing?.Id == c.Id)
                         {
                             <div style="margin-top: 4px;">
@@ -109,6 +118,8 @@
     [Parameter] public EventCallback<bool> SavingChanged { get; set; }
     // Shows a question (the delete confirmation) in the dialog's own ConfirmDialog.
     [Parameter] public EventCallback<ConfirmRequest> Ask { get; set; }
+    // The Event whose details show this panel (#132): an added Comment records it. Null on the Activities page.
+    [Parameter] public Guid? EventId { get; set; }
 
     public const string StaleMessage = "This Comment was changed by someone else. Reload and try again.";
 
@@ -136,6 +147,10 @@
     private CommentEntity? _editing;
     private string _editText = string.Empty;
     private string? _editError;
+    // The names of the Events Comments were written from, by id; null until read. Read at most once per panel.
+    private Dictionary<Guid, string>? _eventNames;
+    private bool _eventNamesRead;
+    private bool _eventNamesFailed;
 
     private bool Busy => _running != Request.None || _loading;
 
@@ -195,6 +210,28 @@
             _editError = null;
         }
         finally { _loading = false; }
+        await ReadEventNames();
+    }
+
+    // The Event names for "from {Event name}": read once, and only when a Comment names an Event. Never an
+    // error bar: an Events list that cannot be read only makes the origin vaguer ("from an Event").
+    private async Task ReadEventNames()
+    {
+        if (_eventNamesRead || _comments is null || !_comments.Any(c => c.EventId is not null)) return;
+        _eventNamesRead = true;
+        // Show the Comments while the names load.
+        StateHasChanged();
+        var (events, _) = await ApiResult.LoadAsync(EventSvc.GetAllAsync);
+        if (events is null) _eventNamesFailed = true;
+        else _eventNames = events.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First().Name);
+    }
+
+    // Beside the date: the Event the Comment was written from. Nothing while the names load.
+    private string? Origin(CommentEntity c)
+    {
+        if (c.EventId is not { } id) return null;
+        if (_eventNames is not null) return _eventNames.TryGetValue(id, out var name) ? $"from {name}" : "from a deleted Event";
+        return _eventNamesFailed ? "from an Event" : null;
     }
 
     private async Task Add()
@@ -209,7 +246,7 @@
         _addError = null;
         await RunAsync(Request.Add, async () =>
         {
-            var result = await Client.AddAsync(ActivityId, text);
+            var result = await Client.AddAsync(ActivityId, text, EventId);
             if (result.Comment is not { } added)
             {
                 _addError = $"The Comment was not added. {result.Error}";
@@ -218,6 +255,7 @@
             _comments.Add(added);
             _newText = string.Empty;
         });
+        await ReadEventNames();
     }
 
     private void StartEdit(CommentEntity c)

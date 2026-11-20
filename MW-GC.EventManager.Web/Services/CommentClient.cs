@@ -31,24 +31,28 @@ public sealed class CommentClient(HttpClient http)
         }
     }
 
-    /// <summary>Adds a Comment with only its text; the API sets its id and added date.</summary>
-    public Task<CommentResult> AddAsync(Guid activityId, string text) =>
-        SendAsync(HttpMethod.Post, $"api/activities/{activityId}/comments", text, null);
+    /// <summary>
+    /// Adds a Comment; the API sets its id and added date. <paramref name="eventId"/> is the Event it was
+    /// written from (#132), sent only when given; the API refuses an Event that does not exist.
+    /// </summary>
+    public Task<CommentResult> AddAsync(Guid activityId, string text, Guid? eventId = null) =>
+        SendAsync(HttpMethod.Post, $"api/activities/{activityId}/comments",
+            eventId is { } id ? JsonContent.Create(new { text, eventId = id }) : JsonContent.Create(new { text }), null);
 
     /// <summary>Changes only the text. <paramref name="eTag"/> is that Comment's tag as last read.</summary>
     public Task<CommentResult> UpdateAsync(Guid activityId, Guid commentId, string text, string? eTag) =>
-        SendAsync(HttpMethod.Put, $"api/activities/{activityId}/comments/{commentId}", text, eTag);
+        SendAsync(HttpMethod.Put, $"api/activities/{activityId}/comments/{commentId}", JsonContent.Create(new { text }), eTag);
 
     /// <summary>Deletes one Comment. <paramref name="eTag"/> is that Comment's tag as last read.</summary>
     public Task<CommentResult> DeleteAsync(Guid activityId, Guid commentId, string? eTag) =>
         SendAsync(HttpMethod.Delete, $"api/activities/{activityId}/comments/{commentId}", null, eTag);
 
-    private async Task<CommentResult> SendAsync(HttpMethod method, string path, string? text, string? eTag)
+    private async Task<CommentResult> SendAsync(HttpMethod method, string path, HttpContent? body, string? eTag)
     {
         try
         {
             using var request = new HttpRequestMessage(method, path);
-            if (text is not null) request.Content = JsonContent.Create(new { text });
+            request.Content = body;
             // Azure's weak tags (W/"datetime'...'") are sent as read, without .NET's header parsing.
             if (eTag is not null) request.Headers.TryAddWithoutValidation("If-Match", eTag);
             using var response = await http.SendAsync(request);
