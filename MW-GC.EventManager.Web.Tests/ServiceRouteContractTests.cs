@@ -49,6 +49,9 @@ public sealed class ServiceRouteContractTests
         new(typeof(EventService), nameof(EventService.GetFeedbackLinkAsync), "GET", "api/events/{id}/feedback-link", h => new EventService(h).GetFeedbackLinkAsync(Id)),
         new(typeof(EventService), nameof(EventService.GetLikesAsync), "GET", "api/events/{id}/likes", h => new EventService(h).GetLikesAsync(Id)),
 
+        new(typeof(EventMetricsClient), nameof(EventMetricsClient.GetAsync), "GET", "api/events/{id}/metrics", h => new EventMetricsClient(h).GetAsync(Id)),
+        new(typeof(EventMetricsClient), nameof(EventMetricsClient.SaveAsync), "PUT", "api/events/{id}/metrics", h => new EventMetricsClient(h).SaveAsync(Id, new EventMetricsEntity(), null)),
+
         // The shared Library client, once per list it serves. It has no get-one call: no Library page reads one item.
         .. LibraryRows<GameEntity>("games"),
         .. LibraryRows<ThemeEntity>("themes"),
@@ -65,7 +68,7 @@ public sealed class ServiceRouteContractTests
 
     private static readonly Type[] Services =
     [
-        typeof(GameService), typeof(ActivityService), typeof(EventService),
+        typeof(GameService), typeof(ActivityService), typeof(EventService), typeof(EventMetricsClient),
         typeof(LibraryClient<GameEntity>), typeof(LibraryClient<ThemeEntity>), typeof(LibraryClient<HolidayEntity>)
     ];
 
