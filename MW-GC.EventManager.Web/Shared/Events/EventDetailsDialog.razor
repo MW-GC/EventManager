@@ -1,6 +1,7 @@
 @* The Event details dialog: its Selections as cards, Select Winner, the Like count and feedback
-   link (#101), and the Winner Activity's comment. It owns all of that state, its busy guard and its
-   own "Discard changes?" question, so later Event metrics and Comment entries grow here without
+   link (#101), the Winner Activity's comment, and the Event metrics form (EventMetricsForm, #135,
+   whose unsaved values join the Discard question). It owns all of that state, its busy guard and its
+   own "Discard changes?" question, so the later Comment entry grows here without
    touching the list or the create-and-edit dialog. The page opens it (Open) and refreshes its list
    when a Winner was saved. *@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
@@ -143,10 +144,14 @@
                         </FluentStack>
                     </FluentCard>
                 }
+
+                @* #135: read and saved on their own route, never with the Event (ADR 0001). Keyed by the
+                   Event, so the form survives the list refresh after Select Winner but not another Event. *@
+                <EventMetricsForm @key="_detailEvent.Id" @ref="_metrics" EventId="_detailEvent.Id" SavingChanged="@((bool saving) => _savingMetrics = saving)" />
             </FluentStack>
 
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" Style="margin-top: 16px;">
-                <FluentButton Appearance="Appearance.Neutral" Disabled="@_selectingWinner" OnClick="CancelDetails">Close</FluentButton>
+                <FluentButton Appearance="Appearance.Neutral" Disabled="@Busy" OnClick="CancelDetails">Close</FluentButton>
             </FluentStack>
         </FluentDialogBody>
     </FluentDialog>
@@ -179,6 +184,10 @@
     private ConfirmRequest? _confirm;
     // A failed Select Winner, shown in the details dialog; the previous winner stays.
     private string? _winnerError;
+    // The open Event's metrics form (#135), and whether its save is running.
+    private EventMetricsForm? _metrics;
+    private bool _savingMetrics;
+    private bool Busy => _selectingWinner || _savingMetrics;
 
     // Detail dialog comment editing
     private Dictionary<Guid, string> _detailComments = [];
@@ -258,12 +267,13 @@
         }
     }
 
-    // The Close button closes at once without asking, but never while Select Winner runs.
-    private void CancelDetails() { if (!_selectingWinner) CloseDetails(); }
+    // The Close button closes at once without asking, but never while Select Winner or a metrics save runs.
+    private void CancelDetails() { if (!Busy) CloseDetails(); }
     private void CloseDetails() { _detailEvent = null; _details.Close(); _ = Focus.RestoreAsync(); }
-    // Overlay click or Escape: an unsaved comment asks first.
+    // Overlay click or Escape: an unsaved comment or unsaved Event metrics ask first.
     private void DismissDetails() =>
-        _confirm = ConfirmRequest.ForDismiss(_confirm, _selectingWinner, _detailComments.Keys.Any(IsDetailCommentDirty), CloseDetails);
+        _confirm = ConfirmRequest.ForDismiss(_confirm, Busy,
+            _detailComments.Keys.Any(IsDetailCommentDirty) || _metrics?.IsDirty == true, CloseDetails);
 
     // A Discard closes this dialog, which returns focus to its opener itself.
     private async Task Confirmed(ConfirmRequest confirm)
