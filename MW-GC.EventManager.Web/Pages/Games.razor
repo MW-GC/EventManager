@@ -1,262 +1,142 @@
 @page "/games"
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
-@inject GameService GameSvc
+@inject LibraryClient<GameEntity> GameClient
 @inject ActivityService ActivitySvc
 @inject ThemeService ThemeSvc
 @inject HolidayService HolidaySvc
-@inject FocusReturn Focus
 
-<PageHeader Title="Games" Subtitle="Manage your game library" />
-<ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
-<ApiErrorBar Message="@_actionError" OnDismiss="@(() => _actionError = null)" />
-
-<FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
-    @if (_games is null)
-    {
-        @if (!_loads.Failed("Games"))
-        {
-            <FluentCard AreaRestricted="false">
-                <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
-                    <FluentProgressRing />
-                    <FluentLabel>Loading games...</FluentLabel>
-                </div>
-            </FluentCard>
-        }
-    }
-    else
-    {
-        <FluentCard Style="overflow: visible;" AreaRestricted="false">
-            <FluentStack Orientation="Orientation.Horizontal"
-                         HorizontalAlignment="HorizontalAlignment.SpaceBetween"
-                         VerticalAlignment="VerticalAlignment.Center"
-                         Style="margin-bottom: 16px;"
-                         Wrap="true">
-                <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Immediate="true" ImmediateDelay="300" Placeholder="Search games..." aria-label="Search games" />
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center" Wrap="true">
-                    <FluentButton Appearance="@(_viewMode == ViewMode.Table ? Appearance.Accent : Appearance.Outline)"
-                                  Size="ButtonSize.Small"
-                                  OnClick="@(() => _viewMode = ViewMode.Table)"
-                                  IconStart="@(new Size16.TextBulletListSquare())"
-                                  Title="Table view"
-                                  aria-pressed="@(_viewMode == ViewMode.Table ? "true" : "false")" />
-                    <FluentButton Appearance="@(_viewMode == ViewMode.Cards ? Appearance.Accent : Appearance.Outline)"
-                                  Size="ButtonSize.Small"
-                                  OnClick="@(() => _viewMode = ViewMode.Cards)"
-                                  IconStart="@(new Size16.Grid())"
-                                  Title="Card view"
-                                  aria-pressed="@(_viewMode == ViewMode.Cards ? "true" : "false")" />
-                    <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())" data-focus-key="add">
-                        Add Game
-                    </FluentButton>
-                </FluentStack>
+@* The shared Library page does the loading, search, dialogs, busy guard and delete confirmation; this page
+   adds what is Games-only: the Website field, the icon, Activity counts and the Activities in the Edit dialog. *@
+<LibraryPage TItem="GameEntity" Title="Games" Subtitle="Manage your game library" Singular="Game"
+             Client="@GameClient" Name="@(g => g.Name)" NewItem="NewGame" CopyItem="CopyGame"
+             DirtyFields="@(g => new { g.Name, g.Website })" DeleteMessage="DeleteMessage" Lookups="_lookups"
+             NameLabel="Game Name" DialogWidth="DialogWidth"
+             GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 88px">
+    <Columns>
+        <TemplateColumn TGridItem="GameEntity" Title="Name" Sortable="true" SortBy="@(GridSort<GameEntity>.ByAscending(g => g.Name))" IsDefaultSortColumn="true">
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="8">
+                @if (!string.IsNullOrWhiteSpace(context.IconUrl))
+                {
+                    <img src="@context.IconUrl" alt="" style="width: 24px; height: 24px; border-radius: 4px; object-fit: cover;" />
+                }
+                else
+                {
+                    <FluentIcon Value="@(new Size20.XboxController())" Color="Color.Neutral" />
+                }
+                <FluentLabel Weight="FontWeight.Bold">@context.Name</FluentLabel>
             </FluentStack>
-
-            @if (_viewMode == ViewMode.Table)
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GameEntity" Title="Website">
+            @if (!string.IsNullOrWhiteSpace(context.Website))
             {
-                <FluentDataGrid Items="@Filtered" TGridItem="GameEntity" Virtualize="true" ItemSize="44" GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 88px">
-                    <TemplateColumn Title="Name" Sortable="true" SortBy="@(GridSort<GameEntity>.ByAscending(g => g.Name))" IsDefaultSortColumn="true">
-                        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="8">
-                            @if (!string.IsNullOrWhiteSpace(context.IconUrl))
-                            {
-                                <img src="@context.IconUrl" alt="" style="width: 24px; height: 24px; border-radius: 4px; object-fit: cover;" />
-                            }
-                            else
-                            {
-                                <FluentIcon Value="@(new Size20.XboxController())" Color="Color.Neutral" />
-                            }
-                            <FluentLabel Weight="FontWeight.Bold">@context.Name</FluentLabel>
-                        </FluentStack>
-                    </TemplateColumn>
-                    <TemplateColumn Title="Website">
-                        @if (!string.IsNullOrWhiteSpace(context.Website))
+                <FluentAnchor Href="@context.Website" Target="_blank" Appearance="Appearance.Hypertext">
+                    @TruncateUrl(context.Website)
+                </FluentAnchor>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GameEntity" Title="Activities">
+            <FluentBadge Appearance="Appearance.Neutral">@GetActivityCount(context.Id)</FluentBadge>
+        </TemplateColumn>
+    </Columns>
+    <CardTemplate Context="card">
+        <FluentGridItem xs="12" sm="6" md="4" lg="3">
+            <FluentCard Style="height: 100%;" AreaRestricted="false">
+                <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="height: 100%;">
+                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="10">
+                        @if (!string.IsNullOrWhiteSpace(card.Item.IconUrl))
                         {
-                            <FluentAnchor Href="@context.Website" Target="_blank" Appearance="Appearance.Hypertext">
-                                @TruncateUrl(context.Website)
-                            </FluentAnchor>
+                            <img src="@card.Item.IconUrl" alt="" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover;" />
                         }
-                    </TemplateColumn>
-                    <TemplateColumn Title="Activities">
-                        <FluentBadge Appearance="Appearance.Neutral">@GetActivityCount(context.Id)</FluentBadge>
-                    </TemplateColumn>
-                    <TemplateColumn Title="Actions">
-                        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {context.Name}")" data-focus-key="@($"edit-{context.Id}")"
-                                          Disabled="@_rows.IsBusy(context.Id)" OnClick="@(() => ShowEdit(context))">
-                                <FluentIcon Value="@(new Size16.Edit())" />
-                            </FluentButton>
-                            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {context.Name}")" data-focus-key="@($"delete-{context.Id}")"
-                                          Disabled="@_rows.Running" OnClick="@(() => AskDelete(context))">
-                                <FluentIcon Value="@(new Size16.Delete())" />
-                            </FluentButton>
+                        else
+                        {
+                            <div style="width: 40px; height: 40px; border-radius: 6px; background: var(--neutral-layer-4); display: flex; align-items: center; justify-content: center;">
+                                <FluentIcon Value="@(new Size24.XboxController())" Color="Color.Neutral" />
+                            </div>
+                        }
+                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="2" Style="flex: 1; min-width: 0;">
+                            <FluentLabel Typo="Typography.Body" Weight="FontWeight.Bold" Style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@card.Name</FluentLabel>
+                            <FluentBadge Appearance="Appearance.Neutral" Style="width: fit-content;">
+                                @GetActivityCount(card.Item.Id) activities
+                            </FluentBadge>
+                        </FluentStack>
+                    </FluentStack>
+
+                    @if (!string.IsNullOrWhiteSpace(card.Item.Website))
+                    {
+                        <FluentAnchor Href="@card.Item.Website" Target="_blank" Appearance="Appearance.Hypertext" Style="font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            @TruncateUrl(card.Item.Website)
+                        </FluentAnchor>
+                    }
+
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Style="margin-top: auto;">
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@card.EditKey" Disabled="@card.Busy" OnClick="@card.Edit" IconStart="@(new Size16.Edit())">Edit</FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@card.DeleteKey" Disabled="@card.Running" OnClick="@card.Delete" IconStart="@(new Size16.Delete())">Delete</FluentButton>
+                    </FluentStack>
+                </FluentStack>
+            </FluentCard>
+        </FluentGridItem>
+    </CardTemplate>
+    <EditorFields Context="edit">
+        <div>
+            <FluentTextField @bind-Value="edit.Item.Website" Immediate="true" Label="Website (Optional)" Style="width: 100%;" Placeholder="https://store.steampowered.com/app/123456" />
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-top: 4px;">
+                Paste a Steam store URL or game website to auto-fetch the icon
+            </FluentLabel>
+        </div>
+    </EditorFields>
+    <EditorExtra Context="edit">
+        @if (edit.IsEdit && ActivitiesOf(edit.Item.Id) is { Count: > 0 } activities)
+        {
+            <FluentDivider Style="margin: 16px 0;" />
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold">Activities</FluentLabel>
+                <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint);">Activities for this game</FluentLabel>
+                <FluentDataGrid Items="@activities.AsQueryable()" TGridItem="ActivityEntity" ItemSize="40">
+                    <PropertyColumn Property="@(a => a.Name)" Title="Name" Sortable="true" />
+                    <TemplateColumn Title="Tags">
+                        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Wrap="true">
+                            @foreach (var tid in context.ThemeIds)
+                            {
+                                <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveTheme(tid)" Style="font-size: 0.7rem;" />
+                            }
+                            @foreach (var hid in context.HolidayIds)
+                            {
+                                <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveHoliday(hid)" Style="font-size: 0.7rem;" />
+                            }
                         </FluentStack>
                     </TemplateColumn>
                 </FluentDataGrid>
-            }
-            else
-            {
-                <FluentGrid Spacing="3" Justify="JustifyContent.FlexStart">
-                    @foreach (var game in Filtered)
-                    {
-                        <FluentGridItem xs="12" sm="6" md="4" lg="3">
-                            <FluentCard Style="height: 100%;" AreaRestricted="false">
-                                <FluentStack Orientation="Orientation.Vertical" VerticalGap="12" Style="height: 100%;">
-                                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="10">
-                                        @if (!string.IsNullOrWhiteSpace(game.IconUrl))
-                                        {
-                                            <img src="@game.IconUrl" alt="" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover;" />
-                                        }
-                                        else
-                                        {
-                                            <div style="width: 40px; height: 40px; border-radius: 6px; background: var(--neutral-layer-4); display: flex; align-items: center; justify-content: center;">
-                                                <FluentIcon Value="@(new Size24.XboxController())" Color="Color.Neutral" />
-                                            </div>
-                                        }
-                                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="2" Style="flex: 1; min-width: 0;">
-                                            <FluentLabel Typo="Typography.Body" Weight="FontWeight.Bold" Style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@game.Name</FluentLabel>
-                                            <FluentBadge Appearance="Appearance.Neutral" Style="width: fit-content;">
-                                                @GetActivityCount(game.Id) activities
-                                            </FluentBadge>
-                                        </FluentStack>
-                                    </FluentStack>
-
-                                    @if (!string.IsNullOrWhiteSpace(game.Website))
-                                    {
-                                        <FluentAnchor Href="@game.Website" Target="_blank" Appearance="Appearance.Hypertext" Style="font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                            @TruncateUrl(game.Website)
-                                        </FluentAnchor>
-                                    }
-
-                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Style="margin-top: auto;">
-                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@($"edit-{game.Id}")" Disabled="@_rows.IsBusy(game.Id)" OnClick="@(() => ShowEdit(game))" IconStart="@(new Size16.Edit())">Edit</FluentButton>
-                                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@($"delete-{game.Id}")" Disabled="@_rows.Running" OnClick="@(() => AskDelete(game))" IconStart="@(new Size16.Delete())">Delete</FluentButton>
-                                    </FluentStack>
-                                </FluentStack>
-                            </FluentCard>
-                        </FluentGridItem>
-                    }
-                </FluentGrid>
-            }
-        </FluentCard>
-    }
-</FluentStack>
-
-@* Add Game dialog — simple Name + Website like the original *@
-@if (_showCreate)
-{
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 480px;" AriaLabel="Add Game" @ondialogdismiss="@((DialogEventArgs _) => DismissCreate())">
-        <FluentDialogBody>
-            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 16px;">Add Game</FluentLabel>
-            <EditForm Model="@_create" OnValidSubmit="CreateGame">
-                <DataAnnotationsValidator />
-                <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
-                    <FluentTextField @bind-Value="_create.Name" Immediate="true" Label="Game Name" Required Style="width: 100%;" Placeholder="Enter game name..." />
-                    <div>
-                        <FluentTextField @bind-Value="_create.Website" Immediate="true" Label="Website (Optional)" Style="width: 100%;" Placeholder="https://store.steampowered.com/app/123456" />
-                        <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-top: 4px;">
-                            Paste a Steam store URL or game website to auto-fetch the icon
-                        </FluentLabel>
-                    </div>
-                    <ApiErrorBar Message="@_dialogError" />
-                    <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
-                        <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelCreate">Cancel</FluentButton>
-                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Add())">Add Game</FluentButton>
-                    </FluentStack>
-                </FluentStack>
-            </EditForm>
-        </FluentDialogBody>
-    </FluentDialog>
-}
-
-@* Edit Game dialog — shows activities for this game when editing *@
-@if (_editingId != Guid.Empty)
-{
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true"
-                  Style="@(_editActivities.Count > 0 ? "--dialog-width: 720px;" : "--dialog-width: 480px;")"
-                  AriaLabel="Edit Game"
-                  @ondialogdismiss="@((DialogEventArgs _) => DismissEdit())">
-        <FluentDialogBody>
-            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 16px;">Edit Game</FluentLabel>
-            <EditForm Model="@_edit" OnValidSubmit="SaveEdit">
-                <DataAnnotationsValidator />
-                <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
-                    <FluentTextField @bind-Value="_edit.Name" Immediate="true" Label="Game Name" Required Style="width: 100%;" />
-                    <div>
-                        <FluentTextField @bind-Value="_edit.Website" Immediate="true" Label="Website (Optional)" Style="width: 100%;" Placeholder="https://store.steampowered.com/app/123456" />
-                        <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-top: 4px;">
-                            Paste a Steam store URL or game website to auto-fetch the icon
-                        </FluentLabel>
-                    </div>
-                    <ApiErrorBar Message="@_dialogError" />
-                    <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
-                        <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelEdit">Cancel</FluentButton>
-                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving" IconStart="@(new Size16.Save())">Save Changes</FluentButton>
-                    </FluentStack>
-                </FluentStack>
-            </EditForm>
-
-            @if (_editActivities.Count > 0)
-            {
-                <FluentDivider Style="margin: 16px 0;" />
-                <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold">Activities</FluentLabel>
-                    <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint);">Activities for this game</FluentLabel>
-                    <FluentDataGrid Items="@_editActivities.AsQueryable()" TGridItem="ActivityEntity" ItemSize="40">
-                        <PropertyColumn Property="@(a => a.Name)" Title="Name" Sortable="true" />
-                        <TemplateColumn Title="Tags">
-                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Wrap="true">
-                                @foreach (var tid in context.ThemeIds)
-                                {
-                                    <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveTheme(tid)" Style="font-size: 0.7rem;" />
-                                }
-                                @foreach (var hid in context.HolidayIds)
-                                {
-                                    <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveHoliday(hid)" Style="font-size: 0.7rem;" />
-                                }
-                            </FluentStack>
-                        </TemplateColumn>
-                    </FluentDataGrid>
-                </FluentStack>
-            }
-        </FluentDialogBody>
-    </FluentDialog>
-}
-
-@if (_confirm is { } confirm)
-{
-    <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
-                   CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
-                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
-}
+            </FluentStack>
+        }
+    </EditorExtra>
+</LibraryPage>
 
 @code {
-    private List<GameEntity>? _games;
     private List<ActivityEntity>? _activities;
     private List<ThemeEntity>? _themes;
     private List<HolidayEntity>? _holidays;
-    private GameEntity _create = new() { Name = string.Empty };
-    private GameEntity _edit = new() { Name = string.Empty };
-    private List<ActivityEntity> _editActivities = [];
-    private Guid _editingId;
-    private bool _showCreate;
-    // Set by the save that runs; only that save clears it, never a dismiss.
-    private bool _saving;
-    // The open Add or Edit dialog: a save only closes the dialog it started from.
-    private readonly DialogSession _form = new();
-    // The row whose Delete is running.
-    private readonly RowAction _rows = new();
-    // The open question (delete or discard), if any.
-    private ConfirmRequest? _confirm;
-    private string _search = string.Empty;
-    private ViewMode _viewMode = ViewMode.Table;
-
-    private enum ViewMode { Table, Cards }
-
-    private IQueryable<GameEntity> Filtered => string.IsNullOrWhiteSpace(_search)
-        ? _games!.AsQueryable()
-        : _games!.Where(g => g.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)).AsQueryable();
-
     // Activities per Game, counted once whenever the Activities list loads, not on every row render.
     private Dictionary<Guid, int> _activityCounts = [];
+    private IReadOnlyList<LibraryLookup> _lookups = [];
+
+    protected override void OnInitialized() => _lookups =
+    [
+        // The counts follow every save and delete, so the Activities list reloads with the Games.
+        new(loads => loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, SetActivities), ReloadAfterWrites: true),
+        new(loads => loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? [])),
+        new(loads => loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []))
+    ];
+
+    private static GameEntity NewGame() => new() { Name = string.Empty };
+
+    private static GameEntity CopyGame(GameEntity g) => new()
+    {
+        Id = g.Id,
+        Name = g.Name,
+        ImageUrl = g.ImageUrl,
+        Website = g.Website,
+        IconUrl = g.IconUrl
+    };
 
     private int GetActivityCount(Guid gameId) => _activityCounts.GetValueOrDefault(gameId);
 
@@ -266,6 +146,20 @@
         _activityCounts = _activities.GroupBy(a => a.GameId).ToDictionary(g => g.Key, g => g.Count());
     }
 
+    private List<ActivityEntity> ActivitiesOf(Guid gameId) => _activities?.Where(a => a.GameId == gameId).ToList() ?? [];
+
+    private string DialogWidth(LibraryEdit<GameEntity> edit) =>
+        edit.IsEdit && GetActivityCount(edit.Item.Id) > 0 ? "720px" : "480px";
+
+    // Names the game; a game that activities still use is refused by the server (409), so say so.
+    private string DeleteMessage(GameEntity g)
+    {
+        var count = GetActivityCount(g.Id);
+        return count == 0
+            ? $"Delete {g.Name}? This cannot be undone."
+            : $"{g.Name} has {count} {(count == 1 ? "activity" : "activities")}. The server refuses to delete a game that activities still use, so delete or move them first.";
+    }
+
     private string ResolveTheme(Guid id) => _themes?.FirstOrDefault(t => t.Id == id)?.Name ?? id.ToString()[..8];
     private string ResolveHoliday(Guid id) => _holidays?.FirstOrDefault(h => h.Id == id)?.Name ?? id.ToString()[..8];
 
@@ -273,146 +167,5 @@
     {
         var display = url.Replace("https://", "").Replace("http://", "").TrimEnd('/');
         return display.Length > 40 ? string.Concat(display.AsSpan(0, 37), "...") : display;
-    }
-
-    private void HandleSearch() { }
-
-    // A failed list keeps its previous contents and is named in the page's error bar with Retry.
-    private readonly LoadErrors _loads = new();
-    // A failed Delete, shown above the list; the list stays as it was.
-    private string? _actionError;
-    // A failed create or update, shown inside the open dialog, which keeps the entered data.
-    private string? _dialogError;
-
-    protected override Task OnInitializedAsync() => LoadAll();
-
-    private Task LoadAll() => Task.WhenAll(
-        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
-        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, SetActivities),
-        _loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? []),
-        _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []));
-
-    private Task Reload() => Task.WhenAll(
-        _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
-        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, SetActivities));
-
-    private void ShowCreate()
-    {
-        _create = new GameEntity { Name = string.Empty };
-        _dialogError = null;
-        _showCreate = true;
-        _form.Open(() => new { _create.Name, _create.Website });
-        _ = Focus.RememberAsync("add");
-    }
-
-    // The Cancel button closes at once without asking, but never while the save runs.
-    private void CancelCreate() { if (!_saving) CloseCreate(); }
-    private void CloseCreate() { _showCreate = false; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
-    // Overlay click or Escape.
-    private void DismissCreate() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseCreate);
-
-    private async Task CreateGame()
-    {
-        if (_saving) return;
-        _saving = true;
-        var token = _form.Current;
-        var game = _create;
-        try
-        {
-            var error = await ApiResult.SendAsync(() => GameSvc.CreateAsync(game));
-            var current = _form.IsCurrent(token);
-            if (error is not null)
-            {
-                if (current) _dialogError = error;
-                else _actionError = $"The game was not saved. {error}";
-                return;
-            }
-            if (current) CloseCreate();
-            await Reload();
-        }
-        finally { _saving = false; }
-    }
-
-    private void ShowEdit(GameEntity g)
-    {
-        _dialogError = null;
-        _editingId = g.Id;
-        _edit = new GameEntity
-        {
-            Id = g.Id,
-            Name = g.Name,
-            ImageUrl = g.ImageUrl,
-            Website = g.Website,
-            IconUrl = g.IconUrl
-        };
-        _editActivities = _activities?.Where(a => a.GameId == g.Id).ToList() ?? [];
-        _form.Open(() => new { _edit.Name, _edit.Website });
-        _ = Focus.RememberAsync($"edit-{g.Id}");
-    }
-
-    // The Cancel button closes at once without asking, but never while the save runs.
-    private void CancelEdit() { if (!_saving) CloseEdit(); }
-    private void CloseEdit() { _editingId = Guid.Empty; _editActivities = []; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
-    // Overlay click or Escape.
-    private void DismissEdit() => _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseEdit);
-
-    private async Task SaveEdit()
-    {
-        if (_saving) return;
-        _saving = true;
-        var token = _form.Current;
-        var game = _edit;
-        try
-        {
-            var error = await ApiResult.SendAsync(() => GameSvc.UpdateAsync(game));
-            var current = _form.IsCurrent(token);
-            if (error is not null)
-            {
-                if (current) _dialogError = error;
-                else _actionError = $"The game was not saved. {error}";
-                return;
-            }
-            if (current) CloseEdit();
-            await Reload();
-        }
-        finally { _saving = false; }
-    }
-
-    // Names the game; a game that activities still use is refused by the server (409), so say so.
-    private void AskDelete(GameEntity g)
-    {
-        if (_rows.BusyId is not null) return;
-        _ = Focus.RememberAsync($"delete-{g.Id}");
-        var count = GetActivityCount(g.Id);
-        var message = count == 0
-            ? $"Delete {g.Name}? This cannot be undone."
-            : $"{g.Name} has {count} {(count == 1 ? "activity" : "activities")}. The server refuses to delete a game that activities still use, so delete or move them first.";
-        _confirm = ConfirmRequest.Delete("Delete game", message, () => _rows.RunAsync(g.Id, () => Delete(g.Id)));
-    }
-
-    private async Task Confirmed(ConfirmRequest confirm)
-    {
-        if (_confirm != confirm) return;
-        _confirm = null;
-        await confirm.OnConfirm();
-        // A Discard closed its form dialog, which returned focus itself. After a delete the row is
-        // gone (focus goes to the heading) or, when it failed, its Delete button is enabled again.
-        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
-    }
-
-    // Keep editing leaves focus in the form dialog; a cancelled delete returns it to the Delete button.
-    private void Cancelled(ConfirmRequest confirm)
-    {
-        if (_confirm != confirm) return;
-        _confirm = null;
-        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
-    }
-
-    private async Task Delete(Guid id)
-    {
-        var error = await ApiResult.SendAsync(() => GameSvc.DeleteAsync(id));
-        _actionError = error is null ? null : $"The game was not deleted. {error}";
-        if (error is not null) return;
-        await Reload();
     }
 }

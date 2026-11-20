@@ -1,0 +1,351 @@
+@* One Library list (Games, Themes, Holidays, Activities). This page owns what every list does the same way:
+   load, the error bar and Retry, search by name, the optional card view, the busy guard on every action, the
+   Add and Edit dialog with its name rule, the Discard question, and the delete confirmation that names the
+   item. The page that uses it supplies what differs: columns, card template, extra editor fields, row
+   actions, the delete question, and other lists to load. *@
+@typeparam TItem where TItem : EntityBase
+@using System.Linq.Expressions
+@using System.Reflection
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@inject FocusReturn Focus
+
+<PageHeader Title="@Title" Subtitle="@Subtitle" />
+<ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
+<ApiErrorBar Message="@_actionError" OnDismiss="@(() => _actionError = null)" />
+
+<FluentStack Orientation="Orientation.Vertical" VerticalGap="24">
+    @if (_items is null)
+    {
+        @if (!_loads.Failed(Title))
+        {
+            <FluentCard AreaRestricted="false">
+                <div style="align-items: center; display: flex; gap: 12px; justify-content: center; min-height: 200px;">
+                    <FluentProgressRing />
+                    <FluentLabel>Loading @Plural...</FluentLabel>
+                </div>
+            </FluentCard>
+        }
+    }
+    else
+    {
+        <FluentCard Style="overflow: visible;" AreaRestricted="false">
+            <FluentStack Orientation="Orientation.Horizontal"
+                         HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+                         VerticalAlignment="VerticalAlignment.Center"
+                         Style="margin-bottom: 16px;"
+                         Wrap="true">
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" Wrap="true" Style="min-width: 0; max-width: 100%;">
+                    <FluentSearch @bind-Value="_search" Immediate="true" ImmediateDelay="300" Placeholder="@($"Search {Plural}...")" aria-label="@($"Search {Plural}")" />
+                    @SearchExtras
+                </FluentStack>
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8" VerticalAlignment="VerticalAlignment.Center" Wrap="true">
+                    @if (CardTemplate is not null)
+                    {
+                        <FluentButton Appearance="@(_cards ? Appearance.Outline : Appearance.Accent)"
+                                      Size="ButtonSize.Small"
+                                      OnClick="@(() => _cards = false)"
+                                      IconStart="@(new Size16.TextBulletListSquare())"
+                                      Title="Table view"
+                                      aria-pressed="@(_cards ? "false" : "true")" />
+                        <FluentButton Appearance="@(_cards ? Appearance.Accent : Appearance.Outline)"
+                                      Size="ButtonSize.Small"
+                                      OnClick="@(() => _cards = true)"
+                                      IconStart="@(new Size16.Grid())"
+                                      Title="Card view"
+                                      aria-pressed="@(_cards ? "true" : "false")" />
+                    }
+                    <FluentButton Appearance="Appearance.Accent" OnClick="ShowCreate" IconStart="@(new Size16.Add())" data-focus-key="add">
+                        Add @Singular
+                    </FluentButton>
+                </FluentStack>
+            </FluentStack>
+
+            @if (_cards && CardTemplate is not null)
+            {
+                <FluentGrid Spacing="3" Justify="JustifyContent.FlexStart">
+                    @foreach (var item in Filtered)
+                    {
+                        @CardTemplate(ItemFor(item))
+                    }
+                </FluentGrid>
+            }
+            else
+            {
+                <FluentDataGrid Items="@Filtered" TGridItem="TItem" Virtualize="true" ItemSize="44" GridTemplateColumns="@GridTemplateColumns">
+                    @if (Columns is not null)
+                    {
+                        @Columns
+                    }
+                    else
+                    {
+                        <PropertyColumn Property="@Name" Title="Name" Sortable="true" IsDefaultSortColumn="true" />
+                    }
+                    <TemplateColumn Title="Actions">
+                        @if (RowActions is not null)
+                        {
+                            @RowActions(ItemFor(context))
+                        }
+                        else
+                        {
+                            var row = ItemFor(context);
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
+                                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {row.Name}")" data-focus-key="@row.EditKey"
+                                              Disabled="@row.Busy" OnClick="@row.Edit">
+                                    <FluentIcon Value="@(new Size16.Edit())" />
+                                </FluentButton>
+                                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {row.Name}")" data-focus-key="@row.DeleteKey"
+                                              Disabled="@row.Running" OnClick="@row.Delete">
+                                    <FluentIcon Value="@(new Size16.Delete())" />
+                                </FluentButton>
+                            </FluentStack>
+                        }
+                    </TemplateColumn>
+                </FluentDataGrid>
+            }
+        </FluentCard>
+    }
+</FluentStack>
+
+@* The Add or Edit dialog. The name rule runs before anything is sent; the API checks the same rule again. *@
+@if (_edit is { } edit)
+{
+    var title = edit.IsEdit ? $"Edit {Singular}" : $"Add {Singular}";
+    <FluentDialog @key="edit" Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="@DialogStyle(edit)"
+                  AriaLabel="@title" @ondialogdismiss="@((DialogEventArgs _) => DismissForm())">
+        <FluentDialogBody>
+            <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 16px;">@title</FluentLabel>
+            @* novalidate: the name rule does every check and shows its message; the browser's own required
+               check would stop a blank submit with its tooltip first. The field still says it is required. *@
+            <EditForm Model="@edit.Item" OnValidSubmit="Save" novalidate>
+                <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+                    @(EditorLead?.Invoke(edit))
+                    <div style="width: 100%;">
+                        <FluentTextField Value="@NameOf(edit.Item)" ValueChanged="@((string? v) => SetName(edit.Item, v))" ValueExpression="@_nameField"
+                                         Immediate="true" Label="@NameLabel" Required Style="width: 100%;" Placeholder="@Placeholder" />
+                        <LibraryNameValidator For="@(_nameField!)" />
+                    </div>
+                    @(EditorFields?.Invoke(edit))
+                    <ApiErrorBar Message="@_dialogError" />
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
+                        <FluentButton Appearance="Appearance.Neutral" Disabled="@_saving" OnClick="CancelForm">Cancel</FluentButton>
+                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Loading="@_saving"
+                                      IconStart="@(edit.IsEdit ? new Size16.Save() : (Icon)new Size16.Add())">
+                            @(edit.IsEdit ? SaveText : $"Add {Singular}")
+                        </FluentButton>
+                    </FluentStack>
+                </FluentStack>
+            </EditForm>
+            @(EditorExtra?.Invoke(edit))
+        </FluentDialogBody>
+    </FluentDialog>
+}
+
+@if (_confirm is { } confirm)
+{
+    <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
+                   CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
+                   OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
+}
+
+@code {
+    /// <summary>The page heading, and the list's name in load errors ("Games could not be loaded.").</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Subtitle { get; set; }
+    /// <summary>One item, capitalised: "Add Game", "Edit Game"; lower case in messages ("Delete game").</summary>
+    [Parameter, EditorRequired] public string Singular { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public LibraryClient<TItem> Client { get; set; } = default!;
+    /// <summary>The item's name property: shown, searched, sorted, edited and checked by the name rule.</summary>
+    [Parameter, EditorRequired] public Expression<Func<TItem, string>> Name { get; set; } = default!;
+    /// <summary>A blank item for the Add dialog.</summary>
+    [Parameter, EditorRequired] public Func<TItem> NewItem { get; set; } = default!;
+    /// <summary>A copy of an item for the Edit dialog, so Cancel leaves the list as it was.</summary>
+    [Parameter, EditorRequired] public Func<TItem, TItem> CopyItem { get; set; } = default!;
+
+    /// <summary>The editor's bound values, compared to tell unsaved changes. Default: the name.</summary>
+    [Parameter] public Func<TItem, object>? DirtyFields { get; set; }
+    /// <summary>The delete question. Default: "Delete {name}? This cannot be undone."</summary>
+    [Parameter] public Func<TItem, string>? DeleteMessage { get; set; }
+    /// <summary>Other lists loaded with this one, into the same error bar and Retry.</summary>
+    [Parameter] public IReadOnlyList<LibraryLookup> Lookups { get; set; } = [];
+    /// <summary>Narrows the list beyond the name search (for example a Game filter set in <see cref="SearchExtras"/>).</summary>
+    [Parameter] public Func<TItem, bool>? Filter { get; set; }
+
+    /// <summary>The grid's columns before Actions. Default: a sortable Name column.</summary>
+    [Parameter] public RenderFragment? Columns { get; set; }
+    [Parameter] public string? GridTemplateColumns { get; set; }
+    /// <summary>The Actions column's buttons. Default: Edit and Delete.</summary>
+    [Parameter] public RenderFragment<LibraryItem<TItem>>? RowActions { get; set; }
+    /// <summary>One card (a FluentGridItem). When given, the page offers a Table and a Card view.</summary>
+    [Parameter] public RenderFragment<LibraryItem<TItem>>? CardTemplate { get; set; }
+    /// <summary>Controls next to the search box.</summary>
+    [Parameter] public RenderFragment? SearchExtras { get; set; }
+
+    [Parameter] public string NameLabel { get; set; } = "Name";
+    /// <summary>Default: "Enter {singular} name...".</summary>
+    [Parameter] public string? NamePlaceholder { get; set; }
+    /// <summary>The editor's fields before the name, and after it (both inside the form).</summary>
+    [Parameter] public RenderFragment<LibraryEdit<TItem>>? EditorLead { get; set; }
+    [Parameter] public RenderFragment<LibraryEdit<TItem>>? EditorFields { get; set; }
+    /// <summary>Content under the form, in the same dialog.</summary>
+    [Parameter] public RenderFragment<LibraryEdit<TItem>>? EditorExtra { get; set; }
+    /// <summary>The dialog width for the open editor. Default: 400px.</summary>
+    [Parameter] public Func<LibraryEdit<TItem>, string>? DialogWidth { get; set; }
+    [Parameter] public string SaveText { get; set; } = "Save Changes";
+    /// <summary>
+    /// The editor holds a select: a clean dialog closed by Escape waits for the select to finish with the
+    /// same key first (DialogSession.CloseAfterKeyAsync, #105).
+    /// </summary>
+    [Parameter] public bool HasSelect { get; set; }
+
+    private List<TItem>? _items;
+    // The open Add or Edit dialog, null when none is open.
+    private LibraryEdit<TItem>? _edit;
+    // The open dialog's name as a field, for the text field and the name rule.
+    private Expression<Func<string?>>? _nameField;
+    // Set by the save that runs; only that save clears it, never a dismiss.
+    private bool _saving;
+    // The open Add or Edit dialog: a save only closes the dialog it started from.
+    private readonly DialogSession _form = new();
+    // The row whose Delete (or other row action) is running.
+    private readonly RowAction _rows = new();
+    // The open question (delete or discard), if any.
+    private ConfirmRequest? _confirm;
+    private string _search = string.Empty;
+    private bool _cards;
+    // A failed list keeps its previous contents and is named in the page's error bar with Retry.
+    private readonly LoadErrors _loads = new();
+    // A failed Delete, shown above the list; the list stays as it was.
+    private string? _actionError;
+    // A failed create or update, shown inside the open dialog, which keeps the entered data.
+    private string? _dialogError;
+    private Expression<Func<TItem, string>>? _boundName;
+    private PropertyInfo _nameProperty = default!;
+
+    private string Plural => Title.ToLowerInvariant();
+    private string Lower => Singular.ToLowerInvariant();
+    private string Placeholder => NamePlaceholder ?? $"Enter {Lower} name...";
+
+    private string DialogStyle(LibraryEdit<TItem> edit) => $"--dialog-width: {DialogWidth?.Invoke(edit) ?? "400px"};";
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Name, _boundName)) return;
+        _boundName = Name;
+        _nameProperty = Name.Body is MemberExpression { Member: PropertyInfo property } && property.CanWrite
+            ? property
+            : throw new ArgumentException("Name must name a settable string property, such as x => x.Name.", nameof(Name));
+    }
+
+    private string NameOf(TItem item) => (string?)_nameProperty.GetValue(item) ?? string.Empty;
+
+    private void SetName(TItem item, string? value) => _nameProperty.SetValue(item, value ?? string.Empty);
+
+    private IQueryable<TItem> Filtered
+    {
+        get
+        {
+            IEnumerable<TItem> items = _items!;
+            if (Filter is not null) items = items.Where(Filter);
+            if (!string.IsNullOrWhiteSpace(_search))
+                items = items.Where(i => NameOf(i).Contains(_search, StringComparison.OrdinalIgnoreCase));
+            return items.AsQueryable();
+        }
+    }
+
+    private LibraryItem<TItem> ItemFor(TItem item) => new(
+        item, NameOf(item), _rows.IsBusy(item.Id), _rows.Running,
+        EventCallback.Factory.Create<MouseEventArgs>(this, () => ShowEdit(item)),
+        EventCallback.Factory.Create<MouseEventArgs>(this, () => AskDelete(item)),
+        (write, failed) => RunRowAction(item.Id, write, failed));
+
+    protected override Task OnInitializedAsync() => LoadAll();
+
+    private Task LoadAll() => Task.WhenAll(Lookups.Select(l => l.Load(_loads)).Prepend(LoadItems()));
+
+    // After a write: this list, and the lookups that follow it (such as the Activities a Game count reads).
+    private Task Reload() => Task.WhenAll(Lookups.Where(l => l.ReloadAfterWrites).Select(l => l.Load(_loads)).Prepend(LoadItems()));
+
+    private Task LoadItems() => _loads.LoadAsync(Title, Client.GetAllAsync, v => _items = v ?? []);
+
+    private void ShowCreate() => Open(new LibraryEdit<TItem>(NewItem(), false), "add");
+
+    private void ShowEdit(TItem item) => Open(new LibraryEdit<TItem>(CopyItem(item), true), $"edit-{item.Id}");
+
+    private void Open(LibraryEdit<TItem> edit, string opener)
+    {
+        _dialogError = null;
+        _edit = edit;
+        _nameField = Expression.Lambda<Func<string?>>(Expression.Property(Expression.Constant(edit.Item), _nameProperty));
+        _form.Open(() => DirtyFields?.Invoke(edit.Item) ?? new { Name = NameOf(edit.Item) });
+        _ = Focus.RememberAsync(opener);
+    }
+
+    // The Cancel button closes at once without asking, but never while the save runs.
+    private void CancelForm() { if (!_saving) CloseForm(); }
+    private void CloseForm() { _edit = null; _nameField = null; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
+
+    // Overlay click or Escape.
+    private Task DismissForm()
+    {
+        var closing = Task.CompletedTask;
+        _confirm = ConfirmRequest.ForDismiss(_confirm, _saving, _form.IsDirty, CloseForm,
+            closeNow: HasSelect ? () => closing = _form.CloseAfterKeyAsync(CloseForm) : null);
+        return closing;
+    }
+
+    private async Task Save()
+    {
+        if (_saving || _edit is not { } edit) return;
+        _saving = true;
+        var token = _form.Current;
+        try
+        {
+            var error = edit.IsEdit ? await Client.UpdateAsync(edit.Item) : await Client.CreateAsync(edit.Item);
+            var current = _form.IsCurrent(token);
+            if (error is not null)
+            {
+                if (current) _dialogError = error;
+                else _actionError = $"The {Lower} was not saved. {error}";
+                return;
+            }
+            if (current) CloseForm();
+            await Reload();
+        }
+        finally { _saving = false; }
+    }
+
+    private void AskDelete(TItem item)
+    {
+        if (_rows.Running) return;
+        _ = Focus.RememberAsync($"delete-{item.Id}");
+        var message = DeleteMessage?.Invoke(item) ?? $"Delete {NameOf(item)}? This cannot be undone.";
+        _confirm = ConfirmRequest.Delete($"Delete {Lower}", message,
+            () => RunRowAction(item.Id, () => Client.DeleteAsync(item.Id), $"The {Lower} was not deleted."));
+    }
+
+    // One row action at a time; a failure is shown above the list, a success reloads it.
+    private Task RunRowAction(Guid id, Func<Task<string?>> write, string failed) => _rows.RunAsync(id, async () =>
+    {
+        var error = await write();
+        _actionError = error is null ? null : $"{failed} {error}";
+        if (error is null) await Reload();
+    });
+
+    private async Task Confirmed(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        await confirm.OnConfirm();
+        // A Discard closed its form dialog, which returned focus itself. After a delete the row is
+        // gone (focus goes to the heading) or, when it failed, its Delete button is enabled again.
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
+    }
+
+    // Keep editing leaves focus in the form dialog; a cancelled delete returns it to the Delete button.
+    private void Cancelled(ConfirmRequest confirm)
+    {
+        if (_confirm != confirm) return;
+        _confirm = null;
+        if (!confirm.OverDialog) _ = Focus.RestoreAsync();
+    }
+}
