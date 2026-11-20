@@ -165,6 +165,12 @@ internal sealed class LibraryHarness
     public ConcurrentDictionary<string, TableEntity> EventMetrics { get; } = new();
     public ConcurrentDictionary<string, CommentEntity> Comments { get; } = new();
 
+    /// <summary>
+    /// Rows of the <c>ActivityComments</c> table outside the Comment partition (the old-note
+    /// conversion's marker), keyed by <c>PartitionKey|RowKey</c>. A Comment query never sees them.
+    /// </summary>
+    public ConcurrentDictionary<string, TableEntity> CommentTableOtherRows { get; } = new();
+
     public Mock<TableClient> GameTable { get; }
     public Mock<TableClient> ThemeTable { get; }
     public Mock<TableClient> HolidayTable { get; }
@@ -180,6 +186,7 @@ internal sealed class LibraryHarness
     public ListLogger<EventFunctions> EventLog { get; } = new();
     public ListLogger<EventMetricsFunctions> EventMetricsLog { get; } = new();
     public ListLogger<CommentFunctions> CommentLog { get; } = new();
+    public ListLogger<ActivityNoteConversion> NoteConversionLog { get; } = new();
 
     public GameFunctions GameApi { get; }
     public ThemeFunctions ThemeApi { get; }
@@ -188,6 +195,7 @@ internal sealed class LibraryHarness
     public EventFunctions EventApi { get; }
     public EventMetricsFunctions EventMetricsApi { get; }
     public CommentFunctions CommentApi { get; }
+    public ActivityNoteConversion NoteConversion { get; }
 
     public LibraryHarness()
     {
@@ -198,6 +206,16 @@ internal sealed class LibraryHarness
         EventTable = TableMocks.Table(Events);
         EventMetricsTable = TableMocks.Table(EventMetrics);
         CommentTable = TableMocks.FilteringTable(Comments);
+        // Rows of other partitions in ActivityComments are read and inserted as plain TableEntity rows.
+        CommentTable.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string partition, string row, IEnumerable<string> _, CancellationToken _) =>
+                CommentTableOtherRows.TryGetValue($"{partition}|{row}", out var found)
+                    ? Response.FromValue(found, Mock.Of<Response>())
+                    : throw new RequestFailedException(404, "The specified resource does not exist.", "ResourceNotFound", null));
+        CommentTable.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
+            .Returns((TableEntity row, CancellationToken _) => CommentTableOtherRows.TryAdd($"{row.PartitionKey}|{row.RowKey}", row)
+                ? Task.FromResult(TableMocks.Written())
+                : throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null));
 
         var service = new Mock<TableServiceClient>();
         service.Setup(s => s.GetTableClient("Games")).Returns(GameTable.Object);
@@ -220,6 +238,7 @@ internal sealed class LibraryHarness
         EventApi = new EventFunctions(events, games, activities, metrics, EventLog);
         EventMetricsApi = new EventMetricsFunctions(metrics, events, EventMetricsLog);
         CommentApi = new CommentFunctions(comments, activities, events, CommentLog);
+        NoteConversion = new ActivityNoteConversion(activities, comments, service.Object, NoteConversionLog);
     }
 
     /// <summary>Insert, upsert and update calls that reached any table. Seeding writes the dictionaries directly, so it never counts.</summary>
