@@ -27,6 +27,7 @@ builder.Services.AddScoped(sp => new LibraryClient<GameEntity>(sp.GetRequiredSer
 builder.Services.AddScoped(sp => new LibraryClient<ActivityEntity>(sp.GetRequiredService<HttpClient>(), "activities"));
 builder.Services.AddScoped<ActivityService>();
 builder.Services.AddScoped<EventService>();
+builder.Services.AddScoped<EventMetricsClient>();
 builder.Services.AddScoped(sp => new LibraryClient<ThemeEntity>(sp.GetRequiredService<HttpClient>(), "themes"));
 builder.Services.AddScoped(sp => new LibraryClient<HolidayEntity>(sp.GetRequiredService<HttpClient>(), "holidays"));
 builder.Services.AddScoped<FocusReturn>();

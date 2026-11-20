@@ -1,0 +1,207 @@
+@* The Event metrics form in the Event details dialog (#135): attendees, new attendees, returning
+   attendees and amount spent, all optional, for any Event including past ones. Event metrics live in
+   their own row with their own ETag (ADR 0001), so this form reads and saves them through their own
+   route and never through the Event: saving Selections cannot change them, and saving them never
+   conflicts with a Selections edit. The details dialog asks before discarding unsaved values (IsDirty)
+   and keeps itself open while a save runs (SavingChanged). *@
+@using System.Globalization
+@inject EventMetricsClient MetricsClient
+
+<FluentCard AreaRestricted="false">
+    <FluentStack Orientation="Orientation.Vertical" VerticalGap="8" Style="padding: 8px;">
+        <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold">Event metrics</FluentLabel>
+        <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">
+            Optional numbers about how the night went. Saved on their own, apart from the Selections.
+        </FluentLabel>
+        @if (!_loaded)
+        {
+            @* Not an alert: it is not a result of anything the user did here (like the likes count above). *@
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12" Wrap="true">
+                <span role="status">@(_loadError ?? "Loading Event metrics…")</span>
+                @if (_loadError is not null)
+                {
+                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Loading="@_loading" OnClick="Load">Retry</FluentButton>
+                }
+            </FluentStack>
+        }
+        else
+        {
+            <FluentGrid Spacing="2">
+                @for (var i = 0; i < Labels.Length; i++)
+                {
+                    var field = i;
+                    <FluentGridItem xs="12" sm="6">
+                        <div>
+                            <FluentTextField Id="@Ids[field]" Label="@Labels[field]" Value="@_raw[field]" Immediate="true"
+                                             ValueChanged="@((string? v) => SetRaw(field, v))" Disabled="@_saving" Style="width: 100%;"
+                                             Placeholder="@(field == AmountField ? "e.g. 40.50" : "e.g. 12")" />
+                            @if (_errors[field] is { } error)
+                            {
+                                <div role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@error</div>
+                            }
+                        </div>
+                    </FluentGridItem>
+                }
+            </FluentGrid>
+            @if (_stale)
+            {
+                <div role="alert" style="color: var(--error);">@StaleMessage</div>
+                <div>
+                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Loading="@_loading" Disabled="@_saving" OnClick="Load">Reload</FluentButton>
+                </div>
+            }
+            @if (_saveError is not null)
+            {
+                <div role="alert" style="color: var(--error);">@_saveError</div>
+            }
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" HorizontalGap="12">
+                <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" Loading="@_saving"
+                              Disabled="@(!IsDirty || _loading)" OnClick="Save">Save metrics</FluentButton>
+                @if (_savedNote is not null)
+                {
+                    <span role="status">@_savedNote</span>
+                }
+            </FluentStack>
+        }
+    </FluentStack>
+</FluentCard>
+
+@code {
+    // The Event whose metrics this form edits. The dialog keys the form by it, so another Event gets a new form.
+    [Parameter] public Guid EventId { get; set; }
+    // True while a save runs and false when it ends: the dialog neither closes nor asks meanwhile.
+    [Parameter] public EventCallback<bool> SavingChanged { get; set; }
+
+    public const string StaleMessage = "These numbers were changed by someone else. Reload and try again.";
+
+    // The API's limits and messages (EventMetricsValidator, docs/api-validation.md), copied, not shared.
+    private const int MaxCount = 1_000_000;
+    private const decimal MaxAmount = 1_000_000_000m;
+    private const string AmountMessage = "Amount spent must be between 0 and 1000000000 with at most 2 decimal places.";
+    private static string CountMessage(string field) => $"{field} must be a whole number from 0 to 1000000.";
+
+    private static readonly string[] Labels = ["Attendees", "New attendees", "Returning attendees", "Amount spent"];
+    private static readonly string[] Ids = Labels.Select(l => "metrics-" + l.ToLowerInvariant().Replace(' ', '-')).ToArray();
+    private const int AmountField = 3;
+
+    // What the fields show (as typed) and what was last read or saved, as text. They differ: unsaved.
+    private string[] _raw = ["", "", "", ""];
+    private string[] _stored = ["", "", "", ""];
+    private readonly string?[] _errors = new string?[4];
+    // The stored row's ETag, sent back as If-Match; null while no row is stored (a save then creates it).
+    private string? _eTag;
+    private bool _loaded;
+    private bool _loading;
+    private bool _saving;
+    private bool _stale;
+    private string? _loadError;
+    private string? _saveError;
+    private string? _savedNote;
+
+    /// <summary>A value was typed that is not saved yet (typing the stored value back is no change).</summary>
+    internal bool IsDirty => _loaded && !_raw.SequenceEqual(_stored);
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private void SetRaw(int field, string? value)
+    {
+        _raw[field] = value ?? string.Empty;
+        _errors[field] = null;
+        _savedNote = null;
+    }
+
+    // The first read, Retry after a failed one, and Reload after a stale save: replaces the fields with the row.
+    private async Task Load()
+    {
+        if (_loading || _saving) return;
+        _loading = true;
+        try
+        {
+            var result = await MetricsClient.GetAsync(EventId);
+            if (result.Error is { } error)
+            {
+                if (_loaded) _saveError = $"The Event metrics could not be reloaded. {error}";
+                else _loadError = $"Event metrics could not be loaded. {error}";
+                return;
+            }
+            Show(result);
+            _loadError = _saveError = _savedNote = null;
+            _stale = false;
+            Array.Clear(_errors);
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task Save()
+    {
+        // One save at a time: a second click while one runs sends nothing.
+        if (_saving || _loading || !_loaded) return;
+        if (Validate() is not { } metrics) return;
+        _saving = true;
+        _saveError = _savedNote = null;
+        await SavingChanged.InvokeAsync(true);
+        try
+        {
+            var result = await MetricsClient.SaveAsync(EventId, metrics, _eTag);
+            if (result.Conflict)
+            {
+                // Someone else saved first. Keep what was typed; Reload reads their numbers.
+                _stale = true;
+                return;
+            }
+            if (result.Error is { } error)
+            {
+                _saveError = $"The Event metrics were not saved. {error}";
+                return;
+            }
+            Show(result);
+            _stale = false;
+            _savedNote = "Event metrics saved.";
+        }
+        finally
+        {
+            _saving = false;
+            await SavingChanged.InvokeAsync(false);
+        }
+    }
+
+    private void Show(EventMetricsResult result)
+    {
+        var m = result.Metrics!;
+        _stored = [Text(m.Attendees), Text(m.NewAttendees), Text(m.ReturningAttendees), Text(m.AmountSpent)];
+        _raw = _stored.ToArray();
+        _eTag = result.ETag;
+        _loaded = true;
+    }
+
+    private static string Text(int? value) => value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    private static string Text(decimal? value) => value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+
+    // Every field's rule, as the API checks it; an empty field is null (cleared). Null when any field fails.
+    private EventMetricsEntity? Validate()
+    {
+        var counts = new int?[3];
+        for (var i = 0; i < counts.Length; i++)
+        {
+            var text = _raw[i].Trim();
+            if (text.Length == 0) { _errors[i] = null; continue; }
+            var ok = int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var n) && n is >= 0 and <= MaxCount;
+            _errors[i] = ok ? null : CountMessage(Labels[i]);
+            counts[i] = n;
+        }
+
+        decimal? amount = null;
+        var amountText = _raw[AmountField].Trim();
+        _errors[AmountField] = null;
+        if (amountText.Length > 0)
+        {
+            var ok = decimal.TryParse(amountText, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var a)
+                && a >= 0 && a <= MaxAmount && decimal.Round(a, 2) == a;
+            _errors[AmountField] = ok ? null : AmountMessage;
+            amount = a;
+        }
+
+        if (_errors.Any(e => e is not null)) return null;
+        return new EventMetricsEntity { Id = EventId, Attendees = counts[0], NewAttendees = counts[1], ReturningAttendees = counts[2], AmountSpent = amount };
+    }
+}

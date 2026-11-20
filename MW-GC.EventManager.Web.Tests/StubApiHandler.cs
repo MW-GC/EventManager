@@ -4,10 +4,12 @@ using System.Net.Http.Json;
 namespace MW_GC.EventManager.Web.Tests;
 
 // A stub API for page tests: routes answer with a fixed status, throw a transport error, or
-// return JSON. Unrouted requests answer 404. Every request is recorded with its body.
+// return JSON. Unrouted requests answer 404. Every request is recorded with its body, and
+// separately with its If-Match header.
 internal sealed class StubApiHandler : HttpMessageHandler
 {
     private readonly List<(HttpMethod Method, string Path, Func<Task<HttpResponseMessage>> Respond)> _routes = [];
+    private readonly List<(HttpMethod Method, string Path, string? IfMatch)> _ifMatches = [];
 
     public List<(HttpMethod Method, string Path, string? Body)> Requests { get; } = [];
 
@@ -44,11 +46,16 @@ internal sealed class StubApiHandler : HttpMessageHandler
     public List<string?> Bodies(HttpMethod method, string path) =>
         Requests.Where(r => r.Method == method && r.Path == path).Select(r => r.Body).ToList();
 
+    // The If-Match headers sent to one route, oldest first (null for a request without one).
+    public List<string?> IfMatches(HttpMethod method, string path) =>
+        _ifMatches.Where(r => r.Method == method && r.Path == path).Select(r => r.IfMatch).ToList();
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var path = request.RequestUri!.AbsolutePath;
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         Requests.Add((request.Method, path, body));
+        _ifMatches.Add((request.Method, path, request.Headers.TryGetValues("If-Match", out var tags) ? string.Join(", ", tags) : null));
         foreach (var route in _routes)
             if (route.Method == request.Method && route.Path == path)
                 return await route.Respond();
