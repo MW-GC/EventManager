@@ -129,11 +129,11 @@
                             {
                                 @foreach (var tid in act.ThemeIds)
                                 {
-                                    <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveName(Themes, tid)" Style="font-size: 0.65rem;" />
+                                    <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveName(Themes, tid, t => t.Name)" Style="font-size: 0.65rem;" />
                                 }
                                 @foreach (var hid in act.HolidayIds)
                                 {
-                                    <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveName(Holidays, hid)" Style="font-size: 0.65rem;" />
+                                    <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveName(Holidays, hid, h => h.Name)" Style="font-size: 0.65rem;" />
                                 }
                             }
                         }
@@ -226,9 +226,10 @@
         return list;
     }
 
-    private static string ResolveName<T>(List<T>? list, Guid id) where T : EntityBase =>
+    // A tag's name from the loaded list, or the first 8 characters of its id when the list does not have it.
+    private static string ResolveName<T>(List<T>? list, Guid id, Func<T, string> name) where T : EntityBase =>
         list?.FirstOrDefault(x => x.Id == id) is { } match
-            ? ((dynamic)match).Name
+            ? name(match)
             : id.ToString()[..8];
 
     // An edited slot is its stored snapshot until the user changes its Game or Activity, so a
