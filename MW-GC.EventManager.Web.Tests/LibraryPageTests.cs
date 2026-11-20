@@ -89,6 +89,26 @@ public sealed class LibraryPageTests : IDisposable
         Assert.ContainsSingle(games.FindAll("fluent-button[title='Card view']"));
     }
 
+    // ---- A write the using page sends itself (#126: the Activities Save Comments) -----------------
+
+    [TestMethod]
+    public async Task ReloadAsync_ReadsTheListAgain_AndShowActionError_ShowsAboveTheList()
+    {
+        var page = Themes();
+        var reads = api.Count(HttpMethod.Get, "/api/themes");
+        api.Json(HttpMethod.Get, "/api/themes", new[] { cozy });
+
+        await page.InvokeAsync(() => page.Instance.ReloadAsync());
+
+        Assert.AreEqual(reads + 1, api.Count(HttpMethod.Get, "/api/themes"));
+        page.WaitForAssertion(() => Assert.Contains("Cozy", Assert.ContainsSingle(page.Rows())));
+        Assert.IsEmpty(page.PageAlerts());
+
+        await page.InvokeAsync(() => page.Instance.ShowActionError("The comments were not saved."));
+        Assert.AreEqual("The comments were not saved.", Assert.ContainsSingle(page.PageAlerts()));
+        Assert.Contains("Cozy", Assert.ContainsSingle(page.Rows()));
+    }
+
     // ---- Delete confirmation and the busy guard ----------------------------------------------------
 
     [TestMethod]
@@ -472,8 +492,8 @@ public sealed class LibraryPageTests : IDisposable
     // ---- The generic client ------------------------------------------------------------------------
 
     // The client sends what the service it replaced sent: the same verb, path, headers (no If-Match) and body,
-    // call for call. Activities still has its service, so that row compares against it live. GameService's
-    // writes, ThemeService and HolidayService were removed in #125; their rows compare against what those
+    // call for call. GameService's writes, ThemeService and HolidayService were removed in #125, and
+    // ActivityService's read, create, update and delete in #126; their rows compare against what those
     // services sent, which was checked against the services themselves before they were removed.
     [TestMethod]
     [DataRow("games")]
@@ -497,16 +517,14 @@ public sealed class LibraryPageTests : IDisposable
                 await AssertSameRequests(route, holiday, ServiceRequests(route, holiday));
                 break;
             default:
+                // ActivityService lost these four methods in #126; they sent the same requests as the other services.
                 var activity = new ActivityEntity { Id = Id, Name = "Race", GameId = Guid.NewGuid(), ThemeIds = [Guid.NewGuid()] };
-                var old = new Recorder();
-                var s = new ActivityService(old.Client());
-                await s.GetAllAsync(); (await s.CreateAsync(activity)).Dispose(); (await s.UpdateAsync(activity)).Dispose(); (await s.DeleteAsync(Id)).Dispose();
-                await AssertSameRequests(route, activity, old.Sent);
+                await AssertSameRequests(route, activity, ServiceRequests(route, activity));
                 break;
         }
     }
 
-    // What GameService, ThemeService and HolidayService sent (GetAll, Create, Update, Delete): the verb, the path,
+    // What GameService, ActivityService, ThemeService and HolidayService sent (GetAll, Create, Update, Delete): the verb, the path,
     // no request headers, and the item as web-default JSON, the System.Net.Http.Json default.
     private static string[] ServiceRequests<T>(string route, T item) where T : EntityBase =>
     [

@@ -2,7 +2,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject EventService EventSvc
 @inject GameService GameSvc
-@inject ActivityService ActivitySvc
+@inject LibraryClient<ActivityEntity> ActivityClient
 
 <PageHeader Title="Stats" Subtitle="How often each Game and Activity was offered and won, and when it was last offered" />
 <ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
@@ -119,7 +119,7 @@
         await Task.WhenAll(
             _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
             _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
-            _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []));
+            _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []));
         if (_events is not null && _games is not null && _activities is not null)
             _report = _stats.Compute(_events, _games, _activities);
     }

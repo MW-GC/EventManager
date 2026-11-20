@@ -171,7 +171,10 @@ public sealed class DialogSafetyTests : IDisposable
         await RowButton(page, "Grand Prix", "Duplicate").ClickAsync(new());
         // A click that lands before the re-render reaches the handler itself, which sends nothing.
         // Not awaited before the release: without the guard it would wait on the held request too.
-        var second = page.InvokeAsync(() => ((RowAction)Field(page.Instance, "_rows")!).RunAsync(grandPrix.Id, () => (Task)Call(page.Instance, "Duplicate", grandPrix.Id)!));
+        // The row-action guard moved into the shared Library page the Activities page renders (#126).
+        var library = page.FindComponent<LibraryPage<ActivityEntity>>().Instance;
+        var second = page.InvokeAsync(() => (Task)Call(library, "RunRowAction", grandPrix.Id,
+            (Func<Task<string?>>)(() => (Task<string?>)Call(page.Instance, "Duplicate", grandPrix.Id)!), "The activity was not duplicated.")!);
 
         gate.SetResult();
         await first;

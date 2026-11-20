@@ -1,7 +1,7 @@
 @page "/games"
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject LibraryClient<GameEntity> GameClient
-@inject ActivityService ActivitySvc
+@inject LibraryClient<ActivityEntity> ActivityClient
 @inject LibraryClient<ThemeEntity> ThemeSvc
 @inject LibraryClient<HolidayEntity> HolidaySvc
 
@@ -132,7 +132,7 @@
     protected override void OnInitialized() => _lookups =
     [
         // The counts follow every save and delete, so the Activities list reloads with the Games.
-        new(loads => loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, SetActivities), ReloadAfterWrites: true),
+        new(loads => loads.LoadAsync("Activities", ActivityClient.GetAllAsync, SetActivities), ReloadAfterWrites: true),
         new(loads => loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? [])),
         new(loads => loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []))
     ];

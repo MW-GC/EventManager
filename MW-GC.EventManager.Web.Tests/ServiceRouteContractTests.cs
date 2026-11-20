@@ -33,11 +33,8 @@ public sealed class ServiceRouteContractTests
     [
         new(typeof(GameService), nameof(GameService.GetAllAsync), "GET", "api/games", h => new GameService(h).GetAllAsync()),
 
-        new(typeof(ActivityService), nameof(ActivityService.GetAllAsync), "GET", "api/activities", h => new ActivityService(h).GetAllAsync()),
-        new(typeof(ActivityService), nameof(ActivityService.GetAsync), "GET", "api/activities/{id}", h => new ActivityService(h).GetAsync(Id)),
-        new(typeof(ActivityService), nameof(ActivityService.CreateAsync), "POST", "api/activities", h => new ActivityService(h).CreateAsync(new ActivityEntity { Id = Id })),
-        new(typeof(ActivityService), nameof(ActivityService.UpdateAsync), "PUT", "api/activities/{id}", h => new ActivityService(h).UpdateAsync(new ActivityEntity { Id = Id })),
-        new(typeof(ActivityService), nameof(ActivityService.DeleteAsync), "DELETE", "api/activities/{id}", h => new ActivityService(h).DeleteAsync(Id)),
+        // Activities read, create, update and delete through the shared client (#126); the service keeps the two
+        // routes only Activities have.
         new(typeof(ActivityService), nameof(ActivityService.DuplicateAsync), "POST", "api/activities/{id}/duplicate", h => new ActivityService(h).DuplicateAsync(Id)),
         new(typeof(ActivityService), nameof(ActivityService.UpdateCommentsAsync), "PATCH", "api/activities/{id}/comments", h => new ActivityService(h).UpdateCommentsAsync(Id, "Note")),
 
@@ -56,6 +53,7 @@ public sealed class ServiceRouteContractTests
         .. LibraryRows<GameEntity>("games"),
         .. LibraryRows<ThemeEntity>("themes"),
         .. LibraryRows<HolidayEntity>("holidays"),
+        .. LibraryRows<ActivityEntity>("activities"),
     ];
 
     private static Row[] LibraryRows<T>(string route) where T : EntityBase, new() =>
@@ -69,7 +67,8 @@ public sealed class ServiceRouteContractTests
     private static readonly Type[] Services =
     [
         typeof(GameService), typeof(ActivityService), typeof(EventService), typeof(EventMetricsClient),
-        typeof(LibraryClient<GameEntity>), typeof(LibraryClient<ThemeEntity>), typeof(LibraryClient<HolidayEntity>)
+        typeof(LibraryClient<GameEntity>), typeof(LibraryClient<ThemeEntity>), typeof(LibraryClient<HolidayEntity>),
+        typeof(LibraryClient<ActivityEntity>)
     ];
 
     [TestMethod]

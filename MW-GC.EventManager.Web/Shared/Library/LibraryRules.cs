@@ -24,6 +24,15 @@ public static class LibraryRules
     public static string? Website(string? value) =>
         string.IsNullOrWhiteSpace(value) || IsHttpAddress(value) ? null : "Website must be an http or https address.";
 
+    /// <summary>The message under an Activity's Game field when none is chosen.</summary>
+    public const string GameRequired = "Game is required.";
+
+    /// <summary>
+    /// An Activity's Game: null once one is chosen, otherwise <see cref="GameRequired"/>. The API refuses the same
+    /// case with its own words (ActivityValidator: "GameId is required."); the form names the field as the user sees it.
+    /// </summary>
+    public static string? Game(Guid gameId) => gameId == Guid.Empty ? GameRequired : null;
+
     /// <summary>An absolute http or https address, so safe to use as a link (never javascript: or similar).</summary>
     public static bool IsHttpAddress(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
