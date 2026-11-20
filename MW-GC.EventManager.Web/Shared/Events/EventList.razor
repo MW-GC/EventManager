@@ -1,0 +1,87 @@
+@* The Events list: search, the Create Event button and the grid with each row's Details, Edit and
+   Delete. It only shows the Events it is given and says which button was pressed; the page opens the
+   dialogs and runs the delete. *@
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+
+<FluentCard Style="overflow: visible;" AreaRestricted="false">
+    <FluentStack Orientation="Orientation.Horizontal"
+                 HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+                 VerticalAlignment="VerticalAlignment.Center"
+                 Style="margin-bottom: 16px;"
+                 Wrap="true">
+        <FluentSearch @bind-Value="_search" @bind-Value:after="HandleSearch" Immediate="true" ImmediateDelay="300" Placeholder="Search events..." aria-label="Search events" />
+        <FluentButton Appearance="Appearance.Accent" OnClick="OnCreate" IconStart="@(new Size16.Add())" data-focus-key="add">
+            Create Event
+        </FluentButton>
+    </FluentStack>
+
+    <FluentDataGrid Items="@Filtered" TGridItem="EventEntity" Virtualize="true" ItemSize="44" GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 120px">
+        <PropertyColumn Property="@(e => e.Name)" Title="Name" Sortable="true" />
+        <TemplateColumn Title="Date" Sortable="true" SortBy="@_dateSort" IsDefaultSortColumn="true" InitialSortDirection="SortDirection.Descending">
+            @context.Date.ToLocalTime().ToString("g")
+        </TemplateColumn>
+        <TemplateColumn Title="Selections">
+            <FluentBadge Appearance="Appearance.Neutral">@context.Selections.Count</FluentBadge>
+        </TemplateColumn>
+        <TemplateColumn Title="Winner">
+            @if (context.WinnerActivityId.HasValue)
+            {
+                var winner = context.Selections.FirstOrDefault(s => s.Activity.Id == context.WinnerActivityId.Value);
+                @if (winner is not null)
+                {
+                    <FluentBadge Appearance="Appearance.Accent">
+                        <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> @winner.Game.Name — @winner.Activity.Name
+                    </FluentBadge>
+                }
+                else
+                {
+                    <FluentBadge Appearance="Appearance.Accent">
+                        <FluentIcon Value="@(new Size16.Trophy())" Color="Color.Fill" Style="margin-right: 4px;" /> Selected
+                    </FluentBadge>
+                }
+            }
+            else
+            {
+                <FluentLabel Style="color: var(--neutral-foreground-hint);">None</FluentLabel>
+            }
+        </TemplateColumn>
+        <TemplateColumn Title="Actions">
+            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
+                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" aria-label="@($"Details {context.Name}")" data-focus-key="@($"details-{context.Id}")"
+                              Disabled="@Rows.IsBusy(context.Id)" OnClick="@(() => OnDetails.InvokeAsync(context))">
+                    <FluentIcon Value="@(new Size16.Eye())" />
+                </FluentButton>
+                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {context.Name}")" data-focus-key="@($"edit-{context.Id}")"
+                              Disabled="@Rows.IsBusy(context.Id)" OnClick="@(() => OnEdit.InvokeAsync(context))">
+                    <FluentIcon Value="@(new Size16.Edit())" />
+                </FluentButton>
+                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {context.Name}")" data-focus-key="@($"delete-{context.Id}")"
+                              Disabled="@Rows.Running" OnClick="@(() => OnDelete.InvokeAsync(context))">
+                    <FluentIcon Value="@(new Size16.Delete())" />
+                </FluentButton>
+            </FluentStack>
+        </TemplateColumn>
+    </FluentDataGrid>
+</FluentCard>
+
+@code {
+    // The loaded Events.
+    [Parameter, EditorRequired] public List<EventEntity> Events { get; set; } = [];
+    // The row action (Delete) the page is running, which disables the row buttons meanwhile.
+    [Parameter, EditorRequired] public RowAction Rows { get; set; } = null!;
+    [Parameter] public EventCallback OnCreate { get; set; }
+    [Parameter] public EventCallback<EventEntity> OnDetails { get; set; }
+    [Parameter] public EventCallback<EventEntity> OnEdit { get; set; }
+    [Parameter] public EventCallback<EventEntity> OnDelete { get; set; }
+
+    private string _search = string.Empty;
+
+    // Sorts the grid by the underlying instant while the column renders local time.
+    private static readonly GridSort<EventEntity> _dateSort = GridSort<EventEntity>.ByAscending(e => e.Date);
+
+    private IQueryable<EventEntity> Filtered => string.IsNullOrWhiteSpace(_search)
+        ? Events.AsQueryable()
+        : Events.Where(e => e.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)).AsQueryable();
+
+    private void HandleSearch() { }
+}

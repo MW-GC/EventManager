@@ -9,6 +9,7 @@ using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
 using MW_GC.EventManager.Web.Shared;
+using MW_GC.EventManager.Web.Shared.Events;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -203,7 +204,8 @@ public sealed class DialogSafetyTests : IDisposable
         await during[0].ClickAsync(new());
         // A click that lands before the re-render reaches the handler itself, which sends nothing.
         // Not awaited before the release: without the guard it would wait on the held request too.
-        var second = page.InvokeAsync(() => (Task)Call(page.Instance, "SelectWinner", stock.Id)!);
+        // SelectWinner moved with the details dialog into EventDetailsDialog (#93).
+        var second = page.InvokeAsync(() => (Task)Call(page.FindComponent<EventDetailsDialog>().Instance, "SelectWinner", stock.Id)!);
 
         gate.SetResult();
         await first;
@@ -264,7 +266,9 @@ public sealed class DialogSafetyTests : IDisposable
         // The click may still be queued behind other renderer work, so wait for the save's render.
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
-        await CloseThrough(page, "CloseCustomize");
+        // CloseCustomize and _editingEvent moved with the dialog into EventEditDialog (#93).
+        var dialog = page.FindComponent<EventEditDialog>();
+        await CloseThrough(dialog, "CloseCustomize");
         Assert.IsFalse(page.HasFormDialog());
         await RowButton(page, "Party", "Edit").ClickAsync(new());
         await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Party typed" });
@@ -274,7 +278,7 @@ public sealed class DialogSafetyTests : IDisposable
 
         Assert.AreEqual("Edit Event", page.DialogTitle());
         Assert.AreEqual("Party typed", EventName(page).GetAttribute("value"));
-        Assert.AreEqual(party.Id, ((EventEntity)Field(page.Instance, "_editingEvent")!).Id);
+        Assert.AreEqual(party.Id, ((EventEntity)Field(dialog.Instance, "_editingEvent")!).Id);
         Assert.IsEmpty(page.FormDialog().Alerts());
         Assert.AreEqual(1, api.Count(HttpMethod.Put, pathA));
         Assert.Contains("Night renamed", api.Bodies(HttpMethod.Put, pathA)[0]!);
@@ -614,8 +618,8 @@ public sealed class DialogSafetyTests : IDisposable
         return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
     }
 
-    // Runs one of the page's close methods, then renders, as an event handler would.
-    private static Task CloseThrough(IRenderedComponent<IComponent> page, string method) => page.InvokeAsync(() =>
+    // Runs one of the page's (or one of its dialogs') close methods, then renders, as an event handler would.
+    private static Task CloseThrough<T>(IRenderedComponent<T> page, string method) where T : IComponent => page.InvokeAsync(() =>
     {
         Call(page.Instance, method);
         Call(page.Instance, "StateHasChanged");
