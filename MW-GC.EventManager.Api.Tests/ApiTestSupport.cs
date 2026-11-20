@@ -166,6 +166,12 @@ internal sealed class LibraryHarness
     public ConcurrentDictionary<string, CommentEntity> Comments { get; } = new();
 
     /// <summary>
+    /// The <c>FeedbackLikes</c> table: one row per Like, PartitionKey the Event id. Keyed by RowKey
+    /// alone, so give every seeded row its own RowKey.
+    /// </summary>
+    public ConcurrentDictionary<string, TableEntity> Likes { get; } = new();
+
+    /// <summary>
     /// Rows of the <c>ActivityComments</c> table outside the Comment partition (the old-note
     /// conversion's marker), keyed by <c>PartitionKey|RowKey</c>. A Comment query never sees them.
     /// </summary>
@@ -178,6 +184,7 @@ internal sealed class LibraryHarness
     public Mock<TableClient> EventTable { get; }
     public Mock<TableClient> EventMetricsTable { get; }
     public Mock<TableClient> CommentTable { get; }
+    public Mock<TableClient> LikesTable { get; }
 
     public ListLogger<GameFunctions> GameLog { get; } = new();
     public ListLogger<ThemeFunctions> ThemeLog { get; } = new();
@@ -206,6 +213,10 @@ internal sealed class LibraryHarness
         EventTable = TableMocks.Table(Events);
         EventMetricsTable = TableMocks.Table(EventMetrics);
         CommentTable = TableMocks.FilteringTable(Comments);
+        LikesTable = TableMocks.FilteringTable(Likes);
+        // A read of the whole table (no filter, the string overload) answers with every row.
+        LikesTable.Setup(t => t.QueryAsync<TableEntity>(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(Likes.Values.ToList(), null, Mock.Of<Response>())]));
         // Rows of other partitions in ActivityComments are read and inserted as plain TableEntity rows.
         CommentTable.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string partition, string row, IEnumerable<string> _, CancellationToken _) =>
@@ -225,6 +236,8 @@ internal sealed class LibraryHarness
         service.Setup(s => s.GetTableClient("Events")).Returns(EventTable.Object);
         service.Setup(s => s.GetTableClient("EventMetrics")).Returns(EventMetricsTable.Object);
         service.Setup(s => s.GetTableClient("ActivityComments")).Returns(CommentTable.Object);
+        service.Setup(s => s.GetTableClient(FeedbackStore.LinksTable)).Returns(TableMocks.Table(new ConcurrentDictionary<string, TableEntity>()).Object);
+        service.Setup(s => s.GetTableClient(FeedbackStore.LikesTable)).Returns(LikesTable.Object);
 
         var games = new TableStore<GameEntity>(service.Object, "Games", "Game");
         var activities = new TableStore<ActivityEntity>(service.Object, "Activities", "Activity");
@@ -236,7 +249,7 @@ internal sealed class LibraryHarness
         HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), activities, HolidayLog);
         ActivityApi = new ActivityFunctions(activities, games, comments, ActivityLog);
         EventApi = new EventFunctions(events, games, activities, metrics, EventLog);
-        EventMetricsApi = new EventMetricsFunctions(metrics, events, EventMetricsLog);
+        EventMetricsApi = new EventMetricsFunctions(metrics, events, new FeedbackStore(service.Object), EventMetricsLog);
         CommentApi = new CommentFunctions(comments, activities, events, CommentLog);
         NoteConversion = new ActivityNoteConversion(activities, comments, service.Object, NoteConversionLog);
     }

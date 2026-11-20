@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using MW_GC.EventManager.Shared.Entities;
+using MW_GC.EventManager.Shared.Models;
 
 namespace MW_GC.EventManager.Web.Services;
 
@@ -13,6 +14,13 @@ namespace MW_GC.EventManager.Web.Services;
 /// </summary>
 public sealed class EventMetricsClient(HttpClient http)
 {
+    /// <summary>
+    /// Every Event's metrics with its Like count (<c>GET api/event-metrics</c>, #136), for the Stats
+    /// page. An Event with neither has no item. Unlike the calls below it throws on failure, like the
+    /// other list loads, so <see cref="LoadErrors"/> can name it.
+    /// </summary>
+    public Task<List<EventMetricsWithLikes>?> GetAllAsync() => http.GetFromJsonAsync<List<EventMetricsWithLikes>>("api/event-metrics");
+
     public async Task<EventMetricsResult> GetAsync(Guid eventId)
     {
         try

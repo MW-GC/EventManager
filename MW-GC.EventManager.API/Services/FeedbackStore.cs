@@ -94,6 +94,22 @@ internal sealed class FeedbackStore
         return count;
     }
 
+    /// <summary>
+    /// The Like count of every Event that has at least one Like, in one pass over the whole
+    /// <c>FeedbackLikes</c> table reading only the keys (#136). A partition key that is not a Guid
+    /// is not an Event's and is skipped.
+    /// </summary>
+    public async Task<Dictionary<Guid, int>> CountLikesByEventAsync(CancellationToken ct = default)
+    {
+        var counts = new Dictionary<Guid, int>();
+        await foreach (var row in _likes.QueryAsync<TableEntity>(select: ["PartitionKey", "RowKey"], cancellationToken: ct))
+        {
+            if (!Guid.TryParse(row.PartitionKey, out var eventId)) continue;
+            counts[eventId] = counts.GetValueOrDefault(eventId) + 1;
+        }
+        return counts;
+    }
+
     private async Task<string?> ReadTokenAsync(Guid eventId, CancellationToken ct) =>
         (await GetAsync(_links, EventPartition, EventKey(eventId), ct))?.GetString(TokenProperty);
 

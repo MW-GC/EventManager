@@ -30,7 +30,8 @@ public sealed class PageSmokeTests : IDisposable
            .Json(HttpMethod.Get, "/api/activities", new[] { activity })
            .Json(HttpMethod.Get, "/api/themes", new[] { theme })
            .Json(HttpMethod.Get, "/api/holidays", new[] { holiday })
-           .Json(HttpMethod.Get, "/api/events", new[] { ev });
+           .Json(HttpMethod.Get, "/api/events", new[] { ev })
+           .Json(HttpMethod.Get, "/api/event-metrics", Array.Empty<EventMetricsWithLikes>());
         harness = new PageHarness(api);
     }
 

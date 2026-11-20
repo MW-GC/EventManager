@@ -43,7 +43,16 @@ public sealed class PlayStatsTests
         WinnerActivityId = winner
     };
 
-    private PlayStatsReport Compute(params EventEntity[] events) => stats.Compute(events, [kart, puzzle], [sprint, battle, tiles]);
+    private PlayStatsReport Compute(params EventEntity[] events) => stats.Compute(events, [kart, puzzle], [sprint, battle, tiles], []);
+
+    private PlayStatsReport Compute(EventMetricsWithLikes[] metrics, params EventEntity[] events) =>
+        stats.Compute(events, [kart, puzzle], [sprint, battle, tiles], metrics);
+
+    // One Event's metrics item: its attendees (null for cleared) and its Like count.
+    private static EventMetricsWithLikes Metrics(EventEntity ev, int? attendees, int likes) => new(ev.Id, attendees, null, null, null, likes);
+
+    private static (decimal? WinRate, decimal? AverageLikes, decimal? AverageAttendees) Performance(ActivityPlayStats a) =>
+        (a.WinRate, a.AverageLikes, a.AverageAttendees);
 
     private static GamePlayStats Game(PlayStatsReport report, Guid id) => report.Games.Single(g => g.Id == id);
     private static ActivityPlayStats Activity(PlayStatsReport report, Guid id) => report.Activities.Single(a => a.Id == id);
@@ -189,7 +198,8 @@ public sealed class PlayStatsTests
         var report = stats.Compute(
             [Event(Day(3, 1), sprint.Id, Pick(kart, sprint)), Event(Day(4, 1), null, Pick(twinGame, twinActivity))],
             [kart, twinGame],
-            [sprint, twinActivity]);
+            [sprint, twinActivity],
+            []);
 
         var karts = report.Games.Where(g => g.Name == "Kart").ToList();
         Assert.HasCount(2, karts);
@@ -225,7 +235,7 @@ public sealed class PlayStatsTests
     [TestMethod]
     public void NothingAtAll_GivesNoRows()
     {
-        var report = stats.Compute([], [], []);
+        var report = stats.Compute([], [], [], []);
         Assert.IsEmpty(report.Games);
         Assert.IsEmpty(report.Activities);
     }
@@ -243,9 +253,143 @@ public sealed class PlayStatsTests
                 Event(Day(2, 1), null, Pick(chess, battle)),
             ],
             [kart, puzzle, mono, chess],
+            [],
             []);
 
         CollectionAssert.AreEqual(new[] { "Mono", "Puzzle", "Chess", "Kart" }, report.Games.Select(g => g.Name).ToList());
+    }
+
+    // ---- Activity performance (#136): win rate, average Likes and average attendees ------------
+
+    [TestMethod]
+    public void WinRate_IsWinsDividedByOffered()
+    {
+        var report = Compute(
+            Event(Day(3, 1), sprint.Id, Pick(kart, sprint), Pick(puzzle, tiles)),
+            Event(Day(4, 1), tiles.Id, Pick(kart, sprint), Pick(puzzle, tiles)),
+            Event(Day(5, 1), null, Pick(kart, sprint)),
+            Event(Day(6, 1), tiles.Id, Pick(kart, sprint), Pick(puzzle, tiles)));
+
+        Assert.AreEqual(0.25m, Activity(report, sprint.Id).WinRate);
+        Assert.AreEqual(2m / 3m, Activity(report, tiles.Id).WinRate);
+    }
+
+    [TestMethod]
+    public void AverageLikes_IsTheMeanLikeCountOfTheEventsTheActivityAppearedIn()
+    {
+        var first = Event(Day(3, 1), sprint.Id, Pick(kart, sprint), Pick(puzzle, tiles));
+        var second = Event(Day(4, 1), null, Pick(kart, sprint));
+
+        var report = Compute([Metrics(first, null, 3), Metrics(second, null, 2)], first, second);
+
+        Assert.AreEqual(2.5m, Activity(report, sprint.Id).AverageLikes);
+        Assert.AreEqual(3m, Activity(report, tiles.Id).AverageLikes);
+    }
+
+    [TestMethod]
+    public void AverageAttendees_IsTheMeanAttendeesOfTheEventsTheActivityAppearedIn()
+    {
+        var first = Event(Day(3, 1), sprint.Id, Pick(kart, sprint), Pick(puzzle, tiles));
+        var second = Event(Day(4, 1), null, Pick(kart, sprint));
+
+        var report = Compute([Metrics(first, 10, 0), Metrics(second, 15, 0)], first, second);
+
+        Assert.AreEqual(12.5m, Activity(report, sprint.Id).AverageAttendees);
+        Assert.AreEqual(10m, Activity(report, tiles.Id).AverageAttendees);
+    }
+
+    [TestMethod]
+    public void AnEventWithNoMetricsItem_IsLeftOutOfAttendees_ButCountsZeroLikes()
+    {
+        var withMetrics = Event(Day(3, 1), sprint.Id, Pick(kart, sprint));
+        var without = Event(Day(4, 1), null, Pick(kart, sprint));
+
+        var report = Compute([Metrics(withMetrics, 10, 4)], withMetrics, without);
+
+        Assert.AreEqual(10m, Activity(report, sprint.Id).AverageAttendees, "not (10 + 0) / 2");
+        Assert.AreEqual(2m, Activity(report, sprint.Id).AverageLikes, "(4 + 0) / 2");
+    }
+
+    [TestMethod]
+    public void ANullAttendees_IsLeftOutOfTheAttendeeAverage()
+    {
+        var recorded = Event(Day(3, 1), sprint.Id, Pick(kart, sprint));
+        var cleared = Event(Day(4, 1), null, Pick(kart, sprint));
+
+        var report = Compute([Metrics(recorded, 10, 0), Metrics(cleared, null, 2)], recorded, cleared);
+
+        Assert.AreEqual(10m, Activity(report, sprint.Id).AverageAttendees);
+        Assert.AreEqual(1m, Activity(report, sprint.Id).AverageLikes, "the cleared Event's Likes still count");
+    }
+
+    [TestMethod]
+    public void AnActivityThatNeverAppeared_HasNoWinRateNoAverageLikesAndNoAverageAttendees()
+    {
+        var ev = Event(Day(3, 1), sprint.Id, Pick(kart, sprint));
+
+        var report = Compute([Metrics(ev, 10, 2)], ev);
+
+        Assert.AreEqual((null, null, null), Performance(Activity(report, battle.Id)));
+        Assert.AreEqual((1m, 2m, 10m), Performance(Activity(report, sprint.Id)));
+    }
+
+    [TestMethod]
+    public void AnActivityOfferedButNeverWon_HasAZeroWinRate_NotNull()
+    {
+        var report = Compute(
+            Event(Day(3, 1), sprint.Id, Pick(kart, sprint), Pick(puzzle, tiles)),
+            Event(Day(4, 1), null, Pick(puzzle, tiles)));
+
+        Assert.AreEqual(0m, Activity(report, tiles.Id).WinRate);
+    }
+
+    [TestMethod]
+    public void ADeletedActivity_GetsThePerformanceNumbersToo()
+    {
+        var goneActivity = Guid.NewGuid();
+        var first = Event(Day(3, 1), goneActivity, Pick(kart.Id, kart.Name, goneActivity, "Drift"));
+        var second = Event(Day(4, 1), sprint.Id, Pick(kart.Id, kart.Name, goneActivity, "Drift"), Pick(kart, sprint));
+
+        var report = Compute([Metrics(first, 8, 1), Metrics(second, 12, 4)], first, second);
+
+        var deleted = Activity(report, goneActivity);
+        Assert.IsTrue(deleted.Deleted);
+        Assert.AreEqual((0.5m, 2.5m, 10m), Performance(deleted));
+    }
+
+    [TestMethod]
+    public void AFutureEvent_IsNotCountedInThePerformanceNumbers()
+    {
+        var past = Event(Day(3, 1), sprint.Id, Pick(kart, sprint));
+        var future = Event(Day(12, 24), null, Pick(kart, sprint));
+
+        var report = Compute([Metrics(past, 10, 2), Metrics(future, 100, 50)], past, future);
+
+        Assert.AreEqual((1m, 2m, 10m), Performance(Activity(report, sprint.Id)));
+    }
+
+    [TestMethod]
+    public void AnActivityTwiceInOneEvent_CountsThatEventOnce()
+    {
+        var twice = Event(Day(3, 1), sprint.Id, Pick(kart, sprint), Pick(kart, sprint));
+        var once = Event(Day(4, 1), null, Pick(kart, sprint));
+
+        var report = Compute([Metrics(twice, 10, 4), Metrics(once, 20, 1)], twice, once);
+
+        // Counted twice per Selection it would be a win rate of 1/3, 3 Likes and 13.33 attendees.
+        Assert.AreEqual((0.5m, 2.5m, 15m), Performance(Activity(report, sprint.Id)));
+    }
+
+    [TestMethod]
+    public void AMetricsItemForAnEventNotInTheList_IsIgnored()
+    {
+        var ev = Event(Day(3, 1), sprint.Id, Pick(kart, sprint));
+        var unknown = new EventMetricsWithLikes(Guid.NewGuid(), 100, null, null, null, 50);
+
+        var report = Compute([Metrics(ev, 10, 2), unknown], ev);
+
+        Assert.AreEqual((1m, 2m, 10m), Performance(Activity(report, sprint.Id)));
+        Assert.AreEqual((null, null, null), Performance(Activity(report, battle.Id)));
     }
 
     private static (int, int, DateTimeOffset?) Measures(GamePlayStats g) => (g.Offered, g.Wins, g.LastOffered);
