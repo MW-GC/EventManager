@@ -48,7 +48,7 @@ public class PropertyLimitTests
             var activity = new Activity
             {
                 Id = Guid.NewGuid(), GameId = game.Id, Name = Text(100),
-                Description = Text(text), Rules = Text(text), SetupRequirements = Text(text), Comments = Text(text),
+                Description = Text(text), Rules = Text(text), SetupRequirements = Text(text),
                 ThemeIds = [Guid.NewGuid(), Guid.NewGuid()], HolidayIds = [Guid.NewGuid()],
             };
             return new Selection { Game = game, Activity = activity };
@@ -125,7 +125,7 @@ public class PropertyLimitTests
         var small = MaximumEvent();
         small.Selections = [small.Selections[0] with { Activity = small.Selections[0].Activity with { Description = "short" } }];
         small.Selections[0] = small.Selections[0] with { Game = small.Selections[0].Game with { ImageUrl = null, Website = null, IconUrl = null } };
-        small.Selections[0] = small.Selections[0] with { Activity = small.Selections[0].Activity with { Rules = "", SetupRequirements = "", Comments = null } };
+        small.Selections[0] = small.Selections[0] with { Activity = small.Selections[0].Activity with { Rules = "", SetupRequirements = "" } };
         small.NormalizeWinner(); // one Selection is its own Winner
         Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(await h.EventApi.Update(TestRequests.Json(small), saved.Id, default)));
         var row = h.Events[saved.Id.ToString("D")];

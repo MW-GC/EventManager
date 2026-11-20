@@ -117,7 +117,6 @@ public class EntityValidatorTests
     [DataRow(nameof(ActivityEntity.Description))]
     [DataRow(nameof(ActivityEntity.Rules))]
     [DataRow(nameof(ActivityEntity.SetupRequirements))]
-    [DataRow(nameof(ActivityEntity.Comments))]
     public void ActivityTextFieldsAreCappedAtTwoThousandAndNamed(string field)
     {
         ActivityEntity With(string? value)

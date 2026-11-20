@@ -140,7 +140,7 @@ public sealed class LibraryPagesErrorStateTests : IDisposable
     private (StubApiHandler Api, ActivityEntity Existing) ActivitiesApi()
     {
         var game = new GameEntity { Name = "Game" };
-        var existing = new ActivityEntity { Name = "Race", GameId = game.Id, Comments = "Old note" };
+        var existing = new ActivityEntity { Name = "Race", GameId = game.Id };
         var api = new StubApiHandler()
             .Json(HttpMethod.Get, "/api/activities", new[] { existing })
             .Json(HttpMethod.Get, "/api/games", new[] { game })

@@ -11,7 +11,7 @@ namespace MW_GC.EventManager.API.Functions;
 /// <summary>
 /// Optimistic concurrency on the wire. Every single-entity response carries the row's ETag in the
 /// ETag header (the JSON body carries it too, as <c>eTag</c>). A client may send it back as
-/// If-Match on PUT, DELETE and the comments PATCH; a stale tag is a 409 and nothing is written.
+/// If-Match on PUT and DELETE; a stale tag is a 409 and nothing is written.
 /// If-Match is optional: without it an update still never recreates a row that is gone.
 /// Only the header counts; an <c>eTag</c> in a request body is ignored.
 /// </summary>

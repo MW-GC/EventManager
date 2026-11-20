@@ -3,7 +3,10 @@ using MW_GC.EventManager.Shared.Models;
 
 namespace MW_GC.EventManager.Web.Services;
 
-/// <summary>The one mapping from a library Game and Activity to the Selection an Event stores.</summary>
+/// <summary>
+/// The one mapping from a library Game and Activity to the Selection an Event stores. The snapshot
+/// carries no Comments: those are read live from the Activity (ADR 0001).
+/// </summary>
 public static class SelectionSnapshot
 {
     public static Selection From(GameEntity game, ActivityEntity act) => new()
@@ -12,7 +15,7 @@ public static class SelectionSnapshot
         Activity = new Activity
         {
             Id = act.Id, GameId = act.GameId, Name = act.Name, Description = act.Description,
-            Rules = act.Rules, SetupRequirements = act.SetupRequirements, Comments = act.Comments
+            Rules = act.Rules, SetupRequirements = act.SetupRequirements
         }
     };
 }

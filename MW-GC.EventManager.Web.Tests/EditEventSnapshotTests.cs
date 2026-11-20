@@ -26,9 +26,9 @@ public sealed class EditEventSnapshotTests : IDisposable
 
     public EditEventSnapshotTests()
     {
-        grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id, Description = "Four races", Rules = "150cc", SetupRequirements = "Four controllers", Comments = "Ran long" };
+        grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id, Description = "Four races", Rules = "150cc", SetupRequirements = "Four controllers" };
         timeTrial = new ActivityEntity { Name = "Time Trial", GameId = kart.Id };
-        stock = new ActivityEntity { Name = "Stock Battle", GameId = brawl.Id, Description = "Three lives", Rules = "No items", SetupRequirements = "One TV", Comments = "Crowd favourite" };
+        stock = new ActivityEntity { Name = "Stock Battle", GameId = brawl.Id, Description = "Three lives", Rules = "No items", SetupRequirements = "One TV" };
         teams = new ActivityEntity { Name = "Team Battle", GameId = brawl.Id };
         harness = new PageHarness(api);
     }
@@ -81,7 +81,7 @@ public sealed class EditEventSnapshotTests : IDisposable
         var rewritten = new ActivityEntity
         {
             Id = grandPrix.Id, GameId = kart.Id, Name = grandPrix.Name, Description = "New description",
-            Rules = "200cc", SetupRequirements = "Eight controllers", Comments = "A newer note"
+            Rules = "200cc", SetupRequirements = "Eight controllers"
         };
         var renamedGame = new GameEntity { Id = kart.Id, Name = kart.Name, IconUrl = "https://example.test/new.png" };
         UseLibrary([renamedGame, brawl], [rewritten, timeTrial, stock, teams]);
@@ -91,7 +91,8 @@ public sealed class EditEventSnapshotTests : IDisposable
 
         AssertSameSelections(ev.Selections, saved.Selections);
         Assert.AreEqual("Four races", saved.Selections[0].Activity.Description);
-        Assert.AreEqual("Ran long", saved.Selections[0].Activity.Comments);
+        Assert.AreEqual("150cc", saved.Selections[0].Activity.Rules);
+        Assert.AreEqual("Four controllers", saved.Selections[0].Activity.SetupRequirements);
         Assert.IsNull(saved.WinnerActivityId);
     }
 
@@ -177,7 +178,7 @@ public sealed class EditEventSnapshotTests : IDisposable
         Activity = new Activity
         {
             Id = act.Id, GameId = act.GameId, Name = act.Name, Description = act.Description,
-            Rules = act.Rules, SetupRequirements = act.SetupRequirements, Comments = act.Comments
+            Rules = act.Rules, SetupRequirements = act.SetupRequirements
         }
     };
 
@@ -213,7 +214,7 @@ public sealed class EditEventSnapshotTests : IDisposable
         return JsonSerializer.Deserialize<EventEntity>(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, path))!, Web)!;
     }
 
-    // Compares every stored field, including description, rules, setup requirements and comments.
+    // Compares every stored field, including description, rules and setup requirements.
     private static void AssertSameSelections(IEnumerable<Selection> expected, IEnumerable<Selection> actual) =>
         Assert.AreSequenceEqual(expected.Select(s => JsonSerializer.Serialize(s, Web)).ToArray(),
             actual.Select(s => JsonSerializer.Serialize(s, Web)).ToArray());

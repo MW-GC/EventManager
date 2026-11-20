@@ -26,7 +26,7 @@ public sealed class EventsErrorStateTests : IDisposable
 
     public EventsErrorStateTests()
     {
-        first = new ActivityEntity { Name = "First", GameId = gameA, Comments = "Old note" };
+        first = new ActivityEntity { Name = "First", GameId = gameA };
         second = new ActivityEntity { Name = "Second", GameId = gameB };
         ev = new EventEntity
         {

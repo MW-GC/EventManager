@@ -101,7 +101,7 @@ public class IdempotentCreateTests
         {
             case "name": input.Name = "Changed"; break;
             case "date": input.Date = input.Date.AddHours(1); break;
-            case "snapshot": input.Selections[0] = input.Selections[0] with { Activity = input.Selections[0].Activity with { Comments = "Changed" } }; break;
+            case "snapshot": input.Selections[0] = input.Selections[0] with { Activity = input.Selections[0].Activity with { Rules = "Changed" } }; break;
             case "unique": input.UniqueGamesOnly = false; break;
         }
         Assert.IsExactInstanceOfType<ConflictObjectResult>(await api.SaveCustomized(Request(input, key), default));

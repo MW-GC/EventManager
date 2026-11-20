@@ -46,7 +46,7 @@ public class TableStoreTests
             UniqueGamesOnly = true,
             Selections =
             [
-                new Selection { Game = alpha, Activity = new Activity { Id = Guid.NewGuid(), GameId = alpha.Id, Name = "Capture", ThemeIds = [Guid.NewGuid()], Comments = "Loud" } },
+                new Selection { Game = alpha, Activity = new Activity { Id = Guid.NewGuid(), GameId = alpha.Id, Name = "Capture", ThemeIds = [Guid.NewGuid()], Rules = "Loud" } },
                 new Selection { Game = beta, Activity = new Activity { Id = Guid.NewGuid(), GameId = beta.Id, Name = "Race", HolidayIds = [Guid.NewGuid()] } },
             ],
         };

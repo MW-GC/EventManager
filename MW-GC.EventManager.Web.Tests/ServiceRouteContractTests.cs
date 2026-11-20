@@ -35,10 +35,9 @@ public sealed class ServiceRouteContractTests
     [
         new(typeof(GameService), nameof(GameService.GetAllAsync), "GET", "api/games", h => new GameService(h).GetAllAsync()),
 
-        // Activities read, create, update and delete through the shared client (#126); the service keeps the two
-        // routes only Activities have.
+        // Activities read, create, update and delete through the shared client (#126); the service keeps the one
+        // route only Activities have.
         new(typeof(ActivityService), nameof(ActivityService.DuplicateAsync), "POST", "api/activities/{id}/duplicate", h => new ActivityService(h).DuplicateAsync(Id)),
-        new(typeof(ActivityService), nameof(ActivityService.UpdateCommentsAsync), "PATCH", "api/activities/{id}/comments", h => new ActivityService(h).UpdateCommentsAsync(Id, "Note")),
 
         new(typeof(EventService), nameof(EventService.GetAllAsync), "GET", "api/events", h => new EventService(h).GetAllAsync()),
         new(typeof(EventService), nameof(EventService.GetAsync), "GET", "api/events/{id}", h => new EventService(h).GetAsync(Id)),
@@ -143,6 +142,19 @@ public sealed class ServiceRouteContractTests
             .Select(r => r.ToString())
             .ToList();
         Assert.IsEmpty(unmatched, "Route table rows with no matching API HttpTrigger:\n" + string.Join("\n", unmatched));
+    }
+
+    // #133: the old single-text PATCH is gone from the API. The Comment routes on the same path stay.
+    [TestMethod]
+    public void TheApiNoLongerDeclaresTheOldCommentsPatch()
+    {
+        var routes = ApiRoutes();
+
+        Assert.DoesNotContain(("PATCH", "api/activities/{id:guid}/comments"), routes);
+        Assert.Contains(("GET", "api/activities/{id:guid}/comments"), routes);
+        Assert.Contains(("POST", "api/activities/{id:guid}/comments"), routes);
+        Assert.Contains(("PUT", "api/activities/{id:guid}/comments/{commentId:guid}"), routes);
+        Assert.Contains(("DELETE", "api/activities/{id:guid}/comments/{commentId:guid}"), routes);
     }
 
     // Every (METHOD, api/route) pair declared by an HttpTrigger in the API assembly. The Function

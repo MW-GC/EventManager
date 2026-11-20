@@ -10,7 +10,7 @@ using MW_GC.EventManager.Shared.Entities;
 namespace MW_GC.EventManager.Api.Tests;
 
 /// <summary>
-/// The old-note conversion (#130): each Activity's non-empty old single note becomes that
+/// The old-text conversion (#130): each Activity's non-empty old single text becomes that
 /// Activity's first Comment, once, through the conversion class over the in-memory tables of
 /// <see cref="LibraryHarness"/>.
 /// </summary>
@@ -19,19 +19,23 @@ public class ActivityNoteConversionTests
 {
     private readonly LibraryHarness h = new();
 
-    // An Activity row as an older version stored it, with its old note and the time storage last wrote it.
-    private Guid SeedActivity(string? note, DateTimeOffset? lastModified = null)
+    // An Activity row as an older version stored it, with the old single text in its raw Comments
+    // column and the time storage last wrote it. The Activity itself no longer has that field (#133).
+    private Guid SeedActivity(string? oldText, DateTimeOffset? lastModified = null) =>
+        SeedRow(row => row["Comments"] = oldText, lastModified);
+
+    private Guid SeedRow(Action<TableEntity> oldColumn, DateTimeOffset? lastModified = null, Guid? gameId = null)
     {
         var id = Guid.NewGuid();
         var row = new TableEntity("Activity", id.ToString("D"))
         {
-            ["GameId"] = Guid.NewGuid(),
+            ["GameId"] = gameId ?? Guid.NewGuid(),
             ["Name"] = "Old activity",
             ["ThemeIds"] = "[]",
             ["HolidayIds"] = "[]",
-            ["Comments"] = note,
             Timestamp = lastModified ?? new DateTimeOffset(2026, 9, 14, 20, 30, 0, TimeSpan.Zero),
         };
+        oldColumn(row);
         h.Activities[row.RowKey] = row;
         return id;
     }
@@ -60,27 +64,211 @@ public class ActivityNoteConversionTests
     [DataRow(null)]
     [DataRow("")]
     [DataRow("   \t\r\n  ")]
-    public async Task AnActivityWithNoNoteOrOnlyWhitespaceGetsNoComment(string? note)
+    public async Task AnActivityWithNoNoteOrOnlyWhitespaceGetsNoComment(string? oldText)
     {
-        var withNote = SeedActivity("Keep");
-        var without = SeedActivity(note);
+        var withText = SeedActivity("Keep");
+        var without = SeedActivity(oldText);
 
         await h.NoteConversion.RunAsync(default);
 
         Assert.IsEmpty(CommentsOf(without));
-        Assert.ContainsSingle(CommentsOf(withNote));
+        Assert.ContainsSingle(CommentsOf(withText));
+    }
+
+    [TestMethod]
+    public async Task ARowWithoutTheOldCommentsColumnGetsNoComment()
+    {
+        var withText = SeedActivity("Keep");
+        var without = SeedRow(_ => { });
+        Assert.IsFalse(h.Activities[without.ToString("D")].ContainsKey("Comments"));
+
+        await h.NoteConversion.RunAsync(default);
+
+        Assert.IsEmpty(CommentsOf(without));
+        Assert.ContainsSingle(CommentsOf(withText));
+        Assert.IsTrue(MarkerStored());
+    }
+
+    [TestMethod]
+    public async Task ARowWhoseOldCommentsColumnIsNotAStringIsSkippedWithoutThrowing()
+    {
+        var withText = SeedActivity("Keep");
+        // Table Storage keeps a column's type per row; this one was stored as a number.
+        var odd = SeedRow(row => row["Comments"] = 42);
+
+        await h.NoteConversion.RunAsync(default);
+
+        Assert.IsEmpty(CommentsOf(odd));
+        Assert.ContainsSingle(CommentsOf(withText));
+        Assert.IsTrue(MarkerStored(), "The pass finishes and stores the marker.");
+    }
+
+    [TestMethod]
+    public async Task AnActivityPutAfterTheConversionNeitherBringsBackNorNeedsTheOldColumn()
+    {
+        var game = h.SeedGame();
+        var activityId = SeedRow(row => row["Comments"] = "Old text", gameId: game.Id);
+        await h.NoteConversion.RunAsync(default);
+        var convertedId = Assert.ContainsSingle(CommentsOf(activityId)).Id;
+
+        // A client that still sends the old field, and one that never heard of it.
+        var withOld = await h.ActivityApi.Update(
+            TestRequests.Json(new { gameId = game.Id, name = "Renamed", comments = "Sneaked back in" }), activityId, default);
+        Assert.AreEqual(200, ApiResults.Status(withOld));
+        Assert.IsFalse(h.Activities[activityId.ToString("D")].ContainsKey("Comments"), "The PUT must not store the old column.");
+        var without = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed again" }), activityId, default);
+        Assert.AreEqual(200, ApiResults.Status(without));
+        Assert.IsFalse(h.Activities[activityId.ToString("D")].ContainsKey("Comments"));
+        Assert.AreEqual("Renamed again", h.Activities[activityId.ToString("D")].GetString("Name"));
+
+        // The Comment the conversion made is kept, read again after the PUTs, and a later start adds nothing.
+        await h.NoteConversion.RunAsync(default);
+        var listed = ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(TestRequests.Empty(), activityId, default));
+        var kept = Assert.ContainsSingle(listed);
+        Assert.AreEqual(convertedId, kept.Id);
+        Assert.AreEqual("Old text", kept.Text);
+    }
+
+    // ---- an Activity PUT never replaces a row whose old text is not converted yet (#133)
+
+    [TestMethod]
+    public async Task APutBeforeAnyPassKeepsTheOldTextAsACommentAndASecondPutAddsNone()
+    {
+        var game = h.SeedGame();
+        var lastModified = new DateTimeOffset(2026, 6, 1, 18, 0, 0, TimeSpan.Zero);
+        var activityId = SeedRow(row => row["Comments"] = "  Old text  ", lastModified, game.Id);
+        Assert.IsFalse(MarkerStored(), "No pass has run: the startup service never started.");
+
+        var first = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, default);
+
+        Assert.AreEqual(200, ApiResults.Status(first));
+        var row = h.Activities[activityId.ToString("D")];
+        Assert.AreEqual("Renamed", row.GetString("Name"));
+        Assert.IsFalse(row.ContainsKey("Comments"), "The PUT did replace the row.");
+        var listed = ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(TestRequests.Empty(), activityId, default));
+        var comment = Assert.ContainsSingle(listed);
+        Assert.AreEqual("Old text", comment.Text);
+        Assert.AreEqual(activityId, comment.ActivityId);
+        Assert.AreEqual(lastModified, comment.CreatedUtc);
+        Assert.IsNull(comment.EventId);
+        Assert.IsTrue(MarkerStored());
+
+        var second = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed again" }), activityId, default);
+
+        Assert.AreEqual(200, ApiResults.Status(second));
+        var after = ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(TestRequests.Empty(), activityId, default));
+        Assert.AreEqual(comment.Id, Assert.ContainsSingle(after).Id);
+        Assert.AreEqual(1, CommentAdds());
+    }
+
+    [TestMethod]
+    public async Task APutWhoseConversionFailsIs503WritesNothingAndALaterPutKeepsTheText()
+    {
+        var game = h.SeedGame();
+        var activityId = SeedRow(row => row["Comments"] = "Old text", gameId: game.Id);
+        var before = h.Activities[activityId.ToString("D")];
+        // The first Comment insert fails with a storage outage; later inserts behave like storage.
+        var adds = 0;
+        h.CommentTable.Setup(t => t.AddEntityAsync(It.IsAny<CommentEntity>(), It.IsAny<CancellationToken>()))
+            .Returns((CommentEntity row, CancellationToken _) =>
+            {
+                if (++adds == 1) throw new RequestFailedException(503, "Storage unavailable");
+                if (!h.Comments.TryAdd(row.RowKey, row))
+                    throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
+                row.ETag = TableMocks.NextETag();
+                return Task.FromResult<Response>(new StorageResponse(row.ETag));
+            });
+
+        var failed = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, default);
+
+        Assert.AreEqual(503, ApiResults.Status(failed));
+        Assert.AreEqual("Storage is temporarily unavailable. Try again shortly.", ApiResults.Message(failed));
+        Assert.AreSame(before, h.Activities[activityId.ToString("D")], "The row must not be replaced.");
+        Assert.AreEqual("Old text", before.GetString("Comments"));
+        Assert.AreEqual("Old activity", before.GetString("Name"));
+        Assert.IsFalse(h.ActivityTable.Invocations.Any(i => i.Method.Name == nameof(TableClient.UpdateEntityAsync)));
+        Assert.IsEmpty(h.Comments);
+        Assert.IsFalse(MarkerStored());
+
+        var retried = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, default);
+
+        Assert.AreEqual(200, ApiResults.Status(retried));
+        Assert.AreEqual("Renamed", h.Activities[activityId.ToString("D")].GetString("Name"));
+        var listed = ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(TestRequests.Empty(), activityId, default));
+        Assert.AreEqual("Old text", Assert.ContainsSingle(listed).Text);
+        Assert.IsTrue(MarkerStored());
+    }
+
+    [TestMethod]
+    public async Task WithTheMarkerStoredAPutReadsOnlyTheMarkerOnceAndWritesTheActivityAsBefore()
+    {
+        // A deployment whose pass finished earlier: the marker is stored, and this Activity has no old text.
+        h.CommentTableOtherRows[$"{ActivityNoteConversion.MarkerPartitionKey}|{ActivityNoteConversion.MarkerRowKey}"] =
+            new TableEntity(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey);
+        var game = h.SeedGame();
+        var activityId = SeedRow(_ => { }, gameId: game.Id);
+
+        var first = await h.ActivityApi.Update(
+            TestRequests.Json(new { gameId = game.Id, name = "Renamed", rules = "Best of three" }), activityId, default);
+        var second = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed again" }), activityId, default);
+
+        Assert.AreEqual(200, ApiResults.Status(first));
+        Assert.AreEqual(200, ApiResults.Status(second));
+        var row = h.Activities[activityId.ToString("D")];
+        Assert.AreEqual("Renamed again", row.GetString("Name"));
+        Assert.IsFalse(row.ContainsKey("Comments"));
+        // One marker read for both PUTs, no scan of the Activity table, no Comment.
+        Assert.AreEqual(1, h.CommentTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.GetEntityAsync)));
+        Assert.AreEqual(0, h.ActivityTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.QueryAsync)));
+        Assert.IsEmpty(h.Comments);
+        Assert.AreEqual(0, CommentAdds());
+    }
+
+    [TestMethod]
+    public async Task APutDuringTheStartupPassWaitsForItAndTheTextIsConvertedOnce()
+    {
+        var game = h.SeedGame();
+        var activityId = SeedRow(row => row["Comments"] = "Old text", gameId: game.Id);
+        // The startup pass is held inside its Comment insert until the test lets it go.
+        var entered = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        h.CommentTable.Setup(t => t.AddEntityAsync(It.IsAny<CommentEntity>(), It.IsAny<CancellationToken>()))
+            .Returns(async (CommentEntity row, CancellationToken _) =>
+            {
+                entered.TrySetResult();
+                await release.Task;
+                if (!h.Comments.TryAdd(row.RowKey, row))
+                    throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
+                row.ETag = TableMocks.NextETag();
+                return (Response)new StorageResponse(row.ETag);
+            });
+
+        var startupPass = h.NoteConversion.RunAsync(default);
+        await entered.Task;
+        var put = h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, default);
+        Assert.IsFalse(put.IsCompleted, "The PUT must wait for the running pass.");
+        Assert.AreEqual("Old text", h.Activities[activityId.ToString("D")].GetString("Comments"));
+
+        release.SetResult();
+        await startupPass;
+        var result = await put;
+
+        Assert.AreEqual(200, ApiResults.Status(result));
+        Assert.AreEqual("Renamed", h.Activities[activityId.ToString("D")].GetString("Name"));
+        Assert.AreEqual("Old text", Assert.ContainsSingle(CommentsOf(activityId)).Text);
+        Assert.AreEqual(1, CommentAdds(), "The PUT must not run the pass a second time.");
     }
 
     [TestMethod]
     public async Task ANoteOverTheCommentLimitIsCutTo1000CharactersAndAWarningNamesTheActivity()
     {
-        var note = new string('a', 999) + "bcdef";
-        var activityId = SeedActivity("  " + note + "  ");
+        var oldText = new string('a', 999) + "bcdef";
+        var activityId = SeedActivity("  " + oldText + "  ");
         var exact = SeedActivity(new string('x', 1000));
 
         await h.NoteConversion.RunAsync(default);
 
-        Assert.AreEqual(note[..1000], Assert.ContainsSingle(CommentsOf(activityId)).Text);
+        Assert.AreEqual(new string('a', 999) + "b", Assert.ContainsSingle(CommentsOf(activityId)).Text);
         Assert.AreEqual(new string('x', 1000), Assert.ContainsSingle(CommentsOf(exact)).Text);
         var warning = Assert.ContainsSingle(h.NoteConversionLog.Entries.Where(e => e.Level == LogLevel.Warning));
         Assert.Contains(activityId.ToString("D"), warning.Message);
@@ -215,7 +403,7 @@ public class ActivityNoteConversionTests
     [TestMethod]
     public async Task TheMarkerRowNeverAppearsInTheListRoute()
     {
-        var activityId = SeedActivity("Note");
+        var activityId = SeedActivity("Old text");
         await h.NoteConversion.RunAsync(default);
         Assert.IsTrue(MarkerStored());
 
@@ -307,13 +495,13 @@ public class ActivityNoteConversionTests
     [TestMethod]
     public async Task TheConversionNeverEditsTheActivityRow()
     {
-        var activityId = SeedActivity("Old note");
+        var activityId = SeedActivity("Old text");
         var before = h.Activities[activityId.ToString("D")];
 
         await h.NoteConversion.RunAsync(default);
 
         Assert.AreSame(before, h.Activities[activityId.ToString("D")]);
-        Assert.AreEqual("Old note", before.GetString("Comments"));
+        Assert.AreEqual("Old text", before.GetString("Comments"));
         Assert.IsFalse(h.ActivityTable.Invocations.Any(i => i.Method.Name is nameof(TableClient.UpsertEntityAsync)
             or nameof(TableClient.UpdateEntityAsync) or nameof(TableClient.AddEntityAsync) or nameof(TableClient.DeleteEntityAsync)));
     }

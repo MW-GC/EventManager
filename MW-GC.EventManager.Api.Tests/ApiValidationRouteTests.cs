@@ -17,12 +17,12 @@ public class ApiValidationRouteTests
 {
     private readonly LibraryHarness h = new();
 
-    // One entry per body-reading route. Updates, the comments PATCH and the Comment routes target a stored row,
+    // One entry per body-reading route. Updates and the Comment routes target a stored row,
     // so the 400/415 comes from the body and not from a 404.
     public static IEnumerable<object?[]> BodyRoutes =>
     [
         ["CreateGame"], ["UpdateGame"], ["CreateTheme"], ["UpdateTheme"], ["CreateHoliday"], ["UpdateHoliday"],
-        ["CreateActivity"], ["UpdateActivity"], ["UpdateActivityComments"],
+        ["CreateActivity"], ["UpdateActivity"],
         ["AddComment"], ["UpdateComment"],
         ["SaveCustomizedEvent"], ["UpdateEvent"],
     ];
@@ -57,7 +57,6 @@ public class ApiValidationRouteTests
             "UpdateHoliday" => h.HolidayApi.Update(req, holiday.Id, default),
             "CreateActivity" => h.ActivityApi.Create(req, default),
             "UpdateActivity" => h.ActivityApi.Update(req, activityId, default),
-            "UpdateActivityComments" => h.ActivityApi.UpdateComments(req, activityId, default),
             "AddComment" => h.CommentApi.Add(req, activityId, default),
             "UpdateComment" => h.CommentApi.Update(req, activityId, comment.Id, default),
             "SaveCustomizedEvent" => h.EventApi.SaveCustomized(req, default),
@@ -264,7 +263,7 @@ public class ApiValidationRouteTests
         Assert.AreEqual("Renamed", h.Games[old.RowKey].Name);
     }
 
-    // ---- Activities: GameId, id lists, text caps, the comments PATCH.
+    // ---- Activities: GameId, id lists, text caps.
 
     [TestMethod]
     public async Task ActivityWithNullThemeIdsIsStoredWithEmptyLists()
@@ -335,7 +334,6 @@ public class ApiValidationRouteTests
     [DataRow("description", "Description")]
     [DataRow("rules", "Rules")]
     [DataRow("setupRequirements", "SetupRequirements")]
-    [DataRow("comments", "Comments")]
     public async Task OverLongActivityTextIs400NamingTheField(string json, string field)
     {
         var game = h.SeedGame();
@@ -345,21 +343,6 @@ public class ApiValidationRouteTests
 
         Assert.AreEqual($"{field} must be 2000 characters or fewer.", ApiResults.Message(result));
         Assert.IsEmpty(h.Activities);
-    }
-
-    [TestMethod]
-    public async Task CommentsPatchIsCappedLikeTheActivity()
-    {
-        var game = h.SeedGame();
-        var created = ApiResults.Value<ActivityEntity>(await h.ActivityApi.Create(TestRequests.Json(new { gameId = game.Id, name = "Act" }), default));
-
-        var tooLong = await h.ActivityApi.UpdateComments(TestRequests.Json(new { comments = new string('c', 2001) }), created.Id, default);
-        Assert.AreEqual("Comments must be 2000 characters or fewer.", ApiResults.Message(tooLong));
-        Assert.IsNull(h.Activities[created.Id.ToString("D")].GetString("Comments"));
-
-        var ok = await h.ActivityApi.UpdateComments(TestRequests.Json(new { comments = "Bring snacks" }), created.Id, default);
-        Assert.AreEqual("Bring snacks", ApiResults.Value<ActivityEntity>(ok).Comments);
-        Assert.AreEqual("Bring snacks", h.Activities[created.Id.ToString("D")].GetString("Comments"));
     }
 
     // ---- Events: the name rule on create and update, the rest unchanged.
@@ -397,7 +380,7 @@ public class ApiValidationRouteTests
     {
         // A missing row is a 404 even when the body is also bad: the lookup comes first, as before.
         Assert.IsExactInstanceOfType<NotFoundResult>(await h.GameApi.Update(TestRequests.Raw("{"), Guid.NewGuid(), default));
-        Assert.IsExactInstanceOfType<NotFoundResult>(await h.ActivityApi.UpdateComments(TestRequests.Raw("{", "text/plain"), Guid.NewGuid(), default));
+        Assert.IsExactInstanceOfType<NotFoundResult>(await h.CommentApi.Add(TestRequests.Raw("{", "text/plain"), Guid.NewGuid(), default));
         Assert.IsExactInstanceOfType<NotFoundResult>(await h.EventApi.Update(TestRequests.Raw("null"), Guid.NewGuid(), default));
     }
 

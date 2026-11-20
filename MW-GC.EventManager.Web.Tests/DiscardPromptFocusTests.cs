@@ -32,7 +32,7 @@ public sealed class DiscardPromptFocusTests : IDisposable
     public DiscardPromptFocusTests()
     {
         grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id };
-        retired = new Activity { Id = Guid.NewGuid(), GameId = kart.Id, Name = "Retired", Comments = "Old note" };
+        retired = new Activity { Id = Guid.NewGuid(), GameId = kart.Id, Name = "Retired" };
         night = new EventEntity
         {
             Name = "Game night",

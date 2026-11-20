@@ -29,7 +29,7 @@ public sealed class ActivitiesPageTests : IDisposable
 
     public ActivitiesPageTests()
     {
-        race = new ActivityEntity { Name = "Race", GameId = kart.Id, Description = "Three laps", ThemeIds = [spooky.Id], Comments = "Old note" };
+        race = new ActivityEntity { Name = "Race", GameId = kart.Id, Description = "Three laps", ThemeIds = [spooky.Id] };
         sprint = new ActivityEntity { Name = "Sprint", GameId = kart.Id };
         stock = new ActivityEntity { Name = "Stock", GameId = brawl.Id };
         api.Json(HttpMethod.Get, "/api/games", new[] { kart, brawl })
