@@ -8,8 +8,9 @@ using MW_GC.EventManager.Web.Services;
 
 namespace MW_GC.EventManager.Web.Tests;
 
-// Issue #57: the route contract between the Web services (and the shared Library client) and the API. One table lists every
-// public method of every service with the HTTP method and relative path it must send. The tests
+// Issue #57: the route contract between the Web services and the API. One table lists every public
+// method of every service, and of the shared LibraryClient once per list it serves (#125), with the
+// HTTP method and relative path it must send. The tests
 // call each method through a stub API and compare, fail when a service has a public method the
 // table does not list, and check every row against the HttpTrigger routes the API declares.
 [TestClass]
@@ -19,24 +20,21 @@ public sealed class ServiceRouteContractTests
 
     private sealed record Row(Type Service, string Method, string Verb, string Path, Func<HttpClient, Task> Call)
     {
-        public override string ToString() => $"{Service.Name}.{Method} -> {Verb} {Path}";
+        public override string ToString() => $"{Display(Service)}.{Method} -> {Verb} {Path}";
     }
+
+    // LibraryClient<GameEntity> and LibraryClient<ThemeEntity> share the name LibraryClient`1, so name the item type too.
+    private static string Display(Type service) => service.IsGenericType
+        ? $"{service.Name[..service.Name.IndexOf('`')]}<{string.Join(",", service.GetGenericArguments().Select(a => a.Name))}>"
+        : service.Name;
 
     // {id} stands for the Guid the call passes; the API declares the same segment as {id:guid}.
     private static readonly Row[] Table =
     [
         new(typeof(GameService), nameof(GameService.GetAllAsync), "GET", "api/games", h => new GameService(h).GetAllAsync()),
-        new(typeof(GameService), nameof(GameService.GetAsync), "GET", "api/games/{id}", h => new GameService(h).GetAsync(Id)),
-        new(typeof(GameService), nameof(GameService.CreateAsync), "POST", "api/games", h => new GameService(h).CreateAsync(new GameEntity { Id = Id })),
-        new(typeof(GameService), nameof(GameService.UpdateAsync), "PUT", "api/games/{id}", h => new GameService(h).UpdateAsync(new GameEntity { Id = Id })),
-        new(typeof(GameService), nameof(GameService.DeleteAsync), "DELETE", "api/games/{id}", h => new GameService(h).DeleteAsync(Id)),
 
         // Activities read, create, update and delete through the shared client (#126); the service keeps the two
         // routes only Activities have.
-        new(typeof(LibraryClient<ActivityEntity>), nameof(LibraryClient<ActivityEntity>.GetAllAsync), "GET", "api/activities", h => Activities(h).GetAllAsync()),
-        new(typeof(LibraryClient<ActivityEntity>), nameof(LibraryClient<ActivityEntity>.CreateAsync), "POST", "api/activities", h => Activities(h).CreateAsync(new ActivityEntity { Id = Id })),
-        new(typeof(LibraryClient<ActivityEntity>), nameof(LibraryClient<ActivityEntity>.UpdateAsync), "PUT", "api/activities/{id}", h => Activities(h).UpdateAsync(new ActivityEntity { Id = Id })),
-        new(typeof(LibraryClient<ActivityEntity>), nameof(LibraryClient<ActivityEntity>.DeleteAsync), "DELETE", "api/activities/{id}", h => Activities(h).DeleteAsync(Id)),
         new(typeof(ActivityService), nameof(ActivityService.DuplicateAsync), "POST", "api/activities/{id}/duplicate", h => new ActivityService(h).DuplicateAsync(Id)),
         new(typeof(ActivityService), nameof(ActivityService.UpdateCommentsAsync), "PATCH", "api/activities/{id}/comments", h => new ActivityService(h).UpdateCommentsAsync(Id, "Note")),
 
@@ -48,21 +46,27 @@ public sealed class ServiceRouteContractTests
         new(typeof(EventService), nameof(EventService.GetFeedbackLinkAsync), "GET", "api/events/{id}/feedback-link", h => new EventService(h).GetFeedbackLinkAsync(Id)),
         new(typeof(EventService), nameof(EventService.GetLikesAsync), "GET", "api/events/{id}/likes", h => new EventService(h).GetLikesAsync(Id)),
 
-        new(typeof(ThemeService), nameof(ThemeService.GetAllAsync), "GET", "api/themes", h => new ThemeService(h).GetAllAsync()),
-        new(typeof(ThemeService), nameof(ThemeService.CreateAsync), "POST", "api/themes", h => new ThemeService(h).CreateAsync(new ThemeEntity { Id = Id })),
-        new(typeof(ThemeService), nameof(ThemeService.UpdateAsync), "PUT", "api/themes/{id}", h => new ThemeService(h).UpdateAsync(new ThemeEntity { Id = Id })),
-        new(typeof(ThemeService), nameof(ThemeService.DeleteAsync), "DELETE", "api/themes/{id}", h => new ThemeService(h).DeleteAsync(Id)),
-
-        new(typeof(HolidayService), nameof(HolidayService.GetAllAsync), "GET", "api/holidays", h => new HolidayService(h).GetAllAsync()),
-        new(typeof(HolidayService), nameof(HolidayService.CreateAsync), "POST", "api/holidays", h => new HolidayService(h).CreateAsync(new HolidayEntity { Id = Id })),
-        new(typeof(HolidayService), nameof(HolidayService.UpdateAsync), "PUT", "api/holidays/{id}", h => new HolidayService(h).UpdateAsync(new HolidayEntity { Id = Id })),
-        new(typeof(HolidayService), nameof(HolidayService.DeleteAsync), "DELETE", "api/holidays/{id}", h => new HolidayService(h).DeleteAsync(Id)),
+        // The shared Library client, once per list it serves. It has no get-one call: no Library page reads one item.
+        .. LibraryRows<GameEntity>("games"),
+        .. LibraryRows<ThemeEntity>("themes"),
+        .. LibraryRows<HolidayEntity>("holidays"),
+        .. LibraryRows<ActivityEntity>("activities"),
     ];
 
-    private static readonly Type[] Services = [typeof(GameService), typeof(LibraryClient<ActivityEntity>), typeof(ActivityService), typeof(EventService), typeof(ThemeService), typeof(HolidayService)];
+    private static Row[] LibraryRows<T>(string route) where T : EntityBase, new() =>
+    [
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.GetAllAsync), "GET", $"api/{route}", h => new LibraryClient<T>(h, route).GetAllAsync()),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.CreateAsync), "POST", $"api/{route}", h => new LibraryClient<T>(h, route).CreateAsync(new T { Id = Id })),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.UpdateAsync), "PUT", $"api/{route}/{{id}}", h => new LibraryClient<T>(h, route).UpdateAsync(new T { Id = Id })),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.DeleteAsync), "DELETE", $"api/{route}/{{id}}", h => new LibraryClient<T>(h, route).DeleteAsync(Id)),
+    ];
 
-    // The Activities client as Program.cs registers it.
-    private static LibraryClient<ActivityEntity> Activities(HttpClient http) => new(http, "activities");
+    private static readonly Type[] Services =
+    [
+        typeof(GameService), typeof(ActivityService), typeof(EventService),
+        typeof(LibraryClient<GameEntity>), typeof(LibraryClient<ThemeEntity>), typeof(LibraryClient<HolidayEntity>),
+        typeof(LibraryClient<ActivityEntity>)
+    ];
 
     [TestMethod]
     public async Task EveryServiceMethodSendsTheMethodAndPathInTheTable()
@@ -76,7 +80,7 @@ public sealed class ServiceRouteContractTests
             var expected = $"{row.Verb} {row.Path.Replace("{id}", Id.ToString("D"))}";
             var sent = recorder.Sent.Select(r => $"{r.Method.Method} {r.Path}").ToList();
             if (sent.Count != 1 || sent[0] != expected)
-                wrong.Add($"{row.Service.Name}.{row.Method}: expected {expected}, sent [{string.Join(", ", sent)}]");
+                wrong.Add($"{Display(row.Service)}.{row.Method}: expected {expected}, sent [{string.Join(", ", sent)}]");
         }
         Assert.IsEmpty(wrong, "Service calls that do not match the route table:\n" + string.Join("\n", wrong));
     }
@@ -88,9 +92,9 @@ public sealed class ServiceRouteContractTests
         var declared = Services
             .SelectMany(s => s.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
                 .Where(m => !m.IsSpecialName)
-                .Select(m => $"{s.Name}.{m.Name}"))
+                .Select(m => $"{Display(s)}.{m.Name}"))
             .Order().ToList();
-        var listed = Table.Select(r => $"{r.Service.Name}.{r.Method}").Order().ToList();
+        var listed = Table.Select(r => $"{Display(r.Service)}.{r.Method}").Order().ToList();
 
         var missing = declared.ToList();
         foreach (var name in listed) missing.Remove(name);

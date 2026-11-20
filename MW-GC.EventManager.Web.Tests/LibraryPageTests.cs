@@ -1,6 +1,5 @@
 using System.Linq.Expressions;
 using System.Net;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using AngleSharp.Dom;
@@ -492,9 +491,12 @@ public sealed class LibraryPageTests : IDisposable
 
     // ---- The generic client ------------------------------------------------------------------------
 
-    // The client the other Library pages will move to sends what their own service sends today:
-    // the same verb, path, headers (no If-Match) and body, call for call.
+    // The client sends what the service it replaced sent: the same verb, path, headers (no If-Match) and body,
+    // call for call. GameService's writes, ThemeService and HolidayService were removed in #125, and
+    // ActivityService's read, create, update and delete in #126; their rows compare against what those
+    // services sent, which was checked against the services themselves before they were removed.
     [TestMethod]
+    [DataRow("games")]
     [DataRow("themes")]
     [DataRow("holidays")]
     [DataRow("activities")]
@@ -502,41 +504,38 @@ public sealed class LibraryPageTests : IDisposable
     {
         switch (route)
         {
+            case "games":
+                var game = new GameEntity { Id = Id, Name = "Kart", Website = "https://example.test/kart" };
+                await AssertSameRequests(route, game, ServiceRequests(route, game));
+                break;
             case "themes":
                 var theme = new ThemeEntity { Id = Id, Name = "Spooky" };
-                await AssertSameRequests(route, theme, async h =>
-                {
-                    var s = new ThemeService(h);
-                    await s.GetAllAsync(); (await s.CreateAsync(theme)).Dispose(); (await s.UpdateAsync(theme)).Dispose(); (await s.DeleteAsync(Id)).Dispose();
-                });
+                await AssertSameRequests(route, theme, ServiceRequests(route, theme));
                 break;
             case "holidays":
                 var holiday = new HolidayEntity { Id = Id, Name = "Halloween" };
-                await AssertSameRequests(route, holiday, async h =>
-                {
-                    var s = new HolidayService(h);
-                    await s.GetAllAsync(); (await s.CreateAsync(holiday)).Dispose(); (await s.UpdateAsync(holiday)).Dispose(); (await s.DeleteAsync(Id)).Dispose();
-                });
+                await AssertSameRequests(route, holiday, ServiceRequests(route, holiday));
                 break;
             default:
-                // The Activities page moved onto the client (#126) and ActivityService lost these four methods, so
-                // this row compares with the calls they made, as they were written.
+                // ActivityService lost these four methods in #126; they sent the same requests as the other services.
                 var activity = new ActivityEntity { Id = Id, Name = "Race", GameId = Guid.NewGuid(), ThemeIds = [Guid.NewGuid()] };
-                await AssertSameRequests(route, activity, async h =>
-                {
-                    await h.GetFromJsonAsync<List<ActivityEntity>>("api/activities");
-                    (await h.PostAsJsonAsync("api/activities", activity)).Dispose();
-                    (await h.PutAsJsonAsync($"api/activities/{activity.Id}", activity)).Dispose();
-                    (await h.DeleteAsync($"api/activities/{Id}")).Dispose();
-                });
+                await AssertSameRequests(route, activity, ServiceRequests(route, activity));
                 break;
         }
     }
 
-    private static async Task AssertSameRequests<T>(string route, T item, Func<HttpClient, Task> service) where T : EntityBase
+    // What GameService, ActivityService, ThemeService and HolidayService sent (GetAll, Create, Update, Delete): the verb, the path,
+    // no request headers, and the item as web-default JSON, the System.Net.Http.Json default.
+    private static string[] ServiceRequests<T>(string route, T item) where T : EntityBase =>
+    [
+        $"GET /api/{route} [] ",
+        $"POST /api/{route} [] {JsonSerializer.Serialize(item, JsonSerializerOptions.Web)}",
+        $"PUT /api/{route}/{Id} [] {JsonSerializer.Serialize(item, JsonSerializerOptions.Web)}",
+        $"DELETE /api/{route}/{Id} [] ",
+    ];
+
+    private static async Task AssertSameRequests<T>(string route, T item, IReadOnlyList<string> expected) where T : EntityBase
     {
-        var old = new Recorder();
-        await service(old.Client());
         var shared = new Recorder();
         var client = new LibraryClient<T>(shared.Client(), route);
         await client.GetAllAsync();
@@ -544,8 +543,8 @@ public sealed class LibraryPageTests : IDisposable
         Assert.IsNull(await client.UpdateAsync(item));
         Assert.IsNull(await client.DeleteAsync(Id));
 
-        Assert.HasCount(4, old.Sent);
-        CollectionAssert.AreEqual(old.Sent, shared.Sent);
+        Assert.HasCount(4, expected);
+        CollectionAssert.AreEqual(expected.ToList(), shared.Sent);
     }
 
     // Records each request as "METHOD path [header names] body" and answers 200 with JSON null.

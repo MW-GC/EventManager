@@ -23,8 +23,8 @@ internal sealed class PageHarness : IDisposable
         _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.ActivityEntity>(http, "activities"));
         _context.Services.AddSingleton(new ActivityService(http));
         _context.Services.AddSingleton(new EventService(http));
-        _context.Services.AddSingleton(new ThemeService(http));
-        _context.Services.AddSingleton(new HolidayService(http));
+        _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.ThemeEntity>(http, "themes"));
+        _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.HolidayEntity>(http, "holidays"));
         _context.Services.AddScoped<FocusReturn>();
     }
 

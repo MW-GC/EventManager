@@ -3,8 +3,8 @@
 @inject LibraryClient<ActivityEntity> ActivityClient
 @inject ActivityService ActivitySvc
 @inject GameService GameSvc
-@inject ThemeService ThemeSvc
-@inject HolidayService HolidaySvc
+@inject LibraryClient<ThemeEntity> ThemeSvc
+@inject LibraryClient<HolidayEntity> HolidaySvc
 @inject FocusReturn Focus
 
 @* The shared Library page does the loading, search, Add and Edit dialog, busy guard and delete confirmation; this
