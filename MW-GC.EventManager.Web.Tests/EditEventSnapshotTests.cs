@@ -137,6 +137,24 @@ public sealed class EditEventSnapshotTests : IDisposable
         Assert.AreEqual("Team Battle", saved.Selections[1].Activity.Name);
     }
 
+    // A slot's tags name each Theme and Holiday the library has, and show the first 8 characters of the id
+    // of one it does not have, also when that list is empty (#128).
+    [TestMethod]
+    public async Task EditEvent_SlotTags_NameLibraryTags_AndShowTheIdStartOfTagsNotInTheLibrary()
+    {
+        var spooky = new ThemeEntity { Name = "Spooky" };
+        grandPrix.ThemeIds = [spooky.Id, Guid.Parse("0badc0de-1111-4222-8333-444455556666")];
+        grandPrix.HolidayIds = [Guid.Parse("5eedfeed-7777-4888-9999-aaaabbbbcccc")];
+        StoreEvent(winner: null);
+        UseLibrary([kart, brawl], [grandPrix, timeTrial, stock, teams]);
+        api.Json(HttpMethod.Get, "/api/themes", new[] { spooky }); // The Holidays list stays empty.
+        var page = await OpenEdit();
+
+        page.WaitForAssertion(() =>
+            Assert.AreEqual("Theme: Spooky | Theme: 0badc0de | Holiday: 5eedfeed", string.Join(" | ", Tags(page, 0))));
+        Assert.IsEmpty(Tags(page, 1));
+    }
+
     private const string ReplaceNotice = "Replacing this activity clears the Winner.";
 
     private enum Picker { Game = 0, Activity = 1 }
@@ -215,6 +233,11 @@ public sealed class EditEventSnapshotTests : IDisposable
         var value = select.GetAttribute("current-value");
         return select.QuerySelectorAll("fluent-option").Single(o => o.GetAttribute("value") == value).TextContent.Trim();
     }
+
+    // What a screen reader reads for each tag of one slot, in order.
+    private static List<string> Tags(IRenderedComponent<Events> page, int slot) =>
+        Slots(page)[slot].QuerySelectorAll("fluent-badge.tag-badge")
+            .Select(b => string.Join(" ", b.TextContent.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))).ToList();
 
     private static List<string> OptionTexts(IRenderedComponent<Events> page, int slot, Picker picker) =>
         Select(page, slot, picker).QuerySelectorAll("fluent-option").Select(o => o.TextContent.Trim()).ToList();
