@@ -20,6 +20,7 @@ internal sealed class PageHarness : IDisposable
         var http = api.Client();
         _context.Services.AddSingleton(new GameService(http));
         _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.GameEntity>(http, "games"));
+        _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.ActivityEntity>(http, "activities"));
         _context.Services.AddSingleton(new ActivityService(http));
         _context.Services.AddSingleton(new EventService(http));
         _context.Services.AddSingleton(new ThemeService(http));

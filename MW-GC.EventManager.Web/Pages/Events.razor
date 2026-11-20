@@ -2,7 +2,7 @@
 @page "/"
 @inject EventService EventSvc
 @inject GameService GameSvc
-@inject ActivityService ActivitySvc
+@inject LibraryClient<ActivityEntity> ActivityClient
 @inject ThemeService ThemeSvc
 @inject HolidayService HolidaySvc
 @inject FocusReturn Focus
@@ -79,7 +79,7 @@
     private Task LoadAll() => Task.WhenAll(
         _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
         _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
-        _loads.LoadAsync("Activities", ActivitySvc.GetAllAsync, v => _activities = v ?? []),
+        _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []),
         _loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? []),
         _loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []));
 

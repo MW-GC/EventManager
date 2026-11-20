@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using AngleSharp.Dom;
@@ -87,6 +88,26 @@ public sealed class LibraryPageTests : IDisposable
 
         var games = Games();
         Assert.ContainsSingle(games.FindAll("fluent-button[title='Card view']"));
+    }
+
+    // ---- A write the using page sends itself (#126: the Activities Save Comments) -----------------
+
+    [TestMethod]
+    public async Task ReloadAsync_ReadsTheListAgain_AndShowActionError_ShowsAboveTheList()
+    {
+        var page = Themes();
+        var reads = api.Count(HttpMethod.Get, "/api/themes");
+        api.Json(HttpMethod.Get, "/api/themes", new[] { cozy });
+
+        await page.InvokeAsync(() => page.Instance.ReloadAsync());
+
+        Assert.AreEqual(reads + 1, api.Count(HttpMethod.Get, "/api/themes"));
+        page.WaitForAssertion(() => Assert.Contains("Cozy", Assert.ContainsSingle(page.Rows())));
+        Assert.IsEmpty(page.PageAlerts());
+
+        await page.InvokeAsync(() => page.Instance.ShowActionError("The comments were not saved."));
+        Assert.AreEqual("The comments were not saved.", Assert.ContainsSingle(page.PageAlerts()));
+        Assert.Contains("Cozy", Assert.ContainsSingle(page.Rows()));
     }
 
     // ---- Delete confirmation and the busy guard ----------------------------------------------------
@@ -498,11 +519,15 @@ public sealed class LibraryPageTests : IDisposable
                 });
                 break;
             default:
+                // The Activities page moved onto the client (#126) and ActivityService lost these four methods, so
+                // this row compares with the calls they made, as they were written.
                 var activity = new ActivityEntity { Id = Id, Name = "Race", GameId = Guid.NewGuid(), ThemeIds = [Guid.NewGuid()] };
                 await AssertSameRequests(route, activity, async h =>
                 {
-                    var s = new ActivityService(h);
-                    await s.GetAllAsync(); (await s.CreateAsync(activity)).Dispose(); (await s.UpdateAsync(activity)).Dispose(); (await s.DeleteAsync(Id)).Dispose();
+                    await h.GetFromJsonAsync<List<ActivityEntity>>("api/activities");
+                    (await h.PostAsJsonAsync("api/activities", activity)).Dispose();
+                    (await h.PutAsJsonAsync($"api/activities/{activity.Id}", activity)).Dispose();
+                    (await h.DeleteAsync($"api/activities/{Id}")).Dispose();
                 });
                 break;
         }

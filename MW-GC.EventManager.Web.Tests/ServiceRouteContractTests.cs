@@ -8,7 +8,7 @@ using MW_GC.EventManager.Web.Services;
 
 namespace MW_GC.EventManager.Web.Tests;
 
-// Issue #57: the route contract between the five Web services and the API. One table lists every
+// Issue #57: the route contract between the Web services (and the shared Library client) and the API. One table lists every
 // public method of every service with the HTTP method and relative path it must send. The tests
 // call each method through a stub API and compare, fail when a service has a public method the
 // table does not list, and check every row against the HttpTrigger routes the API declares.
@@ -31,11 +31,12 @@ public sealed class ServiceRouteContractTests
         new(typeof(GameService), nameof(GameService.UpdateAsync), "PUT", "api/games/{id}", h => new GameService(h).UpdateAsync(new GameEntity { Id = Id })),
         new(typeof(GameService), nameof(GameService.DeleteAsync), "DELETE", "api/games/{id}", h => new GameService(h).DeleteAsync(Id)),
 
-        new(typeof(ActivityService), nameof(ActivityService.GetAllAsync), "GET", "api/activities", h => new ActivityService(h).GetAllAsync()),
-        new(typeof(ActivityService), nameof(ActivityService.GetAsync), "GET", "api/activities/{id}", h => new ActivityService(h).GetAsync(Id)),
-        new(typeof(ActivityService), nameof(ActivityService.CreateAsync), "POST", "api/activities", h => new ActivityService(h).CreateAsync(new ActivityEntity { Id = Id })),
-        new(typeof(ActivityService), nameof(ActivityService.UpdateAsync), "PUT", "api/activities/{id}", h => new ActivityService(h).UpdateAsync(new ActivityEntity { Id = Id })),
-        new(typeof(ActivityService), nameof(ActivityService.DeleteAsync), "DELETE", "api/activities/{id}", h => new ActivityService(h).DeleteAsync(Id)),
+        // Activities read, create, update and delete through the shared client (#126); the service keeps the two
+        // routes only Activities have.
+        new(typeof(LibraryClient<ActivityEntity>), nameof(LibraryClient<ActivityEntity>.GetAllAsync), "GET", "api/activities", h => Activities(h).GetAllAsync()),
+        new(typeof(LibraryClient<ActivityEntity>), nameof(LibraryClient<ActivityEntity>.CreateAsync), "POST", "api/activities", h => Activities(h).CreateAsync(new ActivityEntity { Id = Id })),
+        new(typeof(LibraryClient<ActivityEntity>), nameof(LibraryClient<ActivityEntity>.UpdateAsync), "PUT", "api/activities/{id}", h => Activities(h).UpdateAsync(new ActivityEntity { Id = Id })),
+        new(typeof(LibraryClient<ActivityEntity>), nameof(LibraryClient<ActivityEntity>.DeleteAsync), "DELETE", "api/activities/{id}", h => Activities(h).DeleteAsync(Id)),
         new(typeof(ActivityService), nameof(ActivityService.DuplicateAsync), "POST", "api/activities/{id}/duplicate", h => new ActivityService(h).DuplicateAsync(Id)),
         new(typeof(ActivityService), nameof(ActivityService.UpdateCommentsAsync), "PATCH", "api/activities/{id}/comments", h => new ActivityService(h).UpdateCommentsAsync(Id, "Note")),
 
@@ -58,7 +59,10 @@ public sealed class ServiceRouteContractTests
         new(typeof(HolidayService), nameof(HolidayService.DeleteAsync), "DELETE", "api/holidays/{id}", h => new HolidayService(h).DeleteAsync(Id)),
     ];
 
-    private static readonly Type[] Services = [typeof(GameService), typeof(ActivityService), typeof(EventService), typeof(ThemeService), typeof(HolidayService)];
+    private static readonly Type[] Services = [typeof(GameService), typeof(LibraryClient<ActivityEntity>), typeof(ActivityService), typeof(EventService), typeof(ThemeService), typeof(HolidayService)];
+
+    // The Activities client as Program.cs registers it.
+    private static LibraryClient<ActivityEntity> Activities(HttpClient http) => new(http, "activities");
 
     [TestMethod]
     public async Task EveryServiceMethodSendsTheMethodAndPathInTheTable()

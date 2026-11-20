@@ -24,6 +24,7 @@ builder.Services.AddFluentUIComponents();
 
 builder.Services.AddScoped<GameService>();
 builder.Services.AddScoped(sp => new LibraryClient<GameEntity>(sp.GetRequiredService<HttpClient>(), "games"));
+builder.Services.AddScoped(sp => new LibraryClient<ActivityEntity>(sp.GetRequiredService<HttpClient>(), "activities"));
 builder.Services.AddScoped<ActivityService>();
 builder.Services.AddScoped<EventService>();
 builder.Services.AddScoped<ThemeService>();
