@@ -2,8 +2,8 @@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject ActivityService ActivitySvc
 @inject GameService GameSvc
-@inject ThemeService ThemeSvc
-@inject HolidayService HolidaySvc
+@inject LibraryClient<ThemeEntity> ThemeSvc
+@inject LibraryClient<HolidayEntity> HolidaySvc
 @inject FocusReturn Focus
 
 <PageHeader Title="Activities" Subtitle="Manage game activities, rules, and descriptions" />

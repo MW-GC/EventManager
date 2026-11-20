@@ -2,8 +2,8 @@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject LibraryClient<GameEntity> GameClient
 @inject ActivityService ActivitySvc
-@inject ThemeService ThemeSvc
-@inject HolidayService HolidaySvc
+@inject LibraryClient<ThemeEntity> ThemeSvc
+@inject LibraryClient<HolidayEntity> HolidaySvc
 
 @* The shared Library page does the loading, search, dialogs, busy guard and delete confirmation; this page
    adds what is Games-only: the Website field, the icon, Activity counts and the Activities in the Edit dialog. *@
