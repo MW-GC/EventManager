@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Moq;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
+using MW_GC.EventManager.Shared.Models;
 
 namespace MW_GC.EventManager.Api.Tests;
 
@@ -450,5 +451,156 @@ public sealed class EventMetricsTests
         Assert.IsExactInstanceOfType<NoContentResult>(await h.EventApi.Delete(Bare(), id, default));
 
         Assert.IsEmpty(h.EventMetrics, "a retried delete cleans up");
+    }
+
+    // ---- the bulk read: GET event-metrics (#136)
+
+    private void SeedLikes(string partitionKey, int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            var rowKey = Guid.NewGuid().ToString("N");
+            h.Likes[rowKey] = new TableEntity(partitionKey, rowKey);
+        }
+    }
+
+    private void SeedLikes(Guid eventId, int count) => SeedLikes(eventId.ToString("D"), count);
+
+    private async Task<List<EventMetricsWithLikes>> GetAllMetrics()
+    {
+        var result = await h.EventMetricsApi.GetAllEventMetrics(Bare(), default);
+        Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(result));
+        return ApiResults.Value<List<EventMetricsWithLikes>>(result);
+    }
+
+    [TestMethod]
+    public async Task GetAll_WithNoMetricsAndNoLikes_IsAnEmptyArray()
+    {
+        await CreateEvent();
+
+        Assert.IsEmpty(await GetAllMetrics());
+    }
+
+    [TestMethod]
+    public async Task GetAll_AnEventWithMetricsOnly_HasItsValues_AndZeroLikes()
+    {
+        var (id, _) = await CreateEvent();
+        await Put(id, Metrics(30, 5, 25, 120.50m));
+
+        var item = Assert.ContainsSingle(await GetAllMetrics());
+
+        Assert.AreEqual(new EventMetricsWithLikes(id, 30, 5, 25, 120.50m, 0), item);
+    }
+
+    [TestMethod]
+    public async Task GetAll_AnEventWithLikesOnly_HasNullMetrics_AndItsLikeCount()
+    {
+        var (id, _) = await CreateEvent();
+        SeedLikes(id, 2);
+
+        var item = Assert.ContainsSingle(await GetAllMetrics());
+
+        Assert.AreEqual(new EventMetricsWithLikes(id, null, null, null, null, 2), item);
+    }
+
+    [TestMethod]
+    public async Task GetAll_AnEventWithMetricsAndLikes_IsOneItem()
+    {
+        var (id, _) = await CreateEvent();
+        await Put(id, Metrics(attendees: 10));
+        SeedLikes(id, 3);
+
+        var item = Assert.ContainsSingle(await GetAllMetrics());
+
+        Assert.AreEqual(new EventMetricsWithLikes(id, 10, null, null, null, 3), item);
+    }
+
+    [TestMethod]
+    public async Task GetAll_TwoEvents_GetOneItemEach_AndAnEventWithNeitherGetsNone()
+    {
+        var (first, _) = await CreateEvent("First");
+        var (second, _) = await CreateEvent("Second");
+        var (neither, _) = await CreateEvent("Neither");
+        await Put(first, Metrics(12, 4, 8, 30m));
+        SeedLikes(first, 1);
+        await Put(second, Metrics(returning: 7));
+        SeedLikes(second, 4);
+
+        var items = await GetAllMetrics();
+
+        CollectionAssert.AreEquivalent(new[]
+        {
+            new EventMetricsWithLikes(first, 12, 4, 8, 30m, 1),
+            new EventMetricsWithLikes(second, null, null, 7, null, 4),
+        }, items);
+        Assert.IsFalse(items.Any(i => i.EventId == neither));
+    }
+
+    [TestMethod]
+    public async Task GetAll_SkipsALikesPartitionKeyThatIsNotAGuid()
+    {
+        var (id, _) = await CreateEvent();
+        SeedLikes(id, 1);
+        SeedLikes("not-an-event-id", 5);
+
+        var item = Assert.ContainsSingle(await GetAllMetrics());
+
+        Assert.AreEqual(new EventMetricsWithLikes(id, null, null, null, null, 1), item);
+    }
+
+    [TestMethod]
+    public async Task GetAll_CountsLikesInOneQueryOfTheWholeTable_SelectingOnlyTheKeys()
+    {
+        var (first, _) = await CreateEvent("First");
+        var (second, _) = await CreateEvent("Second");
+        SeedLikes(first, 2);
+        SeedLikes(second, 1);
+
+        await GetAllMetrics();
+
+        var query = Assert.ContainsSingle(h.LikesTable.Invocations.Where(i => i.Method.Name == nameof(TableClient.QueryAsync)));
+        Assert.IsNull(query.Arguments[0], "no filter: every Event's Likes in one pass");
+        CollectionAssert.AreEquivalent(new[] { "PartitionKey", "RowKey" }, ((IEnumerable<string>)query.Arguments[2]!).ToArray());
+    }
+
+    [TestMethod]
+    [DataRow("metrics")]
+    [DataRow("likes")]
+    public async Task GetAll_AStorageOutage_IsTheMapped503_AndIsLogged(string table)
+    {
+        var outage = new RequestFailedException(503, "storage down");
+        if (table == "metrics")
+            h.EventMetricsTable.Setup(t => t.QueryAsync(It.IsAny<System.Linq.Expressions.Expression<Func<TableEntity, bool>>>(), It.IsAny<int?>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+                .Throws(outage);
+        else
+            h.LikesTable.Setup(t => t.QueryAsync<TableEntity>(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+                .Throws(outage);
+
+        var result = await h.EventMetricsApi.GetAllEventMetrics(Bare(), default);
+
+        Assert.AreEqual(StatusCodes.Status503ServiceUnavailable, ApiResults.Status(result));
+        Assert.AreEqual(RouteFailures.UnavailableMessage, ApiResults.Message(result));
+        var entry = Assert.ContainsSingle(h.EventMetricsLog.Entries);
+        Assert.AreSame(outage, entry.Exception);
+        Assert.Contains("GetAllEventMetrics", entry.Message);
+    }
+
+    [TestMethod]
+    public async Task GetAll_Json_IsAnArrayOfCamelCaseItems()
+    {
+        var (id, _) = await CreateEvent();
+        await Put(id, Metrics(30, 5, 25, 120.50m));
+        SeedLikes(id, 2);
+
+        var result = await h.EventMetricsApi.GetAllEventMetrics(Bare(), default);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(Assert.IsInstanceOfType<ObjectResult>(result).Value, Web));
+        var item = Assert.ContainsSingle(json.RootElement.EnumerateArray().ToList());
+        CollectionAssert.AreEqual(
+            new[] { "eventId", "attendees", "newAttendees", "returningAttendees", "amountSpent", "likes" },
+            item.EnumerateObject().Select(p => p.Name).ToArray());
+        Assert.AreEqual(id.ToString("D"), item.GetProperty("eventId").GetString());
+        Assert.AreEqual(120.50m, item.GetProperty("amountSpent").GetDecimal());
+        Assert.AreEqual(2, item.GetProperty("likes").GetInt32());
     }
 }

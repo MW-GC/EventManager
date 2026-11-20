@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
+using MW_GC.EventManager.Shared.Models;
 
 namespace MW_GC.EventManager.API.Functions;
 
@@ -17,17 +18,43 @@ internal sealed class EventMetricsFunctions
 {
     private readonly TableStore<EventMetricsEntity> _store;
     private readonly TableStore<EventEntity> _events;
+    private readonly FeedbackStore _feedback;
     private readonly ILogger<EventMetricsFunctions> _logger;
 
     public EventMetricsFunctions(
         TableStore<EventMetricsEntity> store,
         TableStore<EventEntity> events,
+        FeedbackStore feedback,
         ILogger<EventMetricsFunctions> logger)
     {
         _store = store;
         _events = events;
+        _feedback = feedback;
         _logger = logger;
     }
+
+    /// <summary>
+    /// The bulk read the Stats page needs (#136, ADR 0001): one item per Event that has a stored
+    /// metrics row or at least one Like, with the Like count joined in. An Event with neither has no
+    /// item. Read-only: no ETag, no body. Whether the Event still exists is not checked; the browser
+    /// matches items to its Events list by id and ignores the rest.
+    /// </summary>
+    [Function("GetAllEventMetrics")]
+    public Task<IActionResult> GetAllEventMetrics(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "event-metrics")] HttpRequest req,
+        CancellationToken ct) => RouteFailures.RunAsync(_logger, "GetAllEventMetrics", ct, async () =>
+    {
+        var rows = await _store.GetAllAsync(ct);
+        var likes = await _feedback.CountLikesByEventAsync(ct);
+
+        var items = rows.Select(m => new EventMetricsWithLikes(
+                m.Id, m.Attendees, m.NewAttendees, m.ReturningAttendees, m.AmountSpent, likes.GetValueOrDefault(m.Id)))
+            .ToList();
+        var withMetrics = rows.Select(m => m.Id).ToHashSet();
+        items.AddRange(likes.Where(l => !withMetrics.Contains(l.Key))
+            .Select(l => new EventMetricsWithLikes(l.Key, null, null, null, null, l.Value)));
+        return new OkObjectResult(items);
+    });
 
     /// <summary>
     /// 404 for an unknown Event. An Event with no stored row reads as empty metrics: every field

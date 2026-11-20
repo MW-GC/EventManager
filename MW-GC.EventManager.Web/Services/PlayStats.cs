@@ -10,8 +10,24 @@ namespace MW_GC.EventManager.Web.Services;
 /// <param name="Deleted">True when the Game is no longer in the library; its name then comes from a Selection snapshot.</param>
 public sealed record GamePlayStats(Guid Id, string Name, int Offered, int Wins, DateTimeOffset? LastOffered, bool Deleted);
 
-/// <summary>One Activity's row on the Stats page, with the name of its Game.</summary>
-public sealed record ActivityPlayStats(Guid Id, string Name, string GameName, int Offered, int Wins, DateTimeOffset? LastOffered, bool Deleted);
+/// <summary>
+/// One Activity's row on the Stats page, with the name of its Game, and its Activity performance (#136)
+/// over the same Events that <see cref="Offered"/> counts.
+/// </summary>
+public sealed record ActivityPlayStats(Guid Id, string Name, string GameName, int Offered, int Wins, DateTimeOffset? LastOffered, bool Deleted)
+{
+    /// <summary>Wins divided by Offered (0 to 1); null when the Activity was never offered, never 0.</summary>
+    public decimal? WinRate { get; init; }
+
+    /// <summary>The mean Like count of the Events it was offered at, an Event with no metrics item counting 0; null when never offered.</summary>
+    public decimal? AverageLikes { get; init; }
+
+    /// <summary>
+    /// The mean Attendees of the Events it was offered at that have Attendees recorded. An Event with no
+    /// metrics, or with Attendees cleared, is left out, not counted as 0; null when none has it.
+    /// </summary>
+    public decimal? AverageAttendees { get; init; }
+}
 
 public sealed record PlayStatsReport(IReadOnlyList<GamePlayStats> Games, IReadOnlyList<ActivityPlayStats> Activities);
 
@@ -21,19 +37,24 @@ public sealed record PlayStatsReport(IReadOnlyList<GamePlayStats> Games, IReadOn
 /// in the library still gets a row, named from the newest Selection snapshot that mentions it and marked
 /// deleted; a library item that was never offered gets a row with 0, 0 and never. Rows come back in the
 /// page's default order: never offered first, then the longest unused, then the most offered, then by name.
+/// Each Activity also gets its Activity performance (#136, ADR 0001) from the Event metrics and Like
+/// counts, matched to the Events by Event id; an item for an Event not in the list is ignored.
 /// </summary>
 public sealed class PlayStats(TimeProvider time)
 {
     /// <summary>Shown for an Activity whose Game is neither in the library nor in any snapshot.</summary>
     public const string UnknownGame = "—";
 
-    public PlayStatsReport Compute(IEnumerable<EventEntity> events, IEnumerable<GameEntity> games, IEnumerable<ActivityEntity> activities)
+    public PlayStatsReport Compute(IEnumerable<EventEntity> events, IEnumerable<GameEntity> games, IEnumerable<ActivityEntity> activities,
+        IEnumerable<EventMetricsWithLikes> metrics)
     {
         var now = time.GetUtcNow();
         var gameTallies = new Dictionary<Guid, Tally>();
         var activityTallies = new Dictionary<Guid, Tally>();
         var gameSnapshots = new Dictionary<Guid, (DateTimeOffset Date, Game Game)>();
         var activitySnapshots = new Dictionary<Guid, (DateTimeOffset Date, Activity Activity)>();
+        var metricsByEvent = new Dictionary<Guid, EventMetricsWithLikes>();
+        foreach (var m in metrics ?? []) if (m is not null) metricsByEvent.TryAdd(m.EventId, m);
 
         foreach (var ev in events)
         {
@@ -47,8 +68,14 @@ public sealed class PlayStats(TimeProvider time)
             // A Game in two Selections of one Event was offered once at that Event.
             foreach (var gameId in selections.Select(s => s.Game.Id).Distinct())
                 TallyFor(gameTallies, gameId).Offer(ev.Date);
+            // No metrics item: 0 Likes and no attendees, so the Event stays out of the attendee average.
+            var eventMetrics = metricsByEvent.GetValueOrDefault(ev.Id);
             foreach (var activityId in selections.Select(s => s.Activity.Id).Distinct())
-                TallyFor(activityTallies, activityId).Offer(ev.Date);
+            {
+                var tally = TallyFor(activityTallies, activityId);
+                tally.Offer(ev.Date);
+                tally.Observe(eventMetrics?.Likes ?? 0, eventMetrics?.Attendees);
+            }
 
             // The winner is the Selection whose Activity Id is WinnerActivityId; none matching means no win.
             var winner = ev.WinnerActivityId is { } winnerId ? selections.FirstOrDefault(s => s.Activity.Id == winnerId) : null;
@@ -79,10 +106,16 @@ public sealed class PlayStats(TimeProvider time)
             .Select(id =>
             {
                 var tally = activityTallies.GetValueOrDefault(id) ?? new Tally();
-                if (libraryActivities.TryGetValue(id, out var current))
-                    return new ActivityPlayStats(id, current.Name, GameName(current.GameId), tally.Offered, tally.Wins, tally.Last, false);
-                var snap = activitySnapshots[id].Activity;
-                return new ActivityPlayStats(id, snap.Name, GameName(snap.GameId), tally.Offered, tally.Wins, tally.Last, true);
+                var row = libraryActivities.TryGetValue(id, out var current)
+                    ? new ActivityPlayStats(id, current.Name, GameName(current.GameId), tally.Offered, tally.Wins, tally.Last, false)
+                    : new ActivityPlayStats(id, activitySnapshots[id].Activity.Name, GameName(activitySnapshots[id].Activity.GameId),
+                        tally.Offered, tally.Wins, tally.Last, true);
+                return row with
+                {
+                    WinRate = tally.Offered == 0 ? null : (decimal)tally.Wins / tally.Offered,
+                    AverageLikes = tally.Offered == 0 ? null : (decimal)tally.Likes / tally.Offered,
+                    AverageAttendees = tally.AttendeeEvents == 0 ? null : (decimal)tally.Attendees / tally.AttendeeEvents,
+                };
             });
 
         return new PlayStatsReport(
@@ -111,10 +144,23 @@ public sealed class PlayStats(TimeProvider time)
         public int Wins { get; set; }
         public DateTimeOffset? Last { get; private set; }
 
+        // Activity performance only: the Likes of every Event offered, and the attendees of those that have them.
+        public long Likes { get; private set; }
+        public long Attendees { get; private set; }
+        public int AttendeeEvents { get; private set; }
+
         public void Offer(DateTimeOffset date)
         {
             Offered++;
             if (Last is null || date > Last) Last = date;
+        }
+
+        public void Observe(int likes, int? attendees)
+        {
+            Likes += likes;
+            if (attendees is not { } a) return;
+            Attendees += a;
+            AttendeeEvents++;
         }
     }
 }

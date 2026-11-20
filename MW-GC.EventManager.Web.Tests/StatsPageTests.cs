@@ -25,6 +25,7 @@ public sealed class StatsPageTests : IDisposable
     private readonly Guid goneGame = Guid.NewGuid();
     private readonly Guid goneActivity = Guid.NewGuid();
     private readonly EventEntity[] events;
+    private readonly EventMetricsWithLikes[] metrics;
 
     public StatsPageTests()
     {
@@ -38,9 +39,20 @@ public sealed class StatsPageTests : IDisposable
             // In the future: ignored.
             Event(new DateTimeOffset(2099, 1, 1, 19, 0, 0, TimeSpan.Zero), tiles.Id, Pick(puzzle.Id, puzzle.Name, tiles.Id, tiles.Name)),
         ];
+        // Event metrics with Like counts (#136): Sprint is at the first two Events, Tiles at the first, Old
+        // activity at the third. The future Event's and an unknown Event's items must not count.
+        metrics =
+        [
+            new(events[0].Id, 10, null, null, null, 4),
+            new(events[1].Id, 20, null, null, null, 0),
+            new(events[2].Id, null, null, null, null, 1),
+            new(events[3].Id, 99, null, null, null, 9),
+            new(Guid.NewGuid(), 50, null, null, null, 50),
+        ];
         api.Json(HttpMethod.Get, "/api/games", new[] { kart, puzzle, unused })
            .Json(HttpMethod.Get, "/api/activities", new[] { sprint, tiles })
-           .Json(HttpMethod.Get, "/api/events", events);
+           .Json(HttpMethod.Get, "/api/events", events)
+           .Json(HttpMethod.Get, "/api/event-metrics", metrics);
         harness = new PageHarness(api);
     }
 
@@ -125,7 +137,7 @@ public sealed class StatsPageTests : IDisposable
         Assert.AreEqual("Stats", h1.TextContent.Trim());
         Assert.AreEqual("-1", h1.GetAttribute("tabindex"));
         CollectionAssert.AreEqual(new[] { "Name", "Offered", "Wins", "Last offered" }, SortHeaders(page, "stats-games"));
-        CollectionAssert.AreEqual(new[] { "Name", "Game", "Offered", "Wins", "Last offered" }, SortHeaders(page, "stats-activities"));
+        CollectionAssert.AreEqual(new[] { "Name", "Game", "Offered", "Wins", "Win rate", "Avg Likes", "Avg attendees", "Last offered" }, SortHeaders(page, "stats-activities"));
         // The default sort is announced on its header.
         Assert.AreEqual("ascending", page.Find("table.stats-games th[aria-sort]:not([aria-sort=none])").GetAttribute("aria-sort"));
     }
@@ -189,7 +201,126 @@ public sealed class StatsPageTests : IDisposable
         Assert.DoesNotContain("Deleted", page.Markup);
     }
 
+    // ---- Activity performance (#136) ------------------------------------------------------------
+
+    private const string PerformanceNote =
+        "Performance cannot tell a weak Activity from a weak night: an Event has several Selections, so its numbers belong to all of them.";
+
+    [TestMethod]
+    public void ActivitiesGrid_ShowsWinRateAverageLikesAndAverageAttendees()
+    {
+        var page = Loaded();
+
+        var rows = Rows(page, "stats-activities");
+        CollectionAssert.AreEqual(new[] { "Old activity", "Tiles", "Sprint" }, rows.Select(Name).ToList());
+        // Sprint: 2 of 2 won, Likes (4 + 0) / 2, attendees (10 + 20) / 2. Tiles: 0 of 1 won, the first Event's 4
+        // Likes and 10 attendees. Old activity: its Event has Likes but no attendees.
+        Assert.AreEqual(("100%", "1.0", "—"), Performance(rows[0]));
+        Assert.AreEqual(("0%", "4.0", "10.0"), Performance(rows[1]));
+        Assert.AreEqual(("100%", "2.0", "15.0"), Performance(rows[2]));
+        Assert.AreEqual(1, api.Count(HttpMethod.Get, "/api/event-metrics"));
+        Assert.IsEmpty(page.FindAll("table.stats-games .stats-win-rate, table.stats-games .stats-avg-likes, table.stats-games .stats-avg-attendees"),
+            "Games get no performance columns");
+    }
+
+    [TestMethod]
+    public void PerformanceNumbers_ShowAWholePercentAndOneDecimal()
+    {
+        var nights = new[]
+        {
+            Event(new DateTimeOffset(2021, 1, 1, 19, 0, 0, TimeSpan.Zero), sprint.Id, Pick(kart.Id, kart.Name, sprint.Id, sprint.Name)),
+            Event(new DateTimeOffset(2021, 2, 1, 19, 0, 0, TimeSpan.Zero), sprint.Id, Pick(kart.Id, kart.Name, sprint.Id, sprint.Name)),
+            Event(new DateTimeOffset(2021, 3, 1, 19, 0, 0, TimeSpan.Zero), null, Pick(kart.Id, kart.Name, sprint.Id, sprint.Name)),
+        };
+        api.Json(HttpMethod.Get, "/api/events", nights)
+           .Json(HttpMethod.Get, "/api/event-metrics", new EventMetricsWithLikes[]
+           {
+               new(nights[0].Id, 10, null, null, null, 1),
+               new(nights[1].Id, 11, null, null, null, 0),
+               new(nights[2].Id, 11, null, null, null, 0),
+           });
+
+        var page = harness.Render<Stats>();
+        page.WaitForAssertion(() => Assert.HasCount(2, Rows(page, "stats-activities")));
+
+        var row = Rows(page, "stats-activities").Single(r => Name(r) == "Sprint");
+        // 2/3 won, 1/3 Likes, 32/3 attendees.
+        Assert.AreEqual(("67%", "0.3", "10.7"), Performance(row));
+    }
+
+    [TestMethod]
+    public void AnActivityNeverOffered_ShowsAnEmDashInEachPerformanceColumn()
+    {
+        var unplayed = new ActivityEntity { Name = "Unplayed", GameId = kart.Id };
+        api.Json(HttpMethod.Get, "/api/activities", new[] { sprint, tiles, unplayed });
+
+        var page = harness.Render<Stats>();
+        page.WaitForAssertion(() => Assert.HasCount(4, Rows(page, "stats-activities")));
+
+        var row = Rows(page, "stats-activities").Single(r => Name(r) == "Unplayed");
+        Assert.AreEqual(("—", "—", "—"), Performance(row));
+        Assert.AreEqual(("0", "0", "Never"), Measures(row));
+    }
+
+    [TestMethod]
+    [DataRow("Win rate", new[] { "Unplayed", "Tiles", "Old activity", "Sprint" })]
+    [DataRow("Avg Likes", new[] { "Unplayed", "Old activity", "Sprint", "Tiles" })]
+    [DataRow("Avg attendees", new[] { "Old activity", "Unplayed", "Tiles", "Sprint" })]
+    public async Task ClickingAPerformanceHeader_SortsAscendingWithBlanksFirst_ThenDescending(string header, string[] ascending)
+    {
+        var unplayed = new ActivityEntity { Name = "Unplayed", GameId = kart.Id };
+        api.Json(HttpMethod.Get, "/api/activities", new[] { sprint, tiles, unplayed });
+        var page = harness.Render<Stats>();
+        page.WaitForAssertion(() => Assert.HasCount(4, Rows(page, "stats-activities")));
+        CollectionAssert.AreEqual(new[] { "Unplayed", "Old activity", "Tiles", "Sprint" }, Rows(page, "stats-activities").Select(Name).ToList(),
+            "the default sort stays Last offered");
+
+        await SortHeader(page, "stats-activities", header).ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(ascending, Rows(page, "stats-activities").Select(Name).ToList()));
+
+        await SortHeader(page, "stats-activities", header).ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(ascending.Reverse().ToArray(), Rows(page, "stats-activities").Select(Name).ToList()));
+    }
+
+    [TestMethod]
+    public void TheActivitiesCard_SaysPerformanceCannotTellAWeakActivityFromAWeakNight()
+    {
+        var page = Loaded();
+
+        var note = page.Find(".stats-performance-note");
+        Assert.AreEqual(PerformanceNote, note.TextContent.Trim());
+        Assert.AreEqual(1, page.Markup.Split(PerformanceNote).Length - 1, "said once");
+        var card = note.Closest("fluent-card")!;
+        Assert.IsNotNull(card.QuerySelector("table.stats-activities"), "under the Activities heading");
+        Assert.IsNull(card.QuerySelector("table.stats-games"));
+    }
+
+    [TestMethod]
+    public async Task AFailedEventMetricsLoad_IsNamed_ShowsNoStats_AndRetryShowsThem()
+    {
+        api.Offline(HttpMethod.Get, "/api/event-metrics");
+
+        var page = harness.Render<Stats>();
+        page.WaitForPageAlert();
+
+        Assert.AreEqual("Event metrics could not be loaded. Could not reach the server. Check the connection and try again.",
+            Assert.ContainsSingle(page.PageAlerts()));
+        Assert.IsEmpty(page.FindAll("table.fluent-data-grid"), "the stats wait for all four lists");
+
+        api.Json(HttpMethod.Get, "/api/event-metrics", metrics);
+        await page.Button("Retry").ClickAsync(new());
+
+        page.WaitForAssertion(() => Assert.HasCount(3, Rows(page, "stats-activities")));
+        Assert.IsEmpty(page.PageAlerts());
+        Assert.AreEqual(("100%", "2.0", "15.0"), Performance(Rows(page, "stats-activities").Single(r => Name(r) == "Sprint")));
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
+
+    private static (string WinRate, string AverageLikes, string AverageAttendees) Performance(IElement row) => (
+        row.QuerySelector(".stats-win-rate")!.TextContent.Trim(),
+        row.QuerySelector(".stats-avg-likes")!.TextContent.Trim(),
+        row.QuerySelector(".stats-avg-attendees")!.TextContent.Trim());
 
     private IRenderedComponent<Stats> Loaded()
     {

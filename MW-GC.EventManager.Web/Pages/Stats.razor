@@ -1,8 +1,10 @@
 @page "/stats"
+@using System.Globalization
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject EventService EventSvc
 @inject GameService GameSvc
 @inject LibraryClient<ActivityEntity> ActivityClient
+@inject EventMetricsClient MetricsClient
 
 <PageHeader Title="Stats" Subtitle="How often each Game and Activity was offered and won, and when it was last offered" />
 <ApiErrorBar Message="@_loads.Message" OnRetry="LoadAll" />
@@ -46,9 +48,10 @@
 
         <FluentCard Style="overflow: visible;" AreaRestricted="false">
             <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 4px;">Activities</FluentLabel>
-            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 12px;">@PastEventsNote</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 4px;">@PastEventsNote</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Class="stats-performance-note" Style="color: var(--neutral-foreground-hint); margin-bottom: 12px;">@PerformanceNote</FluentLabel>
             <FluentDataGrid Items="@_report.Activities.AsQueryable()" TGridItem="ActivityPlayStats" ItemSize="44"
-                            GridTemplateColumns="minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
+                            GridTemplateColumns="minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
                             Class="stats-activities" aria-label="Activity stats">
                 <TemplateColumn Title="Name" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.Name))">
                     @NameCell((context.Name, context.Deleted))
@@ -62,6 +65,16 @@
                 <TemplateColumn Title="Wins" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.Wins))">
                     <span class="stats-wins">@context.Wins</span>
                 </TemplateColumn>
+                @* Activity performance (#136): null sorts lowest, so ascending shows the dash first, as Never does. *@
+                <TemplateColumn Title="Win rate" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.WinRate).ThenAscending(a => a.Name))">
+                    @PerformanceCell(("stats-win-rate", Percent(context.WinRate)))
+                </TemplateColumn>
+                <TemplateColumn Title="Avg Likes" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.AverageLikes).ThenAscending(a => a.Name))">
+                    @PerformanceCell(("stats-avg-likes", OneDecimal(context.AverageLikes)))
+                </TemplateColumn>
+                <TemplateColumn Title="Avg attendees" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.AverageAttendees).ThenAscending(a => a.Name))">
+                    @PerformanceCell(("stats-avg-attendees", OneDecimal(context.AverageAttendees)))
+                </TemplateColumn>
                 <TemplateColumn Title="Last offered" Sortable="true" IsDefaultSortColumn="true"
                                 SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.LastOffered).ThenDescending(a => a.Offered).ThenAscending(a => a.Name))">
                     @LastOfferedCell(context.LastOffered)
@@ -73,6 +86,30 @@
 
 @code {
     private const string PastEventsNote = "Counts Events dated up to now; future Events are not included.";
+    private const string PerformanceNote =
+        "Performance cannot tell a weak Activity from a weak night: an Event has several Selections, so its numbers belong to all of them.";
+
+    // Shown for a performance number that has no value (never offered, or no attendees recorded).
+    private const string NoValue = "—";
+
+    // A whole percent ("50%") and one decimal ("1.0"), the same in every culture.
+    private static string? Percent(decimal? rate) =>
+        rate is { } r ? (r * 100).ToString("0", CultureInfo.InvariantCulture) + "%" : null;
+
+    private static string? OneDecimal(decimal? value) => value?.ToString("0.0", CultureInfo.InvariantCulture);
+
+    // One performance number, or a dimmed dash when it has none.
+    private static readonly RenderFragment<(string Class, string? Text)> PerformanceCell = cell =>
+        @<span class="@cell.Class">
+            @if (cell.Text is { } text)
+            {
+                @text
+            }
+            else
+            {
+                <span style="color: var(--neutral-foreground-hint);">@NoValue</span>
+            }
+        </span>;
 
     // The name, and for an item no longer in the library a "Deleted" chip: visible text with its own
     // icon, so it differs by more than colour, and a tooltip that says where the name came from.
@@ -108,19 +145,22 @@
     private List<EventEntity>? _events;
     private List<GameEntity>? _games;
     private List<ActivityEntity>? _activities;
+    private List<EventMetricsWithLikes>? _metrics;
     private PlayStatsReport? _report;
 
     protected override Task OnInitializedAsync() => LoadAll();
 
-    // All three lists are needed: without the library every row would look deleted. A failed list keeps
-    // its previous contents and is named in the error bar with Retry; the stats wait until all three loaded.
+    // All four lists are needed: without the library every row would look deleted, and without the Event
+    // metrics every Activity would show 0 Likes and no attendees. A failed list keeps its previous contents
+    // and is named in the error bar with Retry; the stats wait until all four loaded.
     private async Task LoadAll()
     {
         await Task.WhenAll(
             _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
             _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
-            _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []));
-        if (_events is not null && _games is not null && _activities is not null)
-            _report = _stats.Compute(_events, _games, _activities);
+            _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []),
+            _loads.LoadAsync("Event metrics", MetricsClient.GetAllAsync, v => _metrics = v ?? []));
+        if (_events is not null && _games is not null && _activities is not null && _metrics is not null)
+            _report = _stats.Compute(_events, _games, _activities, _metrics);
     }
 }
