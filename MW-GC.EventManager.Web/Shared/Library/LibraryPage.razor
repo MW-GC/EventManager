@@ -1,8 +1,8 @@
 @* One Library list (Games, Themes, Holidays, Activities). This page owns what every list does the same way:
    load, the error bar and Retry, search by name, the optional card view, the busy guard on every action, the
    Add and Edit dialog with its name rule, the Discard question, and the delete confirmation that names the
-   item. The page that uses it supplies what differs: columns, card template, extra editor fields, row
-   actions, the delete question, and other lists to load. *@
+   item. The page that uses it supplies what differs: columns, card template, extra editor fields and their
+   rules, row actions, the delete question, and other lists to load. *@
 @typeparam TItem where TItem : EntityBase
 @using System.Linq.Expressions
 @using System.Reflection
@@ -124,6 +124,8 @@
                                          Immediate="true" Label="@NameLabel" Required Style="width: 100%;" Placeholder="@Placeholder" />
                         <LibraryNameValidator For="@(_nameField!)" />
                     </div>
+                    @* The page's own Rules, after the name rule; their messages show under the fields they name. *@
+                    <LibraryRulesValidator Rules="@RulesFor(edit)" />
                     @(EditorFields?.Invoke(edit))
                     <ApiErrorBar Message="@_dialogError" />
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8">
@@ -192,6 +194,13 @@
     [Parameter] public Func<LibraryEdit<TItem>, string>? DialogWidth { get; set; }
     [Parameter] public string SaveText { get; set; } = "Save Changes";
     /// <summary>
+    /// The page's own field rules, checked after the name rule when the editor is saved, and again for a field
+    /// whenever it changes. Each failed rule shows its message under the field it names, through a
+    /// <see cref="LibraryFieldMessage"/> the page puts under that field, and blocks the save. Not checked when
+    /// the editor opens, so a value stored before a rule existed loads as it is.
+    /// </summary>
+    [Parameter] public Func<TItem, IEnumerable<LibraryFieldError>>? Rules { get; set; }
+    /// <summary>
     /// The editor holds a select: a clean dialog closed by Escape waits for the select to finish with the
     /// same key first (DialogSession.CloseAfterKeyAsync, #105).
     /// </summary>
@@ -224,6 +233,9 @@
     private string Plural => Title.ToLowerInvariant();
     private string Lower => Singular.ToLowerInvariant();
     private string Placeholder => NamePlaceholder ?? $"Enter {Lower} name...";
+
+    private Func<IEnumerable<LibraryFieldError>>? RulesFor(LibraryEdit<TItem> edit) =>
+        Rules is { } rules ? () => rules(edit.Item) : null;
 
     private string DialogStyle(LibraryEdit<TItem> edit) => $"--dialog-width: {DialogWidth?.Invoke(edit) ?? "400px"};";
 
