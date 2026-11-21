@@ -74,8 +74,6 @@ public class EntityValidatorTests
         Assert.AreEqual($"{field} must be 2048 characters or fewer.", GameValidator.Validate(With(new string('u', 2049))));
     }
 
-    private const string WebsiteMessage = "Website must be an http or https address.";
-
     [TestMethod]
     [DataRow("http://x", null)]
     [DataRow("https://x", null)]
@@ -84,11 +82,11 @@ public class EntityValidatorTests
     [DataRow(null, null)]
     [DataRow("", null)]
     [DataRow("   ", null)]
-    [DataRow("ftp://x", WebsiteMessage)]
-    [DataRow("javascript:alert(1)", WebsiteMessage)]
-    [DataRow("example.com", WebsiteMessage)]
-    [DataRow("/games/1", WebsiteMessage)]
-    [DataRow("not even a url", WebsiteMessage)]
+    [DataRow("ftp://x", ApiMessages.Website)]
+    [DataRow("javascript:alert(1)", ApiMessages.Website)]
+    [DataRow("example.com", ApiMessages.Website)]
+    [DataRow("/games/1", ApiMessages.Website)]
+    [DataRow("not even a url", ApiMessages.Website)]
     public void GameWebsiteMustBeAnHttpOrHttpsAddressWhenGiven(string? website, string? expected)
     {
         Assert.AreEqual(expected, GameValidator.Validate(new GameEntity { Name = "Alpha", Website = website }));

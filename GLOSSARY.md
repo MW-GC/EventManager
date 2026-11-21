@@ -10,7 +10,10 @@ one won.
 
 **Library**:
 Everything an Event can draw from: the Games, their Activities, and the Themes
-and Holidays used to tag those Activities.
+and Holidays used to tag those Activities. The shared page and client
+(`LibraryPage<TItem>`, `LibraryClient<T>`) accept any entity, but only these
+four Library kinds are registered. A failed Library load throws, and the page
+shows the error with Retry.
 
 **Game**:
 A game in the Library, with a name and optional image, icon and website links.
@@ -36,7 +39,8 @@ of Comments, each with its own added date, and each can be edited or deleted. A
 Comment written from an Event's details lands on the Activity that won that
 Event and records which Event it came from. This replaces the Activity's old
 single text field.
-_Avoid_: note, Activity comments
+_Avoid_: note, Activity comments (`ActivityNoteConversion` and its marker
+`activity-notes-v1` keep the word because they name the retired column)
 
 ### Events
 
@@ -74,8 +78,8 @@ One visitor's thumbs-up for an Event, given through the Event's feedback link.
 A visitor address counts once per Event.
 
 **Activity performance**:
-How an Activity has done across every Event it appeared in: appearances, wins,
-win rate, and the average Likes and attendees of those Events. It is raw
+How an Activity has done across every Event it appeared in: offered, won, win
+rate, average Likes and average attendees of those Events. It is raw
 numbers, never a single score, and it is worked out when read, not stored. It
 cannot tell a weak Activity from a weak night, because an Event has several
 Selections.

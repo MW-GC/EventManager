@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Azure.Data.Tables;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
+using MW_GC.EventManager.API.Functions;
 using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.Shared.Entities;
 
@@ -8,189 +9,214 @@ namespace MW_GC.EventManager.Api.Tests;
 
 /// <summary>
 /// The old-text conversion (#130) against real Table Storage (Azurite). Skipped unless
-/// <c>EM_AZURITE_CONNECTION</c> names the Azurite connection string, so <c>dotnet test</c> on the
-/// solution needs no emulator. When <c>EM_API_URL</c> also names a running API on the same Azurite
-/// (ending in <c>/api</c>), the converted Comments are read back through its list route too.
+/// <c>EM_AZURITE_CONNECTION</c> names the Azurite connection string (<see cref="AzuriteSupport"/>),
+/// so <c>dotnet test</c> on the solution needs no emulator. When <c>EM_API_URL</c> also names a
+/// running API on the same Azurite (ending in <c>/api</c>), the converted Comments are read back
+/// through its list route too. Each test deletes the rows it seeded (and their Comments) at the end.
 /// </summary>
 [TestClass]
 public class ActivityNoteConversionAzuriteTests
 {
-    public const string ConnectionVariable = "EM_AZURITE_CONNECTION";
-    public const string ApiUrlVariable = "EM_API_URL";
-
     public TestContext TestContext { get; set; } = null!;
 
-    private void Flow(bool pass, string name, string detail)
+    // One flow line with what was expected and what storage gave, then the assertion.
+    private void Flow<T>(string name, T expected, T actual)
     {
-        TestContext.WriteLine($"{(pass ? "PASS" : "FAIL")} {name}: {detail}");
-        Assert.IsTrue(pass, $"{name}: {detail}");
+        var pass = EqualityComparer<T>.Default.Equals(expected, actual);
+        TestContext.WriteLine($"{(pass ? "PASS" : "FAIL")} {name}: expected {expected}, actual {actual}");
+        Assert.AreEqual(expected, actual, name);
     }
 
+    private sealed record Converted(string Text, DateTimeOffset CreatedUtc, Guid? EventId);
+
     [TestMethod]
-    public async Task OldNotesInRealStorageBecomeOneCommentEachAndASecondRunAddsNone()
+    public async Task OldTextsInRealStorageBecomeOneCommentEachAndASecondRunAddsNone()
     {
-        var connection = Environment.GetEnvironmentVariable(ConnectionVariable);
-        if (string.IsNullOrWhiteSpace(connection))
-            Assert.Inconclusive($"Azurite test skipped: set {ConnectionVariable} to an Azurite connection string.");
-        var apiUrl = Environment.GetEnvironmentVariable(ApiUrlVariable)?.Trim().TrimEnd('/');
+        var connection = AzuriteSupport.Connection();
+        var apiUrl = AzuriteSupport.ApiUrl();
         var ct = TestContext.CancellationToken;
 
         var service = new TableServiceClient(connection);
-        var activities = new TableStore<ActivityEntity>(service, "Activities", "Activity");
-        var comments = new TableStore<CommentEntity>(service, "ActivityComments", "Comment");
-        var raw = service.GetTableClient("ActivityComments");
+        var activities = new TableStore<ActivityEntity>(service, TableNames.Activities, TableNames.ActivityPartition);
+        var comments = new TableStore<CommentEntity>(service, TableNames.Comments, TableNames.CommentPartition);
+        var commentApi = new CommentFunctions(comments, activities,
+            new TableStore<EventEntity>(service, "Events", "Event"), new ListLogger<CommentFunctions>());
+        var raw = service.GetTableClient(TableNames.Comments);
+        var activityTable = service.GetTableClient(TableNames.Activities);
         var conversion = new ActivityNoteConversion(activities, comments, service, new ListLogger<ActivityNoteConversion>());
-
-        // A host that started on this storage already ran the conversion on its empty library and stored the marker.
-        var markerAtStart = await raw.GetEntityIfExistsAsync<TableEntity>(
-            ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
-        TestContext.WriteLine($"INFO marker before seeding: {(markerAtStart.HasValue ? "present (host-start pass done)" : "absent")}");
-        if (apiUrl is not null)
-            Flow(markerAtStart.HasValue, "host-start pass stored the marker", "the API host ran the conversion at start");
 
         // Old-style data, written straight to the Activities table as raw rows: the Activity no longer has the
         // field (#133), so the old single text is a Comments column only. Two rows carry text, one carries
-        // none (no column), and one carries a number in that column (skipped, never thrown on).
+        // none (no column), and one carries a number in that column (skipped, never thrown on). The first
+        // has a fixed id, so its Comment's id can be compared with a literal.
         var gameId = Guid.NewGuid();
-        var activityTable = service.GetTableClient("Activities");
-        var first = await SeedRawAsync(activityTable, gameId, "Old text one", "  Ran long, cut the second round  ", ct);
-        var second = await SeedRawAsync(activityTable, gameId, "Old text two", "Bring snacks", ct);
-        var none = await SeedRawAsync(activityTable, gameId, "No old text", null, ct);
-        var number = await SeedRawAsync(activityTable, gameId, "A number in the old column", 42, ct);
-        var seeded = new Dictionary<Guid, TableEntity>();
-        foreach (var id in new[] { first, second, none, number })
-            seeded[id] = (await activityTable.GetEntityAsync<TableEntity>("Activity", id.ToString("D"), cancellationToken: ct)).Value;
-        Flow(!seeded[none].ContainsKey("Comments") && seeded[number]["Comments"] is int,
-            "seeded rows", $"{first} (text), {second} (text), {none} (no Comments column), {number} (Comments stored as a number)");
-
-        if (apiUrl is not null)
+        var first = OldActivityRows.FixedActivityId;
+        var second = Guid.NewGuid();
+        var none = Guid.NewGuid();
+        var number = Guid.NewGuid();
+        var seededIds = new[] { first, second, none, number };
+        await CleanUpAsync(activityTable, comments, seededIds, ct);
+        try
         {
-            var before = 0;
-            foreach (var id in seeded.Keys) before += (await ListAsync(apiUrl, id, ct)).Count;
-            Flow(before == 0, "list route before the conversion", $"{before} Comments for the seeded Activities");
-        }
+            await activityTable.UpsertEntityAsync(OldActivityRows.Row(first, gameId, "Old text one", "  Ran long, cut the second round  "), TableUpdateMode.Replace, ct);
+            await activityTable.UpsertEntityAsync(OldActivityRows.Row(second, gameId, "Old text two", "Bring snacks"), TableUpdateMode.Replace, ct);
+            await activityTable.UpsertEntityAsync(OldActivityRows.Row(none, gameId, "No old text", null), TableUpdateMode.Replace, ct);
+            await activityTable.UpsertEntityAsync(OldActivityRows.Row(number, gameId, "A number in the old column", 42), TableUpdateMode.Replace, ct);
+            var seeded = new Dictionary<Guid, TableEntity>();
+            foreach (var id in seededIds)
+                seeded[id] = (await activityTable.GetEntityAsync<TableEntity>(TableNames.ActivityPartition, id.ToString("D"), cancellationToken: ct)).Value;
+            Flow("seeded rows (old column of: text, text, none, number)", "String, String, none, Int32",
+                string.Join(", ", seededIds.Select(id => seeded[id].TryGetValue(OldActivityRows.OldTextColumn, out var v) ? v.GetType().Name : "none")));
 
-        // The upgrade case: the marker is removed so this pass sees the old texts, as a first start over old data would.
-        await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
-        await conversion.RunAsync(ct);
+            if (apiUrl is not null)
+            {
+                var before = 0;
+                foreach (var id in seededIds) before += (await ListThroughApiAsync(apiUrl, id, ct)).Count;
+                Flow("list route of a running API before the conversion", 0, before);
+            }
 
-        // The trimmed texts each Comment must carry, written out rather than worked out.
-        var expectedText = new Dictionary<Guid, string> { [first] = "Ran long, cut the second round", [second] = "Bring snacks" };
-        var stored = await CommentsOfAsync(comments, seeded.Keys, ct);
-        Flow(stored.Count == 2, "first run, table read-back", $"{stored.Count} Comments for the seeded Activities");
-        foreach (var (id, text) in expectedText)
-        {
-            var row = seeded[id];
-            var comment = stored.Single(c => c.ActivityId == id);
-            var ok = comment.Id == ActivityNoteConversion.CommentIdFor(id) && comment.Text == text
-                && comment.CreatedUtc == row.Timestamp && comment.EventId is null;
-            Flow(ok, $"Comment of {id}",
-                $"id {comment.Id}, text \"{comment.Text}\", createdUtc {comment.CreatedUtc:O} (row Timestamp {row.Timestamp:O}), eventId {comment.EventId?.ToString() ?? "null"}");
-        }
-        Flow(stored.All(c => c.ActivityId != none), "row without the old Comments column", "has no Comment");
-        Flow(stored.All(c => c.ActivityId != number), "row with a number in the old Comments column", "has no Comment, and the pass did not throw");
-        var markerAfter = await raw.GetEntityIfExistsAsync<TableEntity>(
-            ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
-        Flow(markerAfter.HasValue, "marker after the pass", "stored in ActivityComments, partition Migration");
-        var after = (await activityTable.GetEntityAsync<TableEntity>("Activity", first.ToString("D"), cancellationToken: ct)).Value;
-        Flow(after.GetString("Comments") == "  Ran long, cut the second round  " && after.ETag == seeded[first].ETag,
-            "old column untouched", $"the row's Comments column is still \"{after.GetString("Comments")}\", ETag unchanged");
+            // The host-start pass over old data: any marker (left by the running host or an earlier run) is
+            // deleted first, so only this pass can store it.
+            await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
+            Flow("marker before the host-start pass", false, await MarkerStoredAsync(raw, ct));
+            var startedAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+            var startupLog = new ListLogger<ActivityNoteConversionStartup>();
+            await using (var host = new ServiceCollection().AddSingleton(conversion).BuildServiceProvider())
+            {
+                var startup = new ActivityNoteConversionStartup(host, startupLog);
+                await startup.StartAsync(ct);
+                await startup.ExecuteTask!;
+            }
+            Flow("host-start pass logged no failure", 0, startupLog.Entries.Count);
+            var marker = await raw.GetEntityIfExistsAsync<TableEntity>(
+                ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
+            Flow("host-start pass stored a new marker", true, marker.HasValue && marker.Value!.GetDateTimeOffset("CompletedUtc") >= startedAt);
 
-        if (apiUrl is not null)
-        {
+            // The trimmed texts each Comment must carry, written out rather than worked out.
+            var expectedText = new Dictionary<Guid, string> { [first] = "Ran long, cut the second round", [second] = "Bring snacks" };
+            var stored = await CommentsOfAsync(comments, seededIds, ct);
+            Flow("Comments for the seeded Activities after the pass", 2, stored.Count);
             foreach (var (id, text) in expectedText)
             {
-                var listed = await ListAsync(apiUrl, id, ct);
-                var ok = listed.Count == 1 && listed[0].Text == text
-                    && listed[0].CreatedUtc == seeded[id].Timestamp && listed[0].EventId is null;
-                Flow(ok, $"list route GET {apiUrl}/activities/{id}/comments",
-                    string.Join("; ", listed.Select(c => $"text \"{c.Text}\", createdUtc {c.CreatedUtc:O}, eventId {c.EventId?.ToString() ?? "null"}")));
+                var comment = stored.Single(c => c.ActivityId == id);
+                Flow($"Comment of {id}", new Converted(text, seeded[id].Timestamp!.Value, null),
+                    new Converted(comment.Text, comment.CreatedUtc, comment.EventId));
             }
-            foreach (var id in new[] { none, number })
+            Flow("id of the fixed Activity's Comment", OldActivityRows.FixedActivityCommentId, stored.Single(c => c.ActivityId == first).Id);
+            Flow("rows with nothing to convert have no Comment", 0, stored.Count(c => c.ActivityId == none || c.ActivityId == number));
+
+            // The Comment list filter matches only a Guid-typed ActivityId (#160): the stored column is one.
+            var rawComment = (await raw.GetEntityAsync<TableEntity>(
+                TableNames.CommentPartition, OldActivityRows.FixedActivityCommentId.ToString("D"), cancellationToken: ct)).Value;
+            Flow("stored ActivityId column type", nameof(Guid), rawComment["ActivityId"]?.GetType().Name);
+            var listed = ApiResults.Value<List<CommentEntity>>(await commentApi.List(TestRequests.Empty(), first, ct));
+            Flow("list route over real storage finds the converted Comment", OldActivityRows.FixedActivityCommentId, Assert.ContainsSingle(listed).Id);
+
+            var after = (await activityTable.GetEntityAsync<TableEntity>(TableNames.ActivityPartition, first.ToString("D"), cancellationToken: ct)).Value;
+            Flow("old column untouched", ("  Ran long, cut the second round  ", seeded[first].ETag),
+                (after.GetString(OldActivityRows.OldTextColumn), after.ETag));
+
+            if (apiUrl is not null)
             {
-                var listedNone = await ListAsync(apiUrl, id, ct);
-                Flow(listedNone.Count == 0, $"list route, row {id} with nothing to convert", $"{listedNone.Count} Comments");
+                foreach (var (id, text) in expectedText)
+                {
+                    var throughApi = await ListThroughApiAsync(apiUrl, id, ct);
+                    Flow($"list route GET {apiUrl}/activities/{id}/comments",
+                        $"1: {new Converted(text, seeded[id].Timestamp!.Value, null)}",
+                        $"{throughApi.Count}: {string.Join("; ", throughApi)}");
+                }
+                foreach (var id in new[] { none, number })
+                    Flow($"list route, row {id} with nothing to convert", 0, (await ListThroughApiAsync(apiUrl, id, ct)).Count);
+            }
+
+            // Second run: the marker is there, so nothing is added.
+            await conversion.RunAsync(ct);
+            Flow("second run", 2, (await CommentsOfAsync(comments, seededIds, ct)).Count);
+
+            // Third run with the marker removed again: the deterministic ids still add no duplicate in real storage.
+            await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
+            await conversion.RunAsync(ct);
+            Flow("rerun without the marker (inserts refused as EntityAlreadyExists)", 2, (await CommentsOfAsync(comments, seededIds, ct)).Count);
+            Flow("marker after the rerun", true, await MarkerStoredAsync(raw, ct));
+
+            if (apiUrl is not null)
+            {
+                var total = 0;
+                foreach (var id in seededIds) total += (await ListThroughApiAsync(apiUrl, id, ct)).Count;
+                Flow("list route of a running API after the reruns", 2, total);
             }
         }
-
-        // Second run: the marker is there, so nothing is added.
-        await conversion.RunAsync(ct);
-        var afterSecond = await CommentsOfAsync(comments, seeded.Keys, ct);
-        Flow(afterSecond.Count == 2, "second run", $"{afterSecond.Count} Comments, unchanged");
-
-        // Third run with the marker removed again: the deterministic ids still add no duplicate in real storage.
-        await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
-        await conversion.RunAsync(ct);
-        var afterThird = await CommentsOfAsync(comments, seeded.Keys, ct);
-        Flow(afterThird.Count == 2, "rerun without the marker", $"{afterThird.Count} Comments, no duplicate (insert refused as EntityAlreadyExists)");
-
-        if (apiUrl is not null)
+        finally
         {
-            var total = 0;
-            foreach (var id in seeded.Keys) total += (await ListAsync(apiUrl, id, ct)).Count;
-            Flow(total == 2, "list route after the reruns", $"{total} Comments for the seeded Activities");
+            await CleanUpAsync(activityTable, comments, seededIds, ct);
         }
     }
 
     [TestMethod]
     public async Task APutBeforeAnyPassKeepsTheOldTextAsACommentInRealStorage()
     {
-        var connection = Environment.GetEnvironmentVariable(ConnectionVariable);
-        if (string.IsNullOrWhiteSpace(connection))
-            Assert.Inconclusive($"Azurite test skipped: set {ConnectionVariable} to an Azurite connection string.");
+        var connection = AzuriteSupport.Connection();
         var ct = TestContext.CancellationToken;
 
         // A fresh conversion and Activity routes over real storage, as a host that has not run its startup pass.
         var service = new TableServiceClient(connection);
         var games = new TableStore<GameEntity>(service, "Games", "Game");
-        var activities = new TableStore<ActivityEntity>(service, "Activities", "Activity");
-        var comments = new TableStore<CommentEntity>(service, "ActivityComments", "Comment");
+        var activities = new TableStore<ActivityEntity>(service, TableNames.Activities, TableNames.ActivityPartition);
+        var comments = new TableStore<CommentEntity>(service, TableNames.Comments, TableNames.CommentPartition);
         var conversion = new ActivityNoteConversion(activities, comments, service, new ListLogger<ActivityNoteConversion>());
-        var activityApi = new MW_GC.EventManager.API.Functions.ActivityFunctions(
-            activities, games, comments, conversion, new ListLogger<MW_GC.EventManager.API.Functions.ActivityFunctions>());
-        var commentApi = new MW_GC.EventManager.API.Functions.CommentFunctions(
-            comments, activities, new TableStore<EventEntity>(service, "Events", "Event"),
-            new ListLogger<MW_GC.EventManager.API.Functions.CommentFunctions>());
+        var activityApi = new ActivityFunctions(activities, games, comments, conversion, new ListLogger<ActivityFunctions>());
+        var commentApi = new CommentFunctions(comments, activities,
+            new TableStore<EventEntity>(service, "Events", "Event"), new ListLogger<CommentFunctions>());
+        var activityTable = service.GetTableClient(TableNames.Activities);
+        var raw = service.GetTableClient(TableNames.Comments);
 
         var game = new GameEntity { Id = Guid.NewGuid(), Name = "Azurite game" };
-        await games.UpsertAsync(game, ct);
-        var activityTable = service.GetTableClient("Activities");
-        var activityId = await SeedRawAsync(activityTable, game.Id, "Old activity", "  Old text  ", ct);
-        var seeded = (await activityTable.GetEntityAsync<TableEntity>("Activity", activityId.ToString("D"), cancellationToken: ct)).Value;
-        var raw = service.GetTableClient("ActivityComments");
-        await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
-        var markerBefore = await raw.GetEntityIfExistsAsync<TableEntity>(
-            ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
-        Flow(!markerBefore.HasValue, "no marker before the PUT", $"Activity {activityId} holds \"{seeded.GetString("Comments")}\"");
+        var activityId = Guid.NewGuid();
+        try
+        {
+            await games.UpsertAsync(game, ct);
+            await activityTable.AddEntityAsync(OldActivityRows.Row(activityId, game.Id, "Old activity", "  Old text  "), ct);
+            var seeded = (await activityTable.GetEntityAsync<TableEntity>(TableNames.ActivityPartition, activityId.ToString("D"), cancellationToken: ct)).Value;
+            await raw.DeleteEntityAsync(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
+            Flow($"marker before the PUT (Activity {activityId} holds \"{seeded.GetString(OldActivityRows.OldTextColumn)}\")",
+                false, await MarkerStoredAsync(raw, ct));
 
-        var put = await activityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, ct);
-        var stored = (await activityTable.GetEntityAsync<TableEntity>("Activity", activityId.ToString("D"), cancellationToken: ct)).Value;
-        Flow(ApiResults.Status(put) == 200 && stored.GetString("Name") == "Renamed" && !stored.ContainsKey("Comments"),
-            "PUT replaced the row", $"status {ApiResults.Status(put)}, name \"{stored.GetString("Name")}\", Comments column present: {stored.ContainsKey("Comments")}");
+            var put = await activityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, ct);
+            var stored = (await activityTable.GetEntityAsync<TableEntity>(TableNames.ActivityPartition, activityId.ToString("D"), cancellationToken: ct)).Value;
+            Flow("PUT replaced the row (status, name, old column present)", (200, "Renamed", false),
+                (ApiResults.Status(put), stored.GetString("Name"), stored.ContainsKey(OldActivityRows.OldTextColumn)));
 
-        var listed = ApiResults.Value<List<CommentEntity>>(await commentApi.List(TestRequests.Empty(), activityId, ct));
-        Flow(listed.Count == 1 && listed[0].Text == "Old text" && listed[0].CreatedUtc == seeded.Timestamp && listed[0].EventId is null,
-            "old text kept as a Comment", string.Join("; ", listed.Select(c => $"text \"{c.Text}\", createdUtc {c.CreatedUtc:O}")));
+            var listed = ApiResults.Value<List<CommentEntity>>(await commentApi.List(TestRequests.Empty(), activityId, ct));
+            var kept = Assert.ContainsSingle(listed);
+            Flow("old text kept as a Comment", new Converted("Old text", seeded.Timestamp!.Value, null),
+                new Converted(kept.Text, kept.CreatedUtc, kept.EventId));
 
-        var again = await activityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed again" }), activityId, ct);
-        var afterSecond = ApiResults.Value<List<CommentEntity>>(await commentApi.List(TestRequests.Empty(), activityId, ct));
-        Flow(ApiResults.Status(again) == 200 && afterSecond.Count == 1 && afterSecond[0].Id == listed[0].Id,
-            "second PUT", $"status {ApiResults.Status(again)}, {afterSecond.Count} Comments");
+            var again = await activityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed again" }), activityId, ct);
+            var afterSecond = ApiResults.Value<List<CommentEntity>>(await commentApi.List(TestRequests.Empty(), activityId, ct));
+            Flow("second PUT (status, Comments, same Comment)", (200, 1, true),
+                (ApiResults.Status(again), afterSecond.Count, afterSecond.Count == 1 && afterSecond[0].Id == kept.Id));
+            Flow("marker after the PUT", true, await MarkerStoredAsync(raw, ct));
+        }
+        finally
+        {
+            await CleanUpAsync(activityTable, comments, [activityId], ct);
+            await games.DeleteAsync(game.Id, ct: ct);
+        }
     }
 
-    // An Activity row as an older version stored it, with the old single text (or another value) in its
-    // Comments column; null leaves the column out.
-    private static async Task<Guid> SeedRawAsync(TableClient table, Guid gameId, string name, object? oldColumn, CancellationToken ct)
+    private static async Task<bool> MarkerStoredAsync(TableClient raw, CancellationToken ct) =>
+        (await raw.GetEntityIfExistsAsync<TableEntity>(
+            ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey, cancellationToken: ct)).HasValue;
+
+    // Deletes the seeded Activity rows and every Comment of theirs, so a later run starts clean.
+    private static async Task CleanUpAsync(TableClient activityTable, TableStore<CommentEntity> comments, IEnumerable<Guid> activityIds, CancellationToken ct)
     {
-        var id = Guid.NewGuid();
-        var row = new TableEntity("Activity", id.ToString("D"))
+        foreach (var id in activityIds)
         {
-            ["GameId"] = gameId, ["Name"] = name, ["Description"] = "", ["Rules"] = "",
-            ["ThemeIds"] = "[]", ["HolidayIds"] = "[]", ["SetupRequirements"] = "",
-        };
-        if (oldColumn is not null) row["Comments"] = oldColumn;
-        await table.AddEntityAsync(row, ct);
-        return id;
+            foreach (var comment in await comments.GetWhereAsync(c => c.ActivityId == id, ct))
+                await comments.DeleteAsync(comment.Id, ct: ct);
+            await activityTable.DeleteEntityAsync(TableNames.ActivityPartition, id.ToString("D"), cancellationToken: ct);
+        }
     }
 
     private static async Task<List<CommentEntity>> CommentsOfAsync(
@@ -200,15 +226,13 @@ public class ActivityNoteConversionAzuriteTests
         return (await comments.GetAllAsync(ct)).Where(c => ids.Contains(c.ActivityId)).ToList();
     }
 
-    private sealed record ListedComment(string Text, DateTimeOffset CreatedUtc, Guid? EventId);
-
-    private static async Task<List<ListedComment>> ListAsync(string apiUrl, Guid activityId, CancellationToken ct)
+    private static async Task<List<Converted>> ListThroughApiAsync(string apiUrl, Guid activityId, CancellationToken ct)
     {
         using var http = new HttpClient();
         using var response = await http.GetAsync($"{apiUrl}/activities/{activityId}/comments", ct);
         Assert.AreEqual(System.Net.HttpStatusCode.OK, response.StatusCode, $"GET comments of {activityId}");
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-        return json.RootElement.EnumerateArray().Select(c => new ListedComment(
+        return json.RootElement.EnumerateArray().Select(c => new Converted(
             c.GetProperty("text").GetString()!,
             c.GetProperty("createdUtc").GetDateTimeOffset(),
             c.GetProperty("eventId").ValueKind == JsonValueKind.Null ? null : c.GetProperty("eventId").GetGuid())).ToList();

@@ -96,15 +96,16 @@ internal sealed class FeedbackStore
 
     /// <summary>
     /// The Like count of every Event that has at least one Like, in one pass over the whole
-    /// <c>FeedbackLikes</c> table reading only the keys (#136). A partition key that is not a Guid
-    /// is not an Event's and is skipped.
+    /// <c>FeedbackLikes</c> table reading only the keys (#136). Like rows are written under the
+    /// Event id in its hyphenated "D" form (<see cref="EventKey"/>), so a partition key in any other
+    /// form (braces, no hyphens) or not a Guid at all is not an Event's and is skipped.
     /// </summary>
     public async Task<Dictionary<Guid, int>> CountLikesByEventAsync(CancellationToken ct = default)
     {
         var counts = new Dictionary<Guid, int>();
         await foreach (var row in _likes.QueryAsync<TableEntity>(select: ["PartitionKey", "RowKey"], cancellationToken: ct))
         {
-            if (!Guid.TryParse(row.PartitionKey, out var eventId)) continue;
+            if (!Guid.TryParseExact(row.PartitionKey, "D", out var eventId)) continue;
             counts[eventId] = counts.GetValueOrDefault(eventId) + 1;
         }
         return counts;
