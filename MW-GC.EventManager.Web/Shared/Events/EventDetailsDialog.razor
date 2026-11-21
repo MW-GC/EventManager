@@ -3,9 +3,10 @@
    metrics form (EventMetricsForm, #135). A Comment added here lands on the Winner Activity and records
    this Event; the panel reads the Activity's Comments live each time it opens, never this Event's
    Selection snapshot. The dialog owns its busy guard (Select Winner, a metrics save, a Comment request)
-   and its own question (Discard changes?, which unsaved metrics or Comment text raise, and the panel's
-   Delete Comment), without touching the list or the create-and-edit dialog. The page opens it (Open)
-   and refreshes its list when a Winner was saved. *@
+   and its own question (Discard changes?, which unsaved metrics or Comment text raise on close, and
+   unsaved Comment text on Select Winner, which swaps the panel; and the panel's Delete Comment),
+   without touching the list or the create-and-edit dialog. The page opens it (Open) and refreshes its
+   list when a Winner was saved. *@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @using MW_GC.EventManager.Web.Shared.Activities
 @inject EventService EventSvc
@@ -87,7 +88,7 @@
                                 }
                                 else
                                 {
-                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@_selectingWinner" OnClick="@(() => SelectWinner(selection.Activity.Id))"
+                                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Disabled="@Busy" OnClick="@(() => SelectWinner(selection.Activity.Id))"
                                                   IconStart="@(new Size16.Trophy())">
                                         Select Winner
                                     </FluentButton>
@@ -155,10 +156,9 @@
 }
 
 @code {
-    // The library, as the page loaded it: Game icons. Activities is passed but not read here since #132
-    // (the Winner's Comments are read live through the Comments panel).
+    // The library's Games, as the page loaded them: their icons. (The Winner's Comments are read live through
+    // the Comments panel, so the dialog needs no Activities.)
     [Parameter] public List<GameEntity>? Games { get; set; }
-    [Parameter] public List<ActivityEntity>? Activities { get; set; }
     // A Winner was saved: the page refreshes its list (never throws; a failure names Events in its error bar).
     [Parameter] public EventCallback RefreshEvents { get; set; }
     // The Event with this id in the page's list as it is now, or null when the list no longer has it.
@@ -181,6 +181,7 @@
     // The Winner's Comments panel (#132), and whether one of its adds, saves or deletes is running.
     private ActivityCommentsPanel? _comments;
     private bool _savingComments;
+    // Holds Close, overlay click, Escape and Select Winner (which swaps the Comments panel) alike.
     private bool Busy => _selectingWinner || _savingMetrics || _savingComments;
 
     // A row's Details button.
@@ -279,9 +280,24 @@
         _confirm = null;
     }
 
-    private async Task SelectWinner(Guid activityId)
+    // A Select Winner button. It goes through Close's busy guard: while Select Winner, a metrics save or a Comment
+    // request runs, nothing happens. The new Winner gets a new Comments panel, so unsaved Comment text (in the add
+    // box or an open edit) asks first, as closing does. Unsaved metrics do not ask: the form is keyed by the Event
+    // and keeps them.
+    private Task SelectWinner(Guid activityId)
     {
-        if (_detailEvent is null || _selectingWinner) return;
+        if (_detailEvent is null || Busy || _confirm is not null) return Task.CompletedTask;
+        if (_comments?.IsDirty == true)
+        {
+            _confirm = ConfirmRequest.Discard(() => SaveWinner(activityId));
+            return Task.CompletedTask;
+        }
+        return SaveWinner(activityId);
+    }
+
+    private async Task SaveWinner(Guid activityId)
+    {
+        if (_detailEvent is null || Busy) return;
         _selectingWinner = true;
         var token = _details.Current;
         try
