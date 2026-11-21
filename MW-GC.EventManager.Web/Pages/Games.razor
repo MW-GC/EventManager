@@ -2,13 +2,13 @@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject LibraryClient<GameEntity> GameClient
 @inject LibraryClient<ActivityEntity> ActivityClient
-@inject LibraryClient<ThemeEntity> ThemeSvc
-@inject LibraryClient<HolidayEntity> HolidaySvc
+@inject LibraryClient<ThemeEntity> ThemeClient
+@inject LibraryClient<HolidayEntity> HolidayClient
 
 @* The shared Library page does the loading, search, dialogs, busy guard and delete confirmation; this page
    adds what is Games-only: the Website field, the icon, Activity counts and the Activities in the Edit dialog. *@
 <LibraryPage TItem="GameEntity" Title="Games" Subtitle="Manage your game library" Singular="Game"
-             Client="@GameClient" Name="@(g => g.Name)" NewItem="NewGame" CopyItem="CopyGame"
+             Client="@GameClient" Name="@(g => g.Name)" SetName="@((g, name) => g.Name = name)" NewItem="NewGame" CopyItem="CopyGame"
              DirtyFields="@(g => new { g.Name, g.Website })" DeleteMessage="DeleteMessage" Lookups="_lookups" Rules="Rules"
              NameLabel="Game Name" DialogWidth="DialogWidth"
              GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 88px">
@@ -27,17 +27,7 @@
             </FluentStack>
         </TemplateColumn>
         <TemplateColumn TGridItem="GameEntity" Title="Website">
-            @* Only an http(s) Website is a link. One stored before that rule shows as text, never as a live link. *@
-            @if (LibraryRules.IsHttpAddress(context.Website))
-            {
-                <FluentAnchor Href="@context.Website" Target="_blank" Appearance="Appearance.Hypertext">
-                    @TruncateUrl(context.Website!)
-                </FluentAnchor>
-            }
-            else if (!string.IsNullOrWhiteSpace(context.Website))
-            {
-                <FluentLabel>@TruncateUrl(context.Website)</FluentLabel>
-            }
+            @WebsiteLink((context.Website, null))
         </TemplateColumn>
         <TemplateColumn TGridItem="GameEntity" Title="Activities">
             <FluentBadge Appearance="Appearance.Neutral">@GetActivityCount(context.Id)</FluentBadge>
@@ -66,20 +56,11 @@
                         </FluentStack>
                     </FluentStack>
 
-                    @if (LibraryRules.IsHttpAddress(card.Item.Website))
-                    {
-                        <FluentAnchor Href="@card.Item.Website" Target="_blank" Appearance="Appearance.Hypertext" Style="font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            @TruncateUrl(card.Item.Website!)
-                        </FluentAnchor>
-                    }
-                    else if (!string.IsNullOrWhiteSpace(card.Item.Website))
-                    {
-                        <FluentLabel Style="font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@TruncateUrl(card.Item.Website)</FluentLabel>
-                    }
+                    @WebsiteLink((card.Item.Website, "font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"))
 
                     <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Style="margin-top: auto;">
                         <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@card.EditKey" Disabled="@card.Busy" OnClick="@card.Edit" IconStart="@(new Size16.Edit())">Edit</FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@card.DeleteKey" Disabled="@card.Running" OnClick="@card.Delete" IconStart="@(new Size16.Delete())">Delete</FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@card.DeleteKey" Disabled="@card.AnyBusy" OnClick="@card.Delete" IconStart="@(new Size16.Delete())">Delete</FluentButton>
                     </FluentStack>
                 </FluentStack>
             </FluentCard>
@@ -87,7 +68,8 @@
     </CardTemplate>
     <EditorFields Context="edit">
         <div>
-            <FluentTextField @bind-Value="edit.Item.Website" Immediate="true" Label="Website (Optional)" Style="width: 100%;" Placeholder="https://store.steampowered.com/app/123456" />
+            <FluentTextField @bind-Value="edit.Item.Website" @attributes="@edit.FieldAttributes(nameof(GameEntity.Website))"
+                             Immediate="true" Label="Website (Optional)" Style="width: 100%;" Placeholder="https://store.steampowered.com/app/123456" />
             <LibraryFieldMessage Field="@nameof(GameEntity.Website)" />
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem; margin-top: 4px;">
                 Paste a Steam store URL or game website to auto-fetch the icon
@@ -133,15 +115,31 @@
     [
         // The counts follow every save and delete, so the Activities list reloads with the Games.
         new(loads => loads.LoadAsync("Activities", ActivityClient.GetAllAsync, SetActivities), ReloadAfterWrites: true),
-        new(loads => loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? [])),
-        new(loads => loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []))
+        new(loads => loads.LoadAsync("Themes", ThemeClient.GetAllAsync, v => _themes = v ?? [])),
+        new(loads => loads.LoadAsync("Holidays", HolidayClient.GetAllAsync, v => _holidays = v ?? []))
     ];
 
     private static GameEntity NewGame() => new() { Name = string.Empty };
 
-    // The API's Website rule, checked by the editor before anything is sent.
+    // The API's Website rules, checked by the editor before anything is sent.
     private static IEnumerable<LibraryFieldError> Rules(GameEntity g) =>
-        LibraryRules.Website(g.Website) is { } message ? [new LibraryFieldError(nameof(GameEntity.Website), message)] : [];
+        LibraryRules.WebsiteMessage(g.Website) is { } message ? [new LibraryFieldError(nameof(GameEntity.Website), message)] : [];
+
+    // A Website in the grid and on a card. Only an http(s) Website is a link; one stored before that rule shows
+    // as text, never as a live link.
+    private static RenderFragment<(string? Website, string? Style)> WebsiteLink => shown =>
+        @<text>
+            @if (LibraryRules.IsHttpAddress(shown.Website))
+            {
+                <FluentAnchor Href="@shown.Website" Target="_blank" Appearance="Appearance.Hypertext" Style="@shown.Style">
+                    @TruncateUrl(shown.Website)
+                </FluentAnchor>
+            }
+            else if (!string.IsNullOrWhiteSpace(shown.Website))
+            {
+                <FluentLabel Style="@shown.Style">@TruncateUrl(shown.Website)</FluentLabel>
+            }
+        </text>;
 
     private static GameEntity CopyGame(GameEntity g) => new()
     {

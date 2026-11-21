@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.DependencyInjection;
 using MW_GC.EventManager.API.Functions;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Services;
@@ -33,6 +34,8 @@ public sealed class ServiceRouteContractTests
     // and {commentId:guid}.
     private static readonly Row[] Table =
     [
+        // The Games list for the readers not yet on LibraryClient<GameEntity> (Events, Stats, the performance panel);
+        // the same request as that client's GetAllAsync row below, until those readers move and the service goes.
         new(typeof(GameService), nameof(GameService.GetAllAsync), "GET", "api/games", h => new GameService(h).GetAllAsync()),
 
         // Activities read, create, update and delete through the shared client (#126); the service keeps the one
@@ -57,20 +60,26 @@ public sealed class ServiceRouteContractTests
         new(typeof(CommentClient), nameof(CommentClient.UpdateAsync), "PUT", "api/activities/{id}/comments/{commentId}", h => new CommentClient(h).UpdateAsync(Id, CommentId, "Ran long", null)),
         new(typeof(CommentClient), nameof(CommentClient.DeleteAsync), "DELETE", "api/activities/{id}/comments/{commentId}", h => new CommentClient(h).DeleteAsync(Id, CommentId, null)),
 
-        // The shared Library client, once per list it serves. It has no get-one call: no Library page reads one item.
-        .. LibraryRows<GameEntity>("games"),
-        .. LibraryRows<ThemeEntity>("themes"),
-        .. LibraryRows<HolidayEntity>("holidays"),
-        .. LibraryRows<ActivityEntity>("activities"),
+        // The shared Library client, once per list it serves, as the app registers it (AddLibraryClients, called by
+        // Program.cs), so a wrong route in the registration fails here. Every path is written out. It has no get-one
+        // call: no Library page reads one item.
+        .. LibraryRows<GameEntity>("api/games", "api/games/{id}"),
+        .. LibraryRows<ThemeEntity>("api/themes", "api/themes/{id}"),
+        .. LibraryRows<HolidayEntity>("api/holidays", "api/holidays/{id}"),
+        .. LibraryRows<ActivityEntity>("api/activities", "api/activities/{id}"),
     ];
 
-    private static Row[] LibraryRows<T>(string route) where T : EntityBase, new() =>
+    private static Row[] LibraryRows<T>(string list, string one) where T : EntityBase, new() =>
     [
-        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.GetAllAsync), "GET", $"api/{route}", h => new LibraryClient<T>(h, route).GetAllAsync()),
-        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.CreateAsync), "POST", $"api/{route}", h => new LibraryClient<T>(h, route).CreateAsync(new T { Id = Id })),
-        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.UpdateAsync), "PUT", $"api/{route}/{{id}}", h => new LibraryClient<T>(h, route).UpdateAsync(new T { Id = Id })),
-        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.DeleteAsync), "DELETE", $"api/{route}/{{id}}", h => new LibraryClient<T>(h, route).DeleteAsync(Id)),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.GetAllAsync), "GET", list, h => Registered<T>(h).GetAllAsync()),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.CreateAsync), "POST", list, h => Registered<T>(h).CreateAsync(new T { Id = Id })),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.UpdateAsync), "PUT", one, h => Registered<T>(h).UpdateAsync(new T { Id = Id })),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.DeleteAsync), "DELETE", one, h => Registered<T>(h).DeleteAsync(Id)),
     ];
+
+    // The LibraryClient<T> the app's registration builds over the given HttpClient.
+    private static LibraryClient<T> Registered<T>(HttpClient http) where T : EntityBase =>
+        new ServiceCollection().AddSingleton(http).AddLibraryClients().BuildServiceProvider().GetRequiredService<LibraryClient<T>>();
 
     private static readonly Type[] Services =
     [

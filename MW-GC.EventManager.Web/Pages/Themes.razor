@@ -2,25 +2,11 @@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject LibraryClient<ThemeEntity> ThemeClient
 
-@* The shared Library page does the loading, search, dialogs, busy guard and delete confirmation; this page
-   adds what is Themes-only: its subtitle, its card, and the Edit dialog's "Save". *@
+@* The shared Library page does the loading, search, dialogs, busy guard, delete confirmation and the card; this
+   page adds what is Themes-only: its subtitle, its card icon, and the Edit dialog's "Save". *@
 <LibraryPage TItem="ThemeEntity" Title="Themes" Subtitle="Manage activity themes for event filtering" Singular="Theme"
-             Client="@ThemeClient" Name="@(t => t.Name)" NewItem="NewTheme" CopyItem="CopyTheme" SaveText="Save">
-    <CardTemplate Context="card">
-        <FluentGridItem xs="6" sm="4" md="3" lg="2">
-            <FluentCard Style="text-align: center; padding: 16px;" AreaRestricted="false">
-                <FluentIcon Value="@(new Size24.Color())" Color="Color.Accent" Style="margin-bottom: 8px;" />
-                <FluentLabel Weight="FontWeight.Bold">@card.Name</FluentLabel>
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.Center" HorizontalGap="4" Style="margin-top: 8px;">
-                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {card.Name}")" data-focus-key="@card.EditKey"
-                                  Disabled="@card.Busy" OnClick="@card.Edit" IconStart="@(new Size16.Edit())" />
-                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {card.Name}")" data-focus-key="@card.DeleteKey"
-                                  Disabled="@card.Running" OnClick="@card.Delete" IconStart="@(new Size16.Delete())" />
-                </FluentStack>
-            </FluentCard>
-        </FluentGridItem>
-    </CardTemplate>
-</LibraryPage>
+             Client="@ThemeClient" Name="@(t => t.Name)" SetName="@((t, name) => t.Name = name)" NewItem="NewTheme" CopyItem="CopyTheme"
+             SaveText="Save" CardIcon="@(new Size24.Color())" />
 
 @code {
     private static ThemeEntity NewTheme() => new() { Name = string.Empty };

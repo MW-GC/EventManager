@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.FluentUI.AspNetCore.Components;
-using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web;
 using MW_GC.EventManager.Web.Services;
 
@@ -23,14 +22,12 @@ builder.Services.AddScoped(sp => new HttpClient(
 builder.Services.AddFluentUIComponents();
 
 builder.Services.AddScoped<GameService>();
-builder.Services.AddScoped(sp => new LibraryClient<GameEntity>(sp.GetRequiredService<HttpClient>(), "games"));
-builder.Services.AddScoped(sp => new LibraryClient<ActivityEntity>(sp.GetRequiredService<HttpClient>(), "activities"));
+// Games, Activities, Themes and Holidays: one LibraryClient each (ServiceRouteContractTests checks the routes).
+builder.Services.AddLibraryClients();
 builder.Services.AddScoped<ActivityService>();
 builder.Services.AddScoped<EventService>();
 builder.Services.AddScoped<EventMetricsClient>();
 builder.Services.AddScoped<CommentClient>();
-builder.Services.AddScoped(sp => new LibraryClient<ThemeEntity>(sp.GetRequiredService<HttpClient>(), "themes"));
-builder.Services.AddScoped(sp => new LibraryClient<HolidayEntity>(sp.GetRequiredService<HttpClient>(), "holidays"));
 builder.Services.AddScoped<FocusReturn>();
 
 await builder.Build().RunAsync();
