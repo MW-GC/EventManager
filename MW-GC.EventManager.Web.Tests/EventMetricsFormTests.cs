@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
+using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
@@ -15,7 +16,8 @@ namespace MW_GC.EventManager.Web.Tests;
 
 // #135: the Event metrics form in the Event details dialog, rendered with bUnit through the Events
 // page against a stub API. Event metrics are read and saved through their own route with the row's
-// ETag (ADR 0001), never with the Event, and never shown in the Events list.
+// ETag (ADR 0001), never with the Event, and never shown in the Events list. Fields are found by their
+// visible label, as a user finds them.
 [TestClass]
 public sealed class EventMetricsFormTests : IDisposable
 {
@@ -24,6 +26,8 @@ public sealed class EventMetricsFormTests : IDisposable
     private const string SecondTag = "W/\"datetime'2026-11-20T11%3A00%3A00.0000000Z'\"";
     private const string StaleMessage = "These numbers were changed by someone else. Reload and try again.";
     private static readonly string[] Labels = ["Attendees", "New attendees", "Returning attendees", "Amount spent"];
+    // The JSON names of the four metrics in a request body, in the order of Labels.
+    private static readonly string[] MetricNames = ["attendees", "newAttendees", "returningAttendees", "amountSpent"];
 
     private readonly StubApiHandler api = new();
     private readonly PageHarness harness;
@@ -54,8 +58,9 @@ public sealed class EventMetricsFormTests : IDisposable
            .Json(HttpMethod.Get, "/api/themes", Array.Empty<ThemeEntity>())
            .Json(HttpMethod.Get, "/api/holidays", Array.Empty<HolidayEntity>())
            .Json(HttpMethod.Get, "/api/events", new[] { past })
-           // The Winner's Comments panel (#132): none yet.
-           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>());
+           // The Winner's Comments panel (#132): none yet, for either Activity.
+           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>())
+           .Json(HttpMethod.Get, $"/api/activities/{timeTrial.Id}/comments", Array.Empty<CommentEntity>());
         // No row yet: every field null and no ETag header, as the API answers.
         Stored(null, null, null, null, null);
         harness = new PageHarness(api);
@@ -123,7 +128,7 @@ public sealed class EventMetricsFormTests : IDisposable
 
         page.WaitForAssertion(() => Assert.Contains(
             "Event metrics could not be loaded. The server had a problem (HTTP 500). Try again.", page.FormDialog().TextContent));
-        Assert.IsNull(page.FormDialog().QuerySelector("#metrics-attendees"));
+        Assert.IsNull(FindField(page, "Attendees"));
 
         Stored(3, null, null, null, FirstTag);
         await page.FormDialog().Button("Retry").ClickAsync(new());
@@ -146,8 +151,7 @@ public sealed class EventMetricsFormTests : IDisposable
         await Type(page, "Amount spent", "40.5");
         await SaveMetrics(page);
 
-        Assert.AreEqual("{\"attendees\":12,\"newAttendees\":5,\"returningAttendees\":7,\"amountSpent\":40.5}",
-            Assert.ContainsSingle(api.Bodies(HttpMethod.Put, metricsPath)));
+        CollectionAssert.AreEqual(new[] { "12", "5", "7", "40.5" }, MetricsIn(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, metricsPath))));
         Assert.IsNull(Assert.ContainsSingle(api.IfMatches(HttpMethod.Put, metricsPath)));
         Assert.Contains("Event metrics saved.", page.FormDialog().TextContent);
         Assert.IsEmpty(page.FormDialog().Alerts());
@@ -163,6 +167,33 @@ public sealed class EventMetricsFormTests : IDisposable
         Assert.AreEqual(0, api.Count(HttpMethod.Put, eventPath));
     }
 
+    // #173 items 1 and 7: the client sends the metrics entity itself, so the body carries exactly the entity's
+    // JSON properties, and every field the form shows reaches its metric. The expected names are read from the
+    // entity type, never from the client, so a hand-listed body (or a metric on the entity with no form field,
+    // which would stay null here) fails.
+    [TestMethod]
+    public async Task TheRequestBodyIsTheEntity_AndEveryMetricInTheListReachesIt()
+    {
+        var page = await OpenDetails();
+        api.On(HttpMethod.Put, metricsPath, () => Row(1, 1, 1, 1m, FirstTag));
+
+        var fields = MetricsCard(page).QuerySelectorAll("fluent-text-field").ToList();
+        foreach (var field in fields) await field.InputAsync(new ChangeEventArgs { Value = "1" });
+        await SaveMetrics(page);
+
+        using var body = JsonDocument.Parse(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, metricsPath))!);
+        var sent = body.RootElement.EnumerateObject().Select(p => p.Name).Order().ToList();
+        var entity = typeof(EventMetricsEntity).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name)).Order().ToList();
+        CollectionAssert.AreEqual(entity, sent);
+
+        var metrics = typeof(EventMetricsEntity).GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name)).ToList();
+        Assert.HasCount(metrics.Count, fields, "one form field per metric on the entity");
+        foreach (var metric in metrics)
+            Assert.AreEqual("1", body.RootElement.GetProperty(metric).GetRawText(), metric);
+    }
+
     [TestMethod]
     public async Task ClearingAFieldSendsItAsNull()
     {
@@ -173,11 +204,58 @@ public sealed class EventMetricsFormTests : IDisposable
         await Type(page, "Amount spent", "");
         await SaveMetrics(page);
 
-        Assert.AreEqual("{\"attendees\":12,\"newAttendees\":5,\"returningAttendees\":7,\"amountSpent\":null}",
-            Assert.ContainsSingle(api.Bodies(HttpMethod.Put, metricsPath)));
+        CollectionAssert.AreEqual(new[] { "12", "5", "7", "null" }, MetricsIn(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, metricsPath))));
         Assert.AreEqual(FirstTag, Assert.ContainsSingle(api.IfMatches(HttpMethod.Put, metricsPath)));
         Assert.AreEqual("", Value(page, "Amount spent") ?? "");
         Assert.AreEqual("12", Value(page, "Attendees"));
+    }
+
+    // #173 item 2: an all-null body is valid and clears the values (docs/api-validation.md).
+    [TestMethod]
+    public async Task ClearingEveryFieldSendsEveryMetricAsNull()
+    {
+        Stored(12, 5, 7, 40.5m, FirstTag);
+        var page = await OpenDetails();
+        api.On(HttpMethod.Put, metricsPath, () => Row(null, null, null, null, SecondTag));
+
+        foreach (var label in Labels) await Type(page, label, "  ");
+        await SaveMetrics(page);
+
+        CollectionAssert.AreEqual(new[] { "null", "null", "null", "null" }, MetricsIn(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, metricsPath))));
+        Assert.AreEqual(FirstTag, Assert.ContainsSingle(api.IfMatches(HttpMethod.Put, metricsPath)));
+        CollectionAssert.AreEqual(new[] { "", "", "", "" }, Labels.Select(l => Value(page, l) ?? "").ToList());
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        Assert.Contains("Event metrics saved.", page.FormDialog().TextContent);
+    }
+
+    // #173 item 2: any Event takes metrics, one that has not happened yet too.
+    [TestMethod]
+    public async Task AFutureEventTakesMetricsToo()
+    {
+        var future = new EventEntity
+        {
+            Name = "Next year",
+            Date = DateTimeOffset.UtcNow.AddYears(1),
+            UniqueGamesOnly = false,
+            Selections = [Pick(timeTrial)],
+            WinnerActivityId = timeTrial.Id
+        };
+        var path = $"/api/events/{future.Id}/metrics";
+        api.Json(HttpMethod.Get, "/api/events", new[] { future });
+        api.On(HttpMethod.Get, path, () => Row(null, null, null, null, null, future.Id));
+        api.On(HttpMethod.Put, path, () => Row(30, null, null, 12.25m, FirstTag, future.Id));
+        var page = harness.Render<Events>();
+        page.WaitForRows(1);
+        await DetailsButton(page).ClickAsync(new());
+        page.WaitForAssertion(() => Assert.IsNotNull(FindField(page, "Attendees")));
+
+        await Type(page, "Attendees", "30");
+        await Type(page, "Amount spent", "12.25");
+        await SaveMetrics(page);
+
+        CollectionAssert.AreEqual(new[] { "30", "null", "null", "12.25" }, MetricsIn(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, path))));
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        Assert.Contains("Event metrics saved.", page.FormDialog().TextContent);
     }
 
     [TestMethod]
@@ -192,8 +270,8 @@ public sealed class EventMetricsFormTests : IDisposable
         await Type(page, "Amount spent", "1000000000.00");
         await SaveMetrics(page);
 
-        Assert.AreEqual("{\"attendees\":0,\"newAttendees\":1000000,\"returningAttendees\":1000000,\"amountSpent\":1000000000.00}",
-            Assert.ContainsSingle(api.Bodies(HttpMethod.Put, metricsPath)));
+        CollectionAssert.AreEqual(new[] { "0", "1000000", "1000000", "1000000000.00" },
+            MetricsIn(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, metricsPath))));
         Assert.IsEmpty(page.FormDialog().Alerts());
     }
 
@@ -224,6 +302,12 @@ public sealed class EventMetricsFormTests : IDisposable
     [DataRow("Amount spent", "1.005", "Amount spent must be between 0 and 1000000000 with at most 2 decimal places.")]
     [DataRow("Amount spent", "1000000000.01", "Amount spent must be between 0 and 1000000000 with at most 2 decimal places.")]
     [DataRow("Amount spent", "ten", "Amount spent must be between 0 and 1000000000 with at most 2 decimal places.")]
+    // #173 item 2: a comma (decimal or thousands) is refused, never read as another number.
+    [DataRow("Amount spent", "40,5", "Amount spent must be between 0 and 1000000000 with at most 2 decimal places.")]
+    [DataRow("Attendees", "1,000", "Attendees must be a whole number from 0 to 1000000.")]
+    // #173 item 2: past int's range is refused, never wrapped round.
+    [DataRow("Attendees", "2147483648", "Attendees must be a whole number from 0 to 1000000.")]
+    [DataRow("Returning attendees", "99999999999", "Returning attendees must be a whole number from 0 to 1000000.")]
     public async Task AnInvalidValueShowsItsMessageUnderTheField_AndSendsNothing(string label, string typed, string message)
     {
         var page = await OpenDetails();
@@ -256,6 +340,59 @@ public sealed class EventMetricsFormTests : IDisposable
         foreach (var c in cases)
             Assert.AreEqual(EventMetricsValidator.Validate(c.Same), Assert.ContainsSingle(FieldAlerts(page, c.Label)), c.Label);
         Assert.AreEqual(0, api.Count(HttpMethod.Put, metricsPath));
+    }
+
+    // #173 item 6: the form's rules are the API's (FieldRules.Count and FieldRules.Money with EventMetricsValidator's
+    // limits), value for value, refused and accepted alike. The limits are read as compiled into each assembly, so a
+    // change on one side alone fails here.
+    [TestMethod]
+    public void TheFormsRulesAreTheApis_ValueForValue()
+    {
+        Assert.AreEqual(1_000_000, typeof(EventMetricsValidator).GetField(nameof(EventMetricsValidator.MaxCount))!.GetRawConstantValue());
+        Assert.AreEqual(typeof(EventMetricsValidator).GetField(nameof(EventMetricsValidator.MaxCount))!.GetRawConstantValue(),
+            typeof(EventMetricsRules).GetField(nameof(EventMetricsRules.MaxCount))!.GetRawConstantValue());
+        // A decimal constant is compiled as a field with its value in a DecimalConstantAttribute.
+        Assert.AreEqual(1_000_000_000m, DecimalConstant(typeof(EventMetricsValidator), nameof(EventMetricsValidator.MaxAmount)));
+        Assert.AreEqual(DecimalConstant(typeof(EventMetricsValidator), nameof(EventMetricsValidator.MaxAmount)),
+            DecimalConstant(typeof(EventMetricsRules), nameof(EventMetricsRules.MaxAmount)));
+
+        foreach (var count in new int?[] { null, int.MinValue, -1, 0, 1, 12, 999_999, 1_000_000, 1_000_001, int.MaxValue })
+            Assert.AreEqual(FieldRules.Count(count, "New attendees", EventMetricsValidator.MaxCount),
+                EventMetricsRules.Count(count, "New attendees"), $"count {count}");
+        foreach (var amount in new decimal?[] { null, -0.01m, 0m, 0.01m, 1.005m, 40.5m, 40.50m, 999_999_999.99m, 1_000_000_000m, 1_000_000_000.01m })
+            Assert.AreEqual(FieldRules.Money(amount, "Amount spent", EventMetricsValidator.MaxAmount),
+                EventMetricsRules.Money(amount, "Amount spent"), $"amount {amount}");
+    }
+
+    // #173 item 9: each message is tied to its field, so a screen reader reads it with the field.
+    [TestMethod]
+    public async Task EveryFieldMessageIsTiedToItsField()
+    {
+        var page = await OpenDetails();
+        foreach (var label in Labels) Assert.IsNull(Field(page, label).GetAttribute("aria-invalid"), label);
+        await Type(page, "Attendees", "-1");
+        await Type(page, "New attendees", "x");
+        await Type(page, "Returning attendees", "1000001");
+        await Type(page, "Amount spent", "1.005");
+
+        await SaveMetrics(page);
+
+        foreach (var label in Labels)
+        {
+            var field = Field(page, label);
+            Assert.AreEqual("true", field.GetAttribute("aria-invalid"), label);
+            var described = field.GetAttribute("aria-describedby");
+            Assert.IsNotNull(described, label);
+            var message = page.FormDialog().QuerySelector($"[id='{described}']");
+            Assert.IsNotNull(message, $"{label}: aria-describedby names no element");
+            Assert.AreEqual(Assert.ContainsSingle(FieldAlerts(page, label)), message.TextContent.Trim(), label);
+        }
+
+        // A fixed field is valid again and names no message.
+        await Type(page, "Attendees", "3");
+        Assert.IsNull(Field(page, "Attendees").GetAttribute("aria-invalid"));
+        Assert.IsNull(Field(page, "Attendees").GetAttribute("aria-describedby"));
+        Assert.AreEqual("true", Field(page, "New attendees").GetAttribute("aria-invalid"));
     }
 
     [TestMethod]
@@ -309,6 +446,43 @@ public sealed class EventMetricsFormTests : IDisposable
         Assert.IsEmpty(page.FormDialog().Alerts());
     }
 
+    // #173 item 5: after a 409 the tag held is out of date, so Save waits for Reload, even when more is typed;
+    // a Reload that fails says so in its own message and leaves Save waiting.
+    [TestMethod]
+    public async Task AfterAStaleSave_SaveStaysDisabledUntilReload()
+    {
+        Stored(12, 5, 7, 40.5m, FirstTag);
+        var page = await OpenDetails();
+        api.Status(HttpMethod.Put, metricsPath, HttpStatusCode.Conflict, "The request conflicts with the stored data. Reload and try again.");
+        await Type(page, "Attendees", "20");
+        await SaveMetrics(page);
+        Assert.AreEqual(StaleMessage, Assert.ContainsSingle(page.FormDialog().Alerts()));
+
+        await Type(page, "Attendees", "21");
+        Assert.IsTrue(page.FormDialog().Button("Save metrics").IsBusy(), "a stale tag waits for Reload");
+        await page.FormDialog().Button("Save metrics").ClickAsync(new());
+        Assert.AreEqual(1, api.Count(HttpMethod.Put, metricsPath));
+
+        api.Status(HttpMethod.Get, metricsPath, HttpStatusCode.InternalServerError);
+        await page.FormDialog().Button("Reload").ClickAsync(new());
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(
+            new[] { StaleMessage, "The Event metrics could not be reloaded. The server had a problem (HTTP 500). Try again." },
+            page.FormDialog().Alerts()));
+        Assert.AreEqual("21", Value(page, "Attendees"));
+        Assert.IsTrue(page.FormDialog().Button("Save metrics").IsBusy(), "still stale after a failed Reload");
+
+        Stored(30, 5, 7, 41m, SecondTag);
+        await page.FormDialog().Button("Reload").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.AreEqual("30", Value(page, "Attendees")));
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        await Type(page, "Attendees", "31");
+        Assert.IsFalse(page.FormDialog().Button("Save metrics").IsBusy());
+        api.On(HttpMethod.Put, metricsPath, () => Row(31, 5, 7, 41m, FirstTag));
+        await SaveMetrics(page);
+        CollectionAssert.AreEqual(new[] { FirstTag, SecondTag }, api.IfMatches(HttpMethod.Put, metricsPath));
+        Assert.Contains("Event metrics saved.", page.FormDialog().TextContent);
+    }
+
     [TestMethod]
     public async Task AFirstSaveThatLosesTheRaceIsAStaleEditToo()
     {
@@ -339,11 +513,12 @@ public sealed class EventMetricsFormTests : IDisposable
         {
             Assert.IsTrue(page.FormDialog().Button("Save metrics").IsBusy());
             Assert.IsTrue(page.FormDialog().Button("Close").IsBusy());
+            // Select Winner goes through Close's busy guard (#186 item 8).
+            Assert.IsTrue(page.FormDialog().Button("Select Winner").IsBusy());
         });
         await page.FormDialog().Button("Save metrics").ClickAsync(new());
-        // A click that lands before the re-render reaches the handler itself, which sends nothing.
-        // Not awaited before the release: without the guard it would wait on the held request too.
-        var second = page.InvokeAsync(() => (Task)Call(page.FindComponent<EventMetricsForm>().Instance, "Save")!);
+        await page.FormDialog().Button("Select Winner").ClickAsync(new());
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, eventPath));
         // Overlay click or Escape while it saves does nothing.
         await Dismiss(page);
         Assert.IsTrue(page.HasFormDialog());
@@ -351,7 +526,6 @@ public sealed class EventMetricsFormTests : IDisposable
 
         gate.SetResult();
         await first;
-        await second;
 
         Assert.AreEqual(1, api.Count(HttpMethod.Put, metricsPath));
         page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
@@ -405,13 +579,46 @@ public sealed class EventMetricsFormTests : IDisposable
         Assert.IsFalse(page.HasFormDialog());
     }
 
+    // #173 item 4: the change check compares values, not text, so the stored amount written with a trailing
+    // zero, or a count with spaces round it, is no change: Save stays off and Escape closes without asking.
+    [TestMethod]
+    public async Task ATrailingZeroIsNoChange()
+    {
+        Stored(12, null, null, 40.5m, FirstTag);
+        var page = await OpenDetails();
+
+        await Type(page, "Amount spent", "40.50");
+        await Type(page, "Attendees", " 12 ");
+
+        Assert.IsTrue(page.FormDialog().Button("Save metrics").IsBusy(), "40.50 is the stored 40.5");
+        await Dismiss(page);
+        Assert.IsFalse(page.HasConfirmation());
+        Assert.IsFalse(page.HasFormDialog());
+
+        // A different value is a change.
+        await DetailsButton(page).ClickAsync(new());
+        page.WaitForAssertion(() => Assert.AreEqual("40.5", Value(page, "Amount spent")));
+        await Type(page, "Amount spent", "40.51");
+        Assert.IsFalse(page.FormDialog().Button("Save metrics").IsBusy());
+        await Dismiss(page);
+        Assert.IsTrue(page.HasConfirmation());
+    }
+
     // ---- Selections stay apart -----------------------------------------------------------------
 
+    // The stub stores what the form saved and answers every read with it, as the API does. Changing the Winner
+    // (an Event PUT) sends exactly the Event's own properties, and the metrics read back afterwards are the saved ones.
     [TestMethod]
     public async Task SavingSelectionsAfterMetricsLeavesTheMetricsIntact()
     {
+        string? storedBody = null;
+        api.On(HttpMethod.Get, metricsPath, () => StoredRow(storedBody));
+        api.On(HttpMethod.Put, metricsPath, () =>
+        {
+            storedBody = api.Bodies(HttpMethod.Put, metricsPath).Last();
+            return StoredRow(storedBody);
+        });
         var page = await OpenDetails();
-        api.On(HttpMethod.Put, metricsPath, () => Row(12, 5, 7, 40.5m, FirstTag));
         await Type(page, "Attendees", "12");
         await Type(page, "New attendees", "5");
         await Type(page, "Returning attendees", "7");
@@ -423,38 +630,67 @@ public sealed class EventMetricsFormTests : IDisposable
            .Json(HttpMethod.Get, "/api/events", new[] { rewon });
         await page.FormDialog().Button("Select Winner").ClickAsync(new());
 
-        var eventBody = Assert.ContainsSingle(api.Bodies(HttpMethod.Put, eventPath))!;
-        Assert.Contains(timeTrial.Id.ToString(), eventBody);
-        foreach (var metric in new[] { "attendees", "amountSpent", "metrics" })
-            Assert.DoesNotContain(metric, eventBody, StringComparison.OrdinalIgnoreCase);
-        // One metrics write, no re-read, and the form still shows what was saved.
+        // The Event PUT carries the Event's properties and nothing else.
+        using (var eventBody = JsonDocument.Parse(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, eventPath))!))
+        {
+            CollectionAssert.AreEqual(
+                new[] { "date", "eTag", "id", "name", "partitionKey", "rowKey", "selections", "timestamp", "uniqueGamesOnly", "winnerActivityId" },
+                eventBody.RootElement.EnumerateObject().Select(p => p.Name).Order().ToList());
+            Assert.AreEqual(timeTrial.Id, eventBody.RootElement.GetProperty("winnerActivityId").GetGuid());
+        }
         Assert.AreEqual(1, api.Count(HttpMethod.Put, metricsPath));
-        Assert.AreEqual(1, api.Count(HttpMethod.Get, metricsPath));
         CollectionAssert.AreEqual(new[] { "12", "5", "7", "40.5" }, Labels.Select(l => Value(page, l)).ToList());
+
+        // Read again from the store after the Event PUT: the saved metrics, untouched.
+        await page.FormDialog().Button("Close").ClickAsync(new());
+        await DetailsButton(page).ClickAsync(new());
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { "12", "5", "7", "40.5" }, Labels.Select(l => Value(page, l)).ToList()));
+        Assert.AreEqual(2, api.Count(HttpMethod.Get, metricsPath));
     }
 
     // ---- Helpers -------------------------------------------------------------------------------
 
+    // A decimal constant as compiled into its own assembly.
+    private static decimal DecimalConstant(Type type, string name) =>
+        type.GetField(name)!.GetCustomAttribute<System.Runtime.CompilerServices.DecimalConstantAttribute>()!.Value;
+
     // The API's answer for a metrics row: the body (eTag included, as the API sends it) and the ETag header.
-    private HttpResponseMessage Row(int? attendees, int? newAttendees, int? returning, decimal? amount, string? eTag)
+    private HttpResponseMessage Row(int? attendees, int? newAttendees, int? returning, decimal? amount, string? eTag, Guid? eventId = null)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = JsonContent.Create(new { id = past.Id, attendees, newAttendees, returningAttendees = returning, amountSpent = amount, eTag })
+            Content = JsonContent.Create(new { id = eventId ?? past.Id, attendees, newAttendees, returningAttendees = returning, amountSpent = amount, eTag })
         };
         if (eTag is not null) response.Headers.TryAddWithoutValidation("ETag", eTag);
         return response;
     }
 
+    // The row as stored from a saved request body, or no row yet.
+    private HttpResponseMessage StoredRow(string? body)
+    {
+        if (body is null) return Row(null, null, null, null, null);
+        using var json = JsonDocument.Parse(body);
+        int? Count(string name) => json.RootElement.GetProperty(name) is { ValueKind: JsonValueKind.Number } n ? n.GetInt32() : null;
+        var amount = json.RootElement.GetProperty("amountSpent") is { ValueKind: JsonValueKind.Number } a ? a.GetDecimal() : (decimal?)null;
+        return Row(Count("attendees"), Count("newAttendees"), Count("returningAttendees"), amount, SecondTag);
+    }
+
     private void Stored(int? attendees, int? newAttendees, int? returning, decimal? amount, string? eTag) =>
         api.On(HttpMethod.Get, metricsPath, () => Row(attendees, newAttendees, returning, amount, eTag));
+
+    // The four metrics in a request body, as written (null for a cleared one), in the order of Labels.
+    private static List<string> MetricsIn(string? body)
+    {
+        using var json = JsonDocument.Parse(body!);
+        return MetricNames.Select(n => json.RootElement.GetProperty(n).GetRawText()).ToList();
+    }
 
     private async Task<IRenderedComponent<Events>> OpenDetails()
     {
         var page = harness.Render<Events>();
         page.WaitForRows(1);
         await DetailsButton(page).ClickAsync(new());
-        page.WaitForAssertion(() => Assert.IsNotNull(page.FormDialog().QuerySelector("#metrics-attendees")));
+        page.WaitForAssertion(() => Assert.IsNotNull(FindField(page, "Attendees")));
         return page;
     }
 
@@ -462,10 +698,21 @@ public sealed class EventMetricsFormTests : IDisposable
         page.FindAll("tbody tr.fluent-data-grid-row").Single(r => r.Closest("fluent-dialog") is null)
             .QuerySelector("fluent-button[title=Details]")!;
 
-    private static string Id(string label) => "metrics-" + label.ToLowerInvariant().Replace(' ', '-');
+    // The card of the Event metrics form in the details dialog.
+    private static IElement MetricsCard(IRenderedComponent<Events> page) =>
+        page.FormDialog().QuerySelectorAll("fluent-card")
+            .Single(c => c.QuerySelectorAll(".fluent-typography").Any(l => l.TextContent.Trim() == "Event metrics"));
+
+    // The text field a visible label names (the label's "for"), or null when the form shows no such field.
+    private static IElement? FindField(IRenderedComponent<Events> page, string label)
+    {
+        var dialog = page.FormDialog();
+        var target = dialog.QuerySelectorAll("label").FirstOrDefault(l => l.TextContent.Trim() == label)?.GetAttribute("for");
+        return target is null ? null : dialog.QuerySelector($"[id='{target}']");
+    }
 
     private static IElement Field(IRenderedComponent<Events> page, string label) =>
-        page.FormDialog().QuerySelector("#" + Id(label))!;
+        FindField(page, label) ?? throw new AssertFailedException($"No field labelled {label}.");
 
     private static string? Value(IRenderedComponent<Events> page, string label) => Field(page, label).GetAttribute("value");
 
@@ -488,7 +735,4 @@ public sealed class EventMetricsFormTests : IDisposable
         var dialog = page.FormDialog();
         return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
     }
-
-    private static object? Call(object component, string name, params object[] args) =>
-        component.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, args);
 }

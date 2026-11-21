@@ -40,24 +40,25 @@ public sealed class DiscardPromptFocusTests : IDisposable
             UniqueGamesOnly = false,
             Selections = [new Selection { Game = new Game { Id = kart.Id, Name = kart.Name }, Activity = new Activity { Id = grandPrix.Id, GameId = kart.Id, Name = grandPrix.Name } }]
         };
-        // Has a winner, so its Details dialog shows the Winner's Comments panel (#132), whose first text box is New Comment.
+        // Has a winner that is in the library, so its Details dialog shows the Winner's Comments panel (#132), whose
+        // first text box is New Comment. Its other Selection is no longer in the library.
         party = new EventEntity
         {
             Name = "Party",
             Date = new DateTimeOffset(2026, 10, 31, 20, 0, 0, TimeSpan.Zero),
-            Selections = [new Selection { Game = new Game { Id = kart.Id, Name = kart.Name }, Activity = retired }],
-            WinnerActivityId = retired.Id
+            UniqueGamesOnly = false,
+            Selections = [new Selection { Game = new Game { Id = kart.Id, Name = kart.Name }, Activity = retired },
+                new Selection { Game = new Game { Id = kart.Id, Name = kart.Name }, Activity = new Activity { Id = grandPrix.Id, GameId = kart.Id, Name = grandPrix.Name } }],
+            WinnerActivityId = grandPrix.Id
         };
         api.Json(HttpMethod.Get, "/api/games", new[] { kart })
            .Json(HttpMethod.Get, "/api/activities", new[] { grandPrix })
            .Json(HttpMethod.Get, "/api/themes", new[] { spooky })
            .Json(HttpMethod.Get, "/api/holidays", new[] { halloween })
            .Json(HttpMethod.Get, "/api/events", new[] { night, party })
-           // The Activity details dialog's Comments panel (#131): none yet, so its first text box is New Comment.
-           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>())
-           // The Party Event's Winner, in its Event details (#132). (The real API answers 404 for an Activity no
-           // longer in the library; this test only needs a text box.)
-           .Json(HttpMethod.Get, $"/api/activities/{retired.Id}/comments", Array.Empty<CommentEntity>());
+           // Grand Prix's Comments, in its Activity details (#131) and as the Party Event's Winner in Event details
+           // (#132): none yet, so the first text box is New Comment.
+           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>());
         harness = new PageHarness(api);
     }
 

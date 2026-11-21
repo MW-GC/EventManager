@@ -90,6 +90,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
     [TestMethod]
     public async Task WinnerWithNoComments_ShowsThePanel_AndNoCommentsYet()
     {
+        ServeOldSnapshots();
         var page = await OpenEventDetails("Game night");
 
         var panel = Assert.ContainsSingle(Panels(page));
@@ -98,10 +99,12 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
         Assert.IsNotNull(NewBox(page));
         Assert.AreEqual(1, api.Count(HttpMethod.Get, ListPath(grandPrix.Id)));
         Assert.AreEqual(0, api.Count(HttpMethod.Get, ListPath(timeTrial.Id)));
-        // The old single-text editor is gone.
+        // The old single-text editor is gone, and the old text an Event stored in its snapshot shows nowhere:
+        // not as text and not as the value of a text box.
         var dialog = page.FormDialog();
         Assert.DoesNotContain("Event Manager Comments", dialog.TextContent);
         Assert.IsEmpty(dialog.QuerySelectorAll("fluent-button").Where(b => b.TextContent.Trim() == "Save Comments").ToList());
+        AssertNotShown(dialog, OldSnapshotText);
     }
 
     [TestMethod]
@@ -196,6 +199,152 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
         Assert.AreEqual(night.Id, Assert.ContainsSingle(comments[grandPrix.Id]).EventId);
     }
 
+    // #186 item 1: a failed add from Event details keeps the typed text and says why; a retry then adds it,
+    // still recording this Event.
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AFailedAdd_KeepsTheTextAndSaysWhy_AndARetrySucceeds(bool offline)
+    {
+        var page = await OpenEventDetails("Game night");
+        var path = ListPath(grandPrix.Id);
+        if (offline) api.Offline(HttpMethod.Post, path);
+        else api.Status(HttpMethod.Post, path, HttpStatusCode.InternalServerError);
+
+        await TypeNew(page, "Cut the second round");
+        await Click(page.FormDialog().Button("Add Comment"), page);
+
+        var why = offline
+            ? "Could not reach the server. Check the connection and try again."
+            : "The server had a problem (HTTP 500). Try again.";
+        Assert.AreEqual($"The Comment was not added. {why}", Assert.ContainsSingle(page.FormDialog().Alerts()));
+        Assert.AreEqual("Cut the second round", NewBox(page)!.GetAttribute("value"));
+        Assert.IsEmpty(Items(page));
+        Assert.IsTrue(page.HasFormDialog());
+
+        api.On(HttpMethod.Post, path, () => StoreAdd(grandPrix.Id));
+        await Click(page.FormDialog().Button("Add Comment"), page);
+
+        CollectionAssert.AreEqual(new[] { "Cut the second round" }, Texts(page));
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        Assert.AreEqual("", NewBox(page)!.GetAttribute("value") ?? "");
+        var expected = $"{{\"text\":\"Cut the second round\",\"eventId\":\"{night.Id}\"}}";
+        CollectionAssert.AreEqual(new[] { expected, expected }, api.Bodies(HttpMethod.Post, path));
+        Assert.AreEqual(night.Id, Assert.ContainsSingle(comments[grandPrix.Id]).EventId);
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { "from Game night" }, Origins(page)));
+    }
+
+    // ---- Select Winner and the Comments panel (#186 item 8) ------------------------------------
+
+    // Select Winner swaps the panel, so it waits while a Comment request runs: its buttons are off, and the
+    // winner is unchanged until the request ends.
+    [TestMethod]
+    public async Task SelectWinner_WhileACommentRequestRuns_DoesNothing()
+    {
+        var page = await OpenEventDetails("Game night");
+        var path = ListPath(grandPrix.Id);
+        var gate = api.Hold(HttpMethod.Post, path, () => One(grandPrix.Id, new Stored(Guid.NewGuid(), "New", night.Id, TagC), HttpStatusCode.Created));
+        var rewon = Rewon(night, timeTrial);
+        api.Json(HttpMethod.Put, $"/api/events/{night.Id}", rewon)
+           .Json(HttpMethod.Get, "/api/events", new[] { rewon, open });
+        await TypeNew(page, "New");
+
+        var add = page.FormDialog().Button("Add Comment").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.IsTrue(Card(page, "Time Trial").Button("Select Winner").IsBusy(), "Select Winner while the add runs"));
+        await Card(page, "Time Trial").Button("Select Winner").ClickAsync(new());
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, $"/api/events/{night.Id}"));
+        Assert.IsFalse(page.HasConfirmation());
+
+        gate.SetResult();
+        await add;
+        page.WaitForAssertion(() => Assert.IsFalse(Card(page, "Time Trial").Button("Select Winner").IsBusy()));
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, $"/api/events/{night.Id}"));
+        CollectionAssert.AreEqual(new[] { "New" }, Texts(page));
+        Assert.AreSame(Card(page, "Grand Prix"), Assert.ContainsSingle(Panels(page)).Closest("fluent-card"));
+
+        // Once the request is done, Select Winner works again.
+        await Card(page, "Time Trial").Button("Select Winner").ClickAsync(new());
+        Assert.AreEqual(1, api.Count(HttpMethod.Put, $"/api/events/{night.Id}"));
+        page.WaitForAssertion(() => Assert.AreSame(Card(page, "Time Trial"), Assert.ContainsSingle(Panels(page)).Closest("fluent-card")));
+    }
+
+    // The Discard question of a Select Winner is answered while a Comment request it did not wait for is running
+    // (the add was started under the open question): the Winner is not saved meanwhile.
+    [TestMethod]
+    public async Task SelectWinner_DiscardAnsweredWhileACommentRequestRuns_SavesNoWinner()
+    {
+        var page = await OpenEventDetails("Game night");
+        var eventPath = $"/api/events/{night.Id}";
+        var gate = api.Hold(HttpMethod.Post, ListPath(grandPrix.Id), () => One(grandPrix.Id, new Stored(Guid.NewGuid(), "Half a thought", night.Id, TagC), HttpStatusCode.Created));
+        var rewon = Rewon(night, timeTrial);
+        api.Json(HttpMethod.Put, eventPath, rewon)
+           .Json(HttpMethod.Get, "/api/events", new[] { rewon, open });
+        await TypeNew(page, "Half a thought");
+        await Card(page, "Time Trial").Button("Select Winner").ClickAsync(new());
+        Assert.AreEqual("Discard changes?", page.Confirmation().QuerySelector("h4")!.TextContent.Trim());
+
+        var add = page.FormDialog().Button("Add Comment").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Close").IsBusy(), "the add is running"));
+        await page.ConfirmAsync("Discard");
+
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, eventPath));
+        gate.SetResult();
+        await add;
+        page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, eventPath));
+        CollectionAssert.AreEqual(new[] { "Half a thought" }, Texts(page));
+        Assert.AreSame(Card(page, "Grand Prix"), Assert.ContainsSingle(Panels(page)).Closest("fluent-card"));
+    }
+
+    // Text typed in the add box, or an edit that differs, would be dropped with the panel: Select Winner asks
+    // first. Keep editing keeps the text and the Winner; Discard saves the new Winner.
+    [TestMethod]
+    [DataRow("add")]
+    [DataRow("edit")]
+    public async Task SelectWinner_WithUnsavedCommentText_AsksToDiscard(string kind)
+    {
+        comments[grandPrix.Id].Add(new Stored(Guid.NewGuid(), "Ran long", null, TagA));
+        comments[timeTrial.Id].Add(new Stored(Guid.NewGuid(), "Crowd favourite", null, TagB));
+        var page = await OpenEventDetails("Game night");
+        page.WaitForAssertion(() => Assert.HasCount(1, Items(page)));
+        var rewon = Rewon(night, timeTrial);
+        api.Json(HttpMethod.Put, $"/api/events/{night.Id}", rewon)
+           .Json(HttpMethod.Get, "/api/events", new[] { rewon, open });
+        Func<string?> typed;
+        if (kind == "add")
+        {
+            await TypeNew(page, "Half a thought");
+            typed = () => NewBox(page)!.GetAttribute("value");
+        }
+        else
+        {
+            await Click(Items(page)[0].Button("Edit"), page);
+            await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Ran longer" });
+            typed = () => EditBox(page)!.GetAttribute("value");
+        }
+
+        await Card(page, "Time Trial").Button("Select Winner").ClickAsync(new());
+
+        Assert.AreEqual("Discard changes?", page.Confirmation().QuerySelector("h4")!.TextContent.Trim());
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, $"/api/events/{night.Id}"));
+        await page.Confirmation().Button("Keep editing").ClickAsync(new());
+        Assert.IsFalse(page.HasConfirmation());
+        Assert.AreEqual(kind == "add" ? "Half a thought" : "Ran longer", typed());
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, $"/api/events/{night.Id}"));
+        Assert.AreSame(Card(page, "Grand Prix"), Assert.ContainsSingle(Panels(page)).Closest("fluent-card"));
+
+        await Card(page, "Time Trial").Button("Select Winner").ClickAsync(new());
+        await page.ConfirmAsync("Discard");
+
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { "Crowd favourite" }, Texts(page)));
+        Assert.AreEqual(1, api.Count(HttpMethod.Put, $"/api/events/{night.Id}"));
+        Assert.Contains($"\"winnerActivityId\":\"{timeTrial.Id}\"", Assert.ContainsSingle(api.Bodies(HttpMethod.Put, $"/api/events/{night.Id}"))!);
+        Assert.AreSame(Card(page, "Time Trial"), Assert.ContainsSingle(Panels(page)).Closest("fluent-card"));
+        Assert.IsTrue(page.HasFormDialog());
+        // Nothing typed was sent as a Comment.
+        Assert.IsEmpty(api.Requests.Where(r => r.Path.Contains("/comments") && r.Method != HttpMethod.Get).ToList());
+    }
+
     // ---- Origin --------------------------------------------------------------------------------
 
     [TestMethod]
@@ -263,6 +412,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
     [TestMethod]
     public async Task ASecondOpen_ReadsTheCommentsAgain_NeverTheSnapshot()
     {
+        ServeOldSnapshots();
         comments[grandPrix.Id].Add(new Stored(Guid.NewGuid(), "Ran long", null, TagA));
         var page = await OpenEventDetails("Game night");
         page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { "Ran long" }, Texts(page)));
@@ -274,6 +424,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
 
         page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { "Ran long", "Crowd favourite" }, Texts(page)));
         Assert.AreEqual(2, api.Count(HttpMethod.Get, ListPath(grandPrix.Id)));
+        AssertNotShown(page.FormDialog(), OldSnapshotText);
     }
 
     // ---- The dialog's guards -------------------------------------------------------------------
@@ -368,6 +519,31 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
     }
 
     // ---- Helpers -------------------------------------------------------------------------------
+
+    // The old text an Event stored before #133 in its Selection snapshot, under the retired "comments" name.
+    private const string OldSnapshotText = "Old text from the snapshot";
+
+    // Answers the Events list in the shape stored before #133: every Selection's Activity snapshot still carries
+    // the old text. The page must load it and never show it.
+    private void ServeOldSnapshots() => api.On(HttpMethod.Get, "/api/events", () =>
+    {
+        var list = JsonSerializer.SerializeToNode(new[] { night, open }, JsonSerializerOptions.Web)!.AsArray();
+        foreach (var ev in list)
+        foreach (var selection in ev!["selections"]!.AsArray())
+            selection!["activity"]!["comments"] = OldSnapshotText;
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(list.ToJsonString(), System.Text.Encoding.UTF8, "application/json") };
+    });
+
+    // The text is neither shown nor the value of any input, text area or Fluent text field inside root.
+    private static void AssertNotShown(IElement root, string text)
+    {
+        Assert.DoesNotContain(text, root.TextContent);
+        foreach (var box in root.QuerySelectorAll("input, textarea, fluent-text-field, fluent-text-area"))
+        {
+            Assert.DoesNotContain(text, box.GetAttribute("value") ?? "", box.OuterHtml);
+            Assert.DoesNotContain(text, box.GetAttribute("current-value") ?? "", box.OuterHtml);
+        }
+    }
 
     private static string ListPath(Guid activityId) => $"/api/activities/{activityId}/comments";
 
