@@ -24,30 +24,35 @@ public class ActivityNoteConversionTests
     private Guid SeedActivity(string? oldText, DateTimeOffset? lastModified = null) =>
         SeedRow(row => row["Comments"] = oldText, lastModified);
 
-    private Guid SeedRow(Action<TableEntity> oldColumn, DateTimeOffset? lastModified = null, Guid? gameId = null)
+    private Guid SeedRow(Action<TableEntity> oldColumn, DateTimeOffset? lastModified = null, Guid? gameId = null, Guid? id = null)
     {
-        var id = Guid.NewGuid();
-        var row = new TableEntity("Activity", id.ToString("D"))
-        {
-            ["GameId"] = gameId ?? Guid.NewGuid(),
-            ["Name"] = "Old activity",
-            ["ThemeIds"] = "[]",
-            ["HolidayIds"] = "[]",
-            Timestamp = lastModified ?? new DateTimeOffset(2026, 9, 14, 20, 30, 0, TimeSpan.Zero),
-        };
+        var row = OldActivityRows.Row(id ?? Guid.NewGuid(), gameId ?? Guid.NewGuid(), "Old activity", null);
+        row.Timestamp = lastModified ?? new DateTimeOffset(2026, 9, 14, 20, 30, 0, TimeSpan.Zero);
         oldColumn(row);
         h.Activities[row.RowKey] = row;
-        return id;
+        return Guid.Parse(row.RowKey);
     }
 
     private List<CommentEntity> CommentsOf(Guid activityId) =>
-        h.Comments.Values.Where(c => c.ActivityId == activityId).ToList();
+        h.StoredComments().Where(c => c.ActivityId == activityId).ToList();
+
+    // The Comment inserts as storage answers them, except that the given insert (1 = the first) fails
+    // with a storage outage first.
+    private void FailCommentInsert(int failing)
+    {
+        var adds = 0;
+        h.CommentTable.Setup(t => t.AddEntityAsync(It.IsAny<CommentEntity>(), It.IsAny<CancellationToken>()))
+            .Returns((CommentEntity row, CancellationToken _) => ++adds == failing
+                ? throw new RequestFailedException(503, "Storage unavailable")
+                : Task.FromResult(TableMocks.AddRow(h.CommentRows, row)));
+    }
 
     [TestMethod]
-    public async Task AnActivityWithANoteGetsOneCommentWithTheTrimmedNoteDatedByTheRowsLastWriteAndNoEvent()
+    public async Task AnActivityWithAnOldTextGetsOneCommentWithTheTrimmedTextDatedByTheRowsLastWriteAndNoEvent()
     {
         var lastModified = new DateTimeOffset(2026, 8, 2, 19, 45, 12, TimeSpan.Zero);
-        var activityId = SeedActivity("  Ran long, cut the second round  ", lastModified);
+        var activityId = SeedRow(row => row["Comments"] = "  Ran long, cut the second round  ", lastModified,
+            id: OldActivityRows.FixedActivityId);
 
         await h.NoteConversion.RunAsync(default);
 
@@ -56,15 +61,15 @@ public class ActivityNoteConversionTests
         Assert.AreEqual(lastModified, comment.CreatedUtc);
         Assert.AreEqual(TimeSpan.Zero, comment.CreatedUtc.Offset);
         Assert.IsNull(comment.EventId);
-        Assert.AreEqual("Comment", comment.PartitionKey);
-        Assert.AreEqual(ActivityNoteConversion.CommentIdFor(activityId), comment.Id);
+        Assert.AreEqual(TableNames.CommentPartition, comment.PartitionKey);
+        Assert.AreEqual(OldActivityRows.FixedActivityCommentId, comment.Id);
     }
 
     [TestMethod]
     [DataRow(null)]
     [DataRow("")]
     [DataRow("   \t\r\n  ")]
-    public async Task AnActivityWithNoNoteOrOnlyWhitespaceGetsNoComment(string? oldText)
+    public async Task AnActivityWithNoOldTextOrOnlyWhitespaceGetsNoComment(string? oldText)
     {
         var withText = SeedActivity("Keep");
         var without = SeedActivity(oldText);
@@ -86,7 +91,7 @@ public class ActivityNoteConversionTests
 
         Assert.IsEmpty(CommentsOf(without));
         Assert.ContainsSingle(CommentsOf(withText));
-        Assert.IsTrue(MarkerStored());
+        Assert.IsTrue(h.MarkerStored());
     }
 
     [TestMethod]
@@ -100,7 +105,7 @@ public class ActivityNoteConversionTests
 
         Assert.IsEmpty(CommentsOf(odd));
         Assert.ContainsSingle(CommentsOf(withText));
-        Assert.IsTrue(MarkerStored(), "The pass finishes and stores the marker.");
+        Assert.IsTrue(h.MarkerStored(), "The pass finishes and stores the marker.");
     }
 
     [TestMethod]
@@ -137,7 +142,7 @@ public class ActivityNoteConversionTests
         var game = h.SeedGame();
         var lastModified = new DateTimeOffset(2026, 6, 1, 18, 0, 0, TimeSpan.Zero);
         var activityId = SeedRow(row => row["Comments"] = "  Old text  ", lastModified, game.Id);
-        Assert.IsFalse(MarkerStored(), "No pass has run: the startup service never started.");
+        Assert.IsFalse(h.MarkerStored(), "No pass has run: the startup service never started.");
 
         var first = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, default);
 
@@ -151,7 +156,7 @@ public class ActivityNoteConversionTests
         Assert.AreEqual(activityId, comment.ActivityId);
         Assert.AreEqual(lastModified, comment.CreatedUtc);
         Assert.IsNull(comment.EventId);
-        Assert.IsTrue(MarkerStored());
+        Assert.IsTrue(h.MarkerStored());
 
         var second = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed again" }), activityId, default);
 
@@ -168,16 +173,7 @@ public class ActivityNoteConversionTests
         var activityId = SeedRow(row => row["Comments"] = "Old text", gameId: game.Id);
         var before = h.Activities[activityId.ToString("D")];
         // The first Comment insert fails with a storage outage; later inserts behave like storage.
-        var adds = 0;
-        h.CommentTable.Setup(t => t.AddEntityAsync(It.IsAny<CommentEntity>(), It.IsAny<CancellationToken>()))
-            .Returns((CommentEntity row, CancellationToken _) =>
-            {
-                if (++adds == 1) throw new RequestFailedException(503, "Storage unavailable");
-                if (!h.Comments.TryAdd(row.RowKey, row))
-                    throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
-                row.ETag = TableMocks.NextETag();
-                return Task.FromResult<Response>(new StorageResponse(row.ETag));
-            });
+        FailCommentInsert(1);
 
         var failed = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, default);
 
@@ -187,8 +183,8 @@ public class ActivityNoteConversionTests
         Assert.AreEqual("Old text", before.GetString("Comments"));
         Assert.AreEqual("Old activity", before.GetString("Name"));
         Assert.IsFalse(h.ActivityTable.Invocations.Any(i => i.Method.Name == nameof(TableClient.UpdateEntityAsync)));
-        Assert.IsEmpty(h.Comments);
-        Assert.IsFalse(MarkerStored());
+        Assert.IsEmpty(h.StoredComments());
+        Assert.IsFalse(h.MarkerStored());
 
         var retried = await h.ActivityApi.Update(TestRequests.Json(new { gameId = game.Id, name = "Renamed" }), activityId, default);
 
@@ -196,15 +192,14 @@ public class ActivityNoteConversionTests
         Assert.AreEqual("Renamed", h.Activities[activityId.ToString("D")].GetString("Name"));
         var listed = ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(TestRequests.Empty(), activityId, default));
         Assert.AreEqual("Old text", Assert.ContainsSingle(listed).Text);
-        Assert.IsTrue(MarkerStored());
+        Assert.IsTrue(h.MarkerStored());
     }
 
     [TestMethod]
     public async Task WithTheMarkerStoredAPutReadsOnlyTheMarkerOnceAndWritesTheActivityAsBefore()
     {
         // A deployment whose pass finished earlier: the marker is stored, and this Activity has no old text.
-        h.CommentTableOtherRows[$"{ActivityNoteConversion.MarkerPartitionKey}|{ActivityNoteConversion.MarkerRowKey}"] =
-            new TableEntity(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey);
+        h.SeedMarker();
         var game = h.SeedGame();
         var activityId = SeedRow(_ => { }, gameId: game.Id);
 
@@ -220,7 +215,7 @@ public class ActivityNoteConversionTests
         // One marker read for both PUTs, no scan of the Activity table, no Comment.
         Assert.AreEqual(1, h.CommentTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.GetEntityAsync)));
         Assert.AreEqual(0, h.ActivityTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.QueryAsync)));
-        Assert.IsEmpty(h.Comments);
+        Assert.IsEmpty(h.StoredComments());
         Assert.AreEqual(0, CommentAdds());
     }
 
@@ -237,10 +232,7 @@ public class ActivityNoteConversionTests
             {
                 entered.TrySetResult();
                 await release.Task;
-                if (!h.Comments.TryAdd(row.RowKey, row))
-                    throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
-                row.ETag = TableMocks.NextETag();
-                return (Response)new StorageResponse(row.ETag);
+                return TableMocks.AddRow(h.CommentRows, row);
             });
 
         var startupPass = h.NoteConversion.RunAsync(default);
@@ -260,7 +252,7 @@ public class ActivityNoteConversionTests
     }
 
     [TestMethod]
-    public async Task ANoteOverTheCommentLimitIsCutTo1000CharactersAndAWarningNamesTheActivity()
+    public async Task AnOldTextOverTheCommentLimitIsCutTo1000CharactersAndAWarningNamesTheActivity()
     {
         var oldText = new string('a', 999) + "bcdef";
         var activityId = SeedActivity("  " + oldText + "  ");
@@ -301,9 +293,6 @@ public class ActivityNoteConversionTests
 
     // ---- runs again on every host start: idempotent, and done once
 
-    private bool MarkerStored() =>
-        h.CommentTableOtherRows.ContainsKey($"{ActivityNoteConversion.MarkerPartitionKey}|{ActivityNoteConversion.MarkerRowKey}");
-
     private int CommentAdds() => h.CommentTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.AddEntityAsync)
         && i.Arguments[0] is CommentEntity);
 
@@ -317,8 +306,9 @@ public class ActivityNoteConversionTests
         await h.NoteConversion.RunAsync(default);
 
         Assert.ContainsSingle(CommentsOf(activityId));
-        Assert.IsTrue(MarkerStored(), "A finished pass stores the marker row.");
-        Assert.ContainsSingle(h.CommentTableOtherRows);
+        Assert.IsTrue(h.MarkerStored(), "A finished pass stores the marker row.");
+        // The marker is the one row of the table that is not a Comment.
+        Assert.ContainsSingle(h.CommentRows.Values.Where(r => r is not CommentEntity));
         Assert.AreEqual(writesAfterFirst, h.Writes(), "The second run must not write.");
         Assert.AreEqual(1, CommentAdds());
     }
@@ -344,27 +334,18 @@ public class ActivityNoteConversionTests
         var second = SeedActivity("Second");
         var third = SeedActivity("Third");
         // The second Comment insert fails with a storage outage; every other insert behaves like storage.
-        var adds = 0;
-        h.CommentTable.Setup(t => t.AddEntityAsync(It.IsAny<CommentEntity>(), It.IsAny<CancellationToken>()))
-            .Returns((CommentEntity row, CancellationToken _) =>
-            {
-                if (++adds == 2) throw new RequestFailedException(503, "Storage unavailable");
-                if (!h.Comments.TryAdd(row.RowKey, row))
-                    throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
-                row.ETag = TableMocks.NextETag();
-                return Task.FromResult<Response>(new StorageResponse(row.ETag));
-            });
+        FailCommentInsert(2);
 
         await Assert.ThrowsAsync<RequestFailedException>(() => h.NoteConversion.RunAsync(default));
-        Assert.IsFalse(MarkerStored(), "A pass that failed part-way must not store the marker.");
-        Assert.HasCount(1, h.Comments);
+        Assert.IsFalse(h.MarkerStored(), "A pass that failed part-way must not store the marker.");
+        Assert.HasCount(1, h.StoredComments());
 
         await h.NoteConversion.RunAsync(default);
 
-        Assert.IsTrue(MarkerStored());
+        Assert.IsTrue(h.MarkerStored());
         foreach (var activityId in new[] { first, second, third })
             Assert.ContainsSingle(CommentsOf(activityId));
-        Assert.HasCount(3, h.Comments);
+        Assert.HasCount(3, h.StoredComments());
     }
 
     [TestMethod]
@@ -372,12 +353,15 @@ public class ActivityNoteConversionTests
     {
         var activityId = SeedActivity("Doomed");
         await h.NoteConversion.RunAsync(default);
+        var marker = h.Marker();
+        Assert.HasCount(2, h.CommentRows, "The converted Comment and the marker share the one table.");
 
         Assert.IsExactInstanceOfType<Microsoft.AspNetCore.Mvc.NoContentResult>(
             await h.ActivityApi.Delete(TestRequests.Empty(), activityId, default));
 
-        Assert.IsEmpty(h.Comments);
-        Assert.IsTrue(MarkerStored(), "The Activity-delete cascade deletes Comments only, never the marker.");
+        Assert.IsEmpty(h.StoredComments());
+        Assert.AreSame(marker, h.Marker(), "The Activity-delete cascade deletes Comments only, never the marker.");
+        Assert.ContainsSingle(h.CommentRows);
     }
 
     // ---- read back through the Comment list route
@@ -386,13 +370,13 @@ public class ActivityNoteConversionTests
     public async Task TheConvertedCommentIsListedWithTheRowsDateAndNoEvent()
     {
         var lastModified = new DateTimeOffset(2026, 7, 4, 22, 0, 5, TimeSpan.Zero);
-        var activityId = SeedActivity("Bring snacks next time", lastModified);
+        var activityId = SeedRow(row => row["Comments"] = "Bring snacks next time", lastModified, id: OldActivityRows.FixedActivityId);
         await h.NoteConversion.RunAsync(default);
 
         var listed = ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(TestRequests.Empty(), activityId, default));
 
         var comment = Assert.ContainsSingle(listed);
-        Assert.AreEqual(ActivityNoteConversion.CommentIdFor(activityId), comment.Id);
+        Assert.AreEqual(OldActivityRows.FixedActivityCommentId, comment.Id);
         Assert.AreEqual(activityId, comment.ActivityId);
         Assert.AreEqual("Bring snacks next time", comment.Text);
         Assert.AreEqual(lastModified, comment.CreatedUtc);
@@ -405,17 +389,19 @@ public class ActivityNoteConversionTests
     {
         var activityId = SeedActivity("Old text");
         await h.NoteConversion.RunAsync(default);
-        Assert.IsTrue(MarkerStored());
+        Assert.IsTrue(h.MarkerStored());
+        // A row of the marker's partition that even carries the Activity's id: only the partition
+        // condition of the list query keeps it out.
+        var lookalike = Guid.NewGuid().ToString("D");
+        h.CommentRows[TableMocks.Key(ActivityNoteConversion.MarkerPartitionKey, lookalike)] =
+            new TableEntity(ActivityNoteConversion.MarkerPartitionKey, lookalike) { ["ActivityId"] = activityId, ["Text"] = "Not a Comment" };
 
         var listed = ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(TestRequests.Empty(), activityId, default));
 
-        Assert.ContainsSingle(listed);
-        // The list query sent to the table names the Comment partition, so a row of the marker's
-        // partition is excluded by storage even if it carried the Activity's id.
-        var query = h.CommentTable.Invocations.Last(i => i.Method.Name == nameof(TableClient.QueryAsync));
-        var filter = Assert.IsInstanceOfType<System.Linq.Expressions.Expression<Func<CommentEntity, bool>>>(query.Arguments[0]).Compile();
-        Assert.IsTrue(filter(new CommentEntity { PartitionKey = "Comment", ActivityId = activityId }));
-        Assert.IsFalse(filter(new CommentEntity { PartitionKey = ActivityNoteConversion.MarkerPartitionKey, ActivityId = activityId }));
+        var only = Assert.ContainsSingle(listed);
+        Assert.AreEqual("Old text", only.Text);
+        Assert.AreEqual(TableNames.CommentPartition, only.PartitionKey);
+        Assert.IsTrue(h.MarkerStored());
     }
 
     // ---- started with the host
@@ -435,7 +421,7 @@ public class ActivityNoteConversionTests
         await startup.ExecuteTask!;
 
         Assert.ContainsSingle(CommentsOf(activityId));
-        Assert.IsTrue(MarkerStored());
+        Assert.IsTrue(h.MarkerStored());
     }
 
     [TestMethod]
@@ -449,13 +435,13 @@ public class ActivityNoteConversionTests
         var startup = new ActivityNoteConversionStartup(services, log);
 
         await startup.StartAsync(default);
+        // Awaiting the hosted service's task throws when the failure faulted it.
         await startup.ExecuteTask!;
 
-        Assert.IsTrue(startup.ExecuteTask!.IsCompletedSuccessfully, "The failure must not fault the hosted service.");
         var entry = Assert.ContainsSingle(log.Entries);
         Assert.AreEqual(LogLevel.Error, entry.Level);
         Assert.AreSame(outage, entry.Exception);
-        Assert.IsFalse(MarkerStored());
+        Assert.IsFalse(h.MarkerStored());
         await startup.StopAsync(default);
     }
 
@@ -468,12 +454,12 @@ public class ActivityNoteConversionTests
         commentTable.Setup(t => t.CreateIfNotExists(It.IsAny<CancellationToken>())).Throws(outage);
         var service = new Mock<TableServiceClient>();
         service.Setup(s => s.GetTableClient(It.IsAny<string>())).Returns(new Mock<TableClient>().Object);
-        service.Setup(s => s.GetTableClient("ActivityComments")).Returns(commentTable.Object);
+        service.Setup(s => s.GetTableClient(TableNames.Comments)).Returns(commentTable.Object);
         var log = new ListLogger<ActivityNoteConversionStartup>();
         var services = new ServiceCollection();
         services.AddSingleton(service.Object);
-        services.AddSingleton(sp => new TableStore<ActivityEntity>(sp.GetRequiredService<TableServiceClient>(), "Activities", "Activity"));
-        services.AddSingleton(sp => new TableStore<CommentEntity>(sp.GetRequiredService<TableServiceClient>(), "ActivityComments", "Comment"));
+        services.AddSingleton(sp => new TableStore<ActivityEntity>(sp.GetRequiredService<TableServiceClient>(), TableNames.Activities, TableNames.ActivityPartition));
+        services.AddSingleton(sp => new TableStore<CommentEntity>(sp.GetRequiredService<TableServiceClient>(), TableNames.Comments, TableNames.CommentPartition));
         services.AddSingleton<ILogger<ActivityNoteConversion>>(new ListLogger<ActivityNoteConversion>());
         services.AddSingleton<ILogger<ActivityNoteConversionStartup>>(log);
         services.AddSingleton<ActivityNoteConversion>();
@@ -483,9 +469,9 @@ public class ActivityNoteConversionTests
         // The host resolves every hosted service before it starts them: that must not throw.
         var startup = provider.GetServices<IHostedService>().OfType<ActivityNoteConversionStartup>().Single();
         await startup.StartAsync(default);
+        // Awaiting the hosted service's task throws when the failure faulted it.
         await startup.ExecuteTask!;
 
-        Assert.IsTrue(startup.ExecuteTask!.IsCompletedSuccessfully, "The failure must not fault the hosted service.");
         var entry = Assert.ContainsSingle(log.Entries);
         Assert.AreEqual(LogLevel.Error, entry.Level);
         Assert.AreSame(outage, entry.Exception);

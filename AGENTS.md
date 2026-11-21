@@ -2,6 +2,7 @@
 
 .NET 10 solution: Blazor WebAssembly UI, Azure Functions API, shared entities, and MSTest test projects (API tests, and Web tests that render pages with bUnit).
 Run `dotnet test MW-GC.EventManager.slnx` and `dotnet build MW-GC.EventManager.slnx` before submitting changes. Use conventional commits and target pull requests at `dev`; do not merge or deploy without authorization.
+Keep a source file under about 400 lines; split it into components or classes before it grows past that.
 
 ## Agent skills
 

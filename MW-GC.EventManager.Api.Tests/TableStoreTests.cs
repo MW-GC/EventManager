@@ -211,4 +211,36 @@ public class TableStoreTests
         Assert.AreEqual(match.Id, Assert.ContainsSingle(listed).Id);
         Assert.AreEqual(3, gameRows.Count);
     }
+
+    [TestMethod]
+    public async Task GetWhereAsyncOfAnEntityWithAComplexPropertyThrowsNotSupported()
+    {
+        // An Event has a complex (JSON) property, Selections: its rows are read raw and hydrated, so a
+        // filter cannot be sent to storage as a typed query.
+        Assert.IsTrue(await events.TryAddAsync(TwoSelectionEvent()));
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => events.GetWhereAsync(e => e.Name == "Friday"));
+
+        Assert.IsFalse(eventTable.Invocations.Any(i => i.Method.Name == nameof(TableClient.QueryAsync)), "Nothing was queried.");
+    }
+
+    [TestMethod]
+    public async Task CommentEntityHasNoComplexPropertySoItsQueriesRunInStorage()
+    {
+        // The Comment list and the Activity-delete cascade query Comments with GetWhereAsync (#160). A
+        // complex property on CommentEntity would make that throw at run time, after the Activity row
+        // is gone, and leave its Comments behind: this test fails first.
+        var commentRows = new ConcurrentDictionary<string, CommentEntity>();
+        var service = new Mock<TableServiceClient>();
+        service.Setup(s => s.GetTableClient(TableNames.Comments)).Returns(TableMocks.FilteringTable(commentRows).Object);
+        var comments = new TableStore<CommentEntity>(service.Object, TableNames.Comments, TableNames.CommentPartition);
+        var activityId = Guid.NewGuid();
+        var mine = new CommentEntity { ActivityId = activityId, Text = "Mine" };
+        await comments.UpsertAsync(mine);
+        await comments.UpsertAsync(new CommentEntity { ActivityId = Guid.NewGuid(), Text = "Theirs" });
+
+        var listed = await comments.GetWhereAsync(c => c.ActivityId == activityId);
+
+        Assert.AreEqual(mine.Id, Assert.ContainsSingle(listed).Id);
+    }
 }

@@ -28,6 +28,13 @@ internal sealed class ListLogger<T> : ILogger<T>
         => Entries.Add((logLevel, exception, formatter(state, exception)));
 }
 
+/// <summary>API messages the tests compare against, written out once.</summary>
+internal static class ApiMessages
+{
+    /// <summary>The Game Website rule's message (<c>FieldRules.HttpAddress</c> for the field <c>Website</c>).</summary>
+    public const string Website = "Website must be an http or https address.";
+}
+
 /// <summary>HTTP requests as the Functions host hands them to a route.</summary>
 internal static class TestRequests
 {
@@ -78,7 +85,7 @@ internal sealed class StorageResponse(ETag etag = default) : Response
 }
 
 /// <summary>In-memory Table Storage tables behind the real <see cref="TableStore{TEntity}"/>.</summary>
-internal static class TableMocks
+internal static partial class TableMocks
 {
     private static int version;
 
@@ -163,19 +170,22 @@ internal sealed class LibraryHarness
     public ConcurrentDictionary<string, TableEntity> Activities { get; } = new();
     public ConcurrentDictionary<string, TableEntity> Events { get; } = new();
     public ConcurrentDictionary<string, TableEntity> EventMetrics { get; } = new();
-    public ConcurrentDictionary<string, CommentEntity> Comments { get; } = new();
+    /// <summary>
+    /// The whole <c>ActivityComments</c> table, keyed by partition and row key (<see cref="TableMocks.Key"/>):
+    /// the Comments (<see cref="CommentEntity"/> rows) and the old-text conversion's marker (a plain
+    /// row in its own partition) side by side, as storage keeps them. Read it through
+    /// <see cref="StoredComments"/>, <see cref="StoredComment"/> and <see cref="MarkerStored"/>.
+    /// </summary>
+    public ConcurrentDictionary<string, ITableEntity> CommentRows { get; } = new();
+
+    /// <summary>How many rows each query of the Comment table answered with, in order.</summary>
+    public List<int> CommentRowsRead { get; } = [];
 
     /// <summary>
     /// The <c>FeedbackLikes</c> table: one row per Like, PartitionKey the Event id. Keyed by RowKey
     /// alone, so give every seeded row its own RowKey.
     /// </summary>
     public ConcurrentDictionary<string, TableEntity> Likes { get; } = new();
-
-    /// <summary>
-    /// Rows of the <c>ActivityComments</c> table outside the Comment partition (the old-note
-    /// conversion's marker), keyed by <c>PartitionKey|RowKey</c>. A Comment query never sees them.
-    /// </summary>
-    public ConcurrentDictionary<string, TableEntity> CommentTableOtherRows { get; } = new();
 
     public Mock<TableClient> GameTable { get; }
     public Mock<TableClient> ThemeTable { get; }
@@ -212,38 +222,28 @@ internal sealed class LibraryHarness
         ActivityTable = TableMocks.Table(Activities);
         EventTable = TableMocks.Table(Events);
         EventMetricsTable = TableMocks.Table(EventMetrics);
-        CommentTable = TableMocks.FilteringTable(Comments);
+        CommentTable = TableMocks.PartitionedTable<CommentEntity>(CommentRows, CommentRowsRead.Add);
         LikesTable = TableMocks.FilteringTable(Likes);
         // A read of the whole table (no filter, the string overload) answers with every row.
         LikesTable.Setup(t => t.QueryAsync<TableEntity>(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(Likes.Values.ToList(), null, Mock.Of<Response>())]));
-        // Rows of other partitions in ActivityComments are read and inserted as plain TableEntity rows.
-        CommentTable.Setup(t => t.GetEntityAsync<TableEntity>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string partition, string row, IEnumerable<string> _, CancellationToken _) =>
-                CommentTableOtherRows.TryGetValue($"{partition}|{row}", out var found)
-                    ? Response.FromValue(found, Mock.Of<Response>())
-                    : throw new RequestFailedException(404, "The specified resource does not exist.", "ResourceNotFound", null));
-        CommentTable.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
-            .Returns((TableEntity row, CancellationToken _) => CommentTableOtherRows.TryAdd($"{row.PartitionKey}|{row.RowKey}", row)
-                ? Task.FromResult(TableMocks.Written())
-                : throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null));
 
         var service = new Mock<TableServiceClient>();
         service.Setup(s => s.GetTableClient("Games")).Returns(GameTable.Object);
         service.Setup(s => s.GetTableClient("Themes")).Returns(ThemeTable.Object);
         service.Setup(s => s.GetTableClient("Holidays")).Returns(HolidayTable.Object);
-        service.Setup(s => s.GetTableClient("Activities")).Returns(ActivityTable.Object);
+        service.Setup(s => s.GetTableClient(TableNames.Activities)).Returns(ActivityTable.Object);
         service.Setup(s => s.GetTableClient("Events")).Returns(EventTable.Object);
         service.Setup(s => s.GetTableClient("EventMetrics")).Returns(EventMetricsTable.Object);
-        service.Setup(s => s.GetTableClient("ActivityComments")).Returns(CommentTable.Object);
+        service.Setup(s => s.GetTableClient(TableNames.Comments)).Returns(CommentTable.Object);
         service.Setup(s => s.GetTableClient(FeedbackStore.LinksTable)).Returns(TableMocks.Table(new ConcurrentDictionary<string, TableEntity>()).Object);
         service.Setup(s => s.GetTableClient(FeedbackStore.LikesTable)).Returns(LikesTable.Object);
 
         var games = new TableStore<GameEntity>(service.Object, "Games", "Game");
-        var activities = new TableStore<ActivityEntity>(service.Object, "Activities", "Activity");
+        var activities = new TableStore<ActivityEntity>(service.Object, TableNames.Activities, TableNames.ActivityPartition);
         var events = new TableStore<EventEntity>(service.Object, "Events", "Event");
         var metrics = new TableStore<EventMetricsEntity>(service.Object, "EventMetrics", "Metrics");
-        var comments = new TableStore<CommentEntity>(service.Object, "ActivityComments", "Comment");
+        var comments = new TableStore<CommentEntity>(service.Object, TableNames.Comments, TableNames.CommentPartition);
         GameApi = new GameFunctions(games, activities, GameLog);
         ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, "Themes", "Theme"), activities, ThemeLog);
         HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), activities, HolidayLog);
@@ -258,6 +258,32 @@ internal sealed class LibraryHarness
     public int Writes() => new[] { GameTable, ThemeTable, HolidayTable, ActivityTable, EventTable, EventMetricsTable, CommentTable }
         .Sum(t => t.Invocations.Count(i => i.Method.Name is nameof(TableClient.UpsertEntityAsync) or nameof(TableClient.AddEntityAsync)
             or nameof(TableClient.UpdateEntityAsync)));
+
+    /// <summary>Every Comment row of the Comment table (never the marker).</summary>
+    public List<CommentEntity> StoredComments() => CommentRows.Values.OfType<CommentEntity>().ToList();
+
+    /// <summary>The stored Comment with that id, or null.</summary>
+    public CommentEntity? StoredComment(Guid id) =>
+        CommentRows.TryGetValue(TableMocks.Key(TableNames.CommentPartition, id.ToString("D")), out var row) ? row as CommentEntity : null;
+
+    /// <summary>Stores a Comment directly, in the Comment partition, as if the API had written it.</summary>
+    public void SeedComment(CommentEntity comment)
+    {
+        comment.PartitionKey = TableNames.CommentPartition;
+        CommentRows[TableMocks.Key(comment.PartitionKey, comment.RowKey)] = comment;
+    }
+
+    private static string MarkerKey => TableMocks.Key(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey);
+
+    /// <summary>Whether the old-text conversion's marker row is stored in the Comment table.</summary>
+    public bool MarkerStored() => CommentRows.ContainsKey(MarkerKey);
+
+    /// <summary>The stored marker row (fails when there is none).</summary>
+    public TableEntity Marker() => Assert.IsInstanceOfType<TableEntity>(CommentRows[MarkerKey]);
+
+    /// <summary>Stores the marker, as a deployment whose conversion finished earlier has it.</summary>
+    public void SeedMarker() =>
+        CommentRows[MarkerKey] = new TableEntity(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey);
 
     /// <summary>Stores a Game directly and returns it, for routes that need one to exist.</summary>
     public GameEntity SeedGame(string name = "Alpha")

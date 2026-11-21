@@ -44,8 +44,8 @@ public class ApiValidationRouteTests
         {
             ["Name"] = "Friday", ["Selections"] = "[]", ["UniqueGamesOnly"] = true,
         };
-        var comment = new CommentEntity { Id = Guid.NewGuid(), PartitionKey = "Comment", ActivityId = activityId, Text = "Keep me" };
-        h.Comments[comment.RowKey] = comment;
+        var comment = new CommentEntity { Id = Guid.NewGuid(), ActivityId = activityId, Text = "Keep me" };
+        h.SeedComment(comment);
 
         return route switch
         {
@@ -194,6 +194,9 @@ public class ApiValidationRouteTests
     [TestMethod]
     [DataRow("ftp://x")]
     [DataRow("javascript:alert(1)")]
+    [DataRow("JavaScript:alert(1)")]
+    [DataRow(" javascript:alert(1)")]
+    [DataRow("data:text/html,x")]
     [DataRow("example.com")]
     public async Task NonHttpWebsiteIs400OnCreateAndUpdateAndNothingIsStored(string website)
     {
@@ -206,7 +209,7 @@ public class ApiValidationRouteTests
         foreach (var result in new[] { create, update })
         {
             Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(result));
-            Assert.AreEqual("Website must be an http or https address.", ApiResults.Message(result));
+            Assert.AreEqual(ApiMessages.Website, ApiResults.Message(result));
         }
         Assert.AreEqual("https://alpha.test", Assert.ContainsSingle(h.Games).Value.Website);
         Assert.AreEqual(0, h.Writes());
@@ -257,7 +260,7 @@ public class ApiValidationRouteTests
         var unchanged = await h.GameApi.Update(TestRequests.Json(new { name = "Renamed", website = "example.com" }), old.Id, default);
         var fixedUp = await h.GameApi.Update(TestRequests.Json(new { name = "Renamed", website = "https://example.com" }), old.Id, default);
 
-        Assert.AreEqual("Website must be an http or https address.", ApiResults.Message(unchanged));
+        Assert.AreEqual(ApiMessages.Website, ApiResults.Message(unchanged));
         Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(fixedUp));
         Assert.AreEqual("https://example.com", h.Games[old.RowKey].Website);
         Assert.AreEqual("Renamed", h.Games[old.RowKey].Name);

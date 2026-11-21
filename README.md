@@ -106,6 +106,23 @@ dotnet test MW-GC.EventManager.Web.Tests/MW-GC.EventManager.Web.Tests.csproj
 
 Package restore requires access to NuGet or a populated local package cache.
 
+### Storage tests (Azurite)
+
+A few API tests run against real Table Storage instead of the in-memory tables
+(`ActivityNoteConversionAzuriteTests` and `StorageQueryAzuriteTests`). They are
+reported as skipped (inconclusive) unless `EM_AZURITE_CONNECTION` is set to an
+Azurite connection string, so the solution-wide `dotnet test` needs no emulator.
+Each test deletes the rows it seeded. When `EM_API_URL` also names a running API
+on the same Azurite (its base address, ending in `/api`), the conversion test
+reads the converted Comments back through that API too. A blank value of either
+variable counts as unset.
+
+```sh
+# Azurite running with its default ports, the API (optional) on 7071
+EM_AZURITE_CONNECTION=UseDevelopmentStorage=true EM_API_URL=http://localhost:7071/api \
+  dotnet test MW-GC.EventManager.Api.Tests/MW-GC.EventManager.Api.Tests.csproj
+```
+
 ### Browser tests (E2E)
 
 `MW-GC.EventManager.E2ETests` drives the running app in headless Chromium with

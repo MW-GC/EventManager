@@ -40,12 +40,6 @@ internal sealed class ActivityNoteConversion
     /// <summary>The marker's row key. A later conversion of the same table would use a new one.</summary>
     public const string MarkerRowKey = "activity-notes-v1";
 
-    private const string CommentTable = "ActivityComments";
-
-    // The table and partition the Activity TableStore uses (Program.cs).
-    private const string ActivityTable = "Activities";
-    private const string ActivityPartitionKey = "Activity";
-
     // The old stored column that held the Activity's single text.
     private const string OldTextColumn = "Comments";
 
@@ -71,10 +65,11 @@ internal sealed class ActivityNoteConversion
         _ = activities;
         _comments = comments;
         // The Activity rows are read raw: the old column is no longer part of ActivityEntity.
-        _activityTable = service.GetTableClient(ActivityTable);
+        // Same table names as the stores Program.cs registers (TableNames).
+        _activityTable = service.GetTableClient(TableNames.Activities);
         // The Comment store creates the table; the marker goes through the raw client because it
         // is not a Comment and does not live in the Comment partition.
-        _commentTable = service.GetTableClient(CommentTable);
+        _commentTable = service.GetTableClient(TableNames.Comments);
         _logger = logger;
     }
 
@@ -135,7 +130,7 @@ internal sealed class ActivityNoteConversion
         }
 
         var added = 0;
-        await foreach (var row in _activityTable.QueryAsync<TableEntity>(e => e.PartitionKey == ActivityPartitionKey, cancellationToken: ct))
+        await foreach (var row in _activityTable.QueryAsync<TableEntity>(e => e.PartitionKey == TableNames.ActivityPartition, cancellationToken: ct))
         {
             // Only a string in the old column is a text to convert; a missing column or another type is skipped.
             if (!row.TryGetValue(OldTextColumn, out var value) || value is not string text) continue;

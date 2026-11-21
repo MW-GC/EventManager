@@ -4,6 +4,7 @@ using Azure.Data.Tables;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
+using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 
@@ -73,18 +74,17 @@ public class CommentApiTests
     {
         var comment = new CommentEntity
         {
-            Id = id ?? Guid.NewGuid(), PartitionKey = "Comment", ActivityId = activityId, Text = text,
+            Id = id ?? Guid.NewGuid(), ActivityId = activityId, Text = text,
             CreatedUtc = createdUtc, ETag = TableMocks.NextETag(),
         };
-        h.Comments[comment.RowKey] = comment;
+        h.SeedComment(comment);
         return comment;
     }
 
     private async Task<List<CommentEntity>> List(Guid activityId) =>
         ApiResults.Value<List<CommentEntity>>(await h.CommentApi.List(Bare(), activityId, default));
 
-    private CommentEntity? Stored(Guid commentId) =>
-        h.Comments.TryGetValue(commentId.ToString("D"), out var comment) ? comment : null;
+    private CommentEntity? Stored(Guid commentId) => h.StoredComment(commentId);
 
     private static int Calls(Mock<TableClient> table, string method) => table.Invocations.Count(i => i.Method.Name == method);
 
@@ -116,7 +116,7 @@ public class CommentApiTests
 
         var stored = Stored(comment.Id);
         Assert.IsNotNull(stored, "The Comment is a row of the ActivityComments table.");
-        Assert.AreEqual("Comment", stored.PartitionKey);
+        Assert.AreEqual(TableNames.CommentPartition, stored.PartitionKey);
         Assert.AreEqual("Ran long, cut the second round", stored.Text);
         // The Activity row and its old Comments field are not touched.
         Assert.IsNull(h.Activities[activityId.ToString("D")].GetString("Comments"));
@@ -150,7 +150,7 @@ public class CommentApiTests
         var result = await h.CommentApi.Add(Request(new { text = "Orphan" }), Guid.NewGuid(), default);
 
         Assert.IsExactInstanceOfType<NotFoundResult>(result);
-        Assert.IsEmpty(h.Comments);
+        Assert.IsEmpty(h.StoredComments());
         Assert.AreEqual(0, h.Writes());
     }
 
@@ -163,7 +163,7 @@ public class CommentApiTests
 
         Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(result));
         Assert.AreEqual(EventNotFound, ApiResults.Message(result));
-        Assert.IsEmpty(h.Comments);
+        Assert.IsEmpty(h.StoredComments());
         Assert.AreEqual(0, CommentWrites());
     }
 
@@ -186,7 +186,7 @@ public class CommentApiTests
         Assert.AreEqual(TextRequired, ApiResults.Message(add));
         Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(edit));
         Assert.AreEqual(TextRequired, ApiResults.Message(edit));
-        Assert.ContainsSingle(h.Comments);
+        Assert.ContainsSingle(h.StoredComments());
         Assert.AreEqual("Keep me", Stored(comment.Id)!.Text);
         Assert.AreEqual(1, CommentWrites());
     }
@@ -207,7 +207,7 @@ public class CommentApiTests
         var add = await h.CommentApi.Add(Request(new { text = over }), activityId, default);
         Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(add));
         Assert.AreEqual(TextTooLong, ApiResults.Message(add));
-        Assert.AreEqual(2, h.Comments.Count);
+        Assert.HasCount(2, h.StoredComments());
 
         var edit = await h.CommentApi.Update(Request(new { text = over }), activityId, comment.Id, default);
         Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(edit));
@@ -235,7 +235,7 @@ public class CommentApiTests
         Assert.AreEqual(message, ApiResults.Message(add));
         Assert.AreEqual(status, ApiResults.Status(edit));
         Assert.AreEqual(message, ApiResults.Message(edit));
-        Assert.AreEqual("Keep me", Assert.ContainsSingle(h.Comments).Value.Text);
+        Assert.AreEqual("Keep me", Assert.ContainsSingle(h.StoredComments()).Text);
         Assert.AreEqual(1, CommentWrites());
     }
 
@@ -277,27 +277,18 @@ public class CommentApiTests
         var (b, _) = await CreateActivity("B");
         var (mine, _) = await AddComment(a, "Mine");
         var (theirs, _) = await AddComment(b, "Theirs");
-        var mineRow = Stored(mine.Id)!;
-        var theirsRow = Stored(theirs.Id)!;
+        Seed(b, "Theirs too", DateTimeOffset.UtcNow);
 
         Assert.AreEqual(mine.Id, Assert.ContainsSingle(await List(a)).Id);
         Assert.IsExactInstanceOfType<NoContentResult>(await h.ActivityApi.Delete(Bare(aTag), a, default));
 
-        // The list and the Activity delete each sent the ActivityId filter to the table, so B's
-        // row was never read for A.
-        var filters = h.CommentTable.Invocations
-            .Where(i => i.Method.Name == nameof(TableClient.QueryAsync))
-            .Select(i => Assert.IsInstanceOfType<Expression<Func<CommentEntity, bool>>>(i.Arguments[0]).Compile())
-            .ToList();
-        Assert.AreEqual(2, filters.Count);
-        foreach (var filter in filters)
-        {
-            Assert.IsTrue(filter(mineRow), "The query must match A's Comment.");
-            Assert.IsFalse(filter(theirsRow), "The query must exclude B's Comment.");
-        }
-
+        // The list and the Activity delete each sent the ActivityId filter to the table, so the table
+        // answered each query with A's one Comment and never with B's two. (The in-memory table
+        // evaluates the query it is sent; Azurite checks the same in StorageQueryAzuriteTests.)
+        CollectionAssert.AreEqual(new[] { 1, 1 }, h.CommentRowsRead);
         Assert.IsNull(Stored(mine.Id));
         Assert.IsNotNull(Stored(theirs.Id));
+        Assert.HasCount(2, await List(b));
     }
 
     // ---- edit
@@ -343,7 +334,7 @@ public class CommentApiTests
         Assert.IsExactInstanceOfType<NotFoundResult>(wrongActivity);
         Assert.IsExactInstanceOfType<NotFoundResult>(missing);
         Assert.AreEqual("Mine", Stored(comment.Id)!.Text);
-        Assert.ContainsSingle(h.Comments);
+        Assert.ContainsSingle(h.StoredComments());
         Assert.AreEqual(1, CommentWrites());
     }
 
@@ -448,7 +439,7 @@ public class CommentApiTests
         Assert.IsExactInstanceOfType<NoContentResult>(await h.ActivityApi.Delete(Bare(doomedTag), doomed, default));
 
         Assert.IsFalse(h.Activities.ContainsKey(doomed.ToString("D")));
-        Assert.AreEqual(kept.Id, Assert.ContainsSingle(h.Comments).Value.Id);
+        Assert.AreEqual(kept.Id, Assert.ContainsSingle(h.StoredComments()).Id);
         Assert.IsExactInstanceOfType<NotFoundResult>(await h.CommentApi.List(Bare(), doomed, default));
     }
 
@@ -464,7 +455,7 @@ public class CommentApiTests
 
         Assert.IsExactInstanceOfType<NoContentResult>(await h.ActivityApi.Delete(Bare(), gone, default));
 
-        Assert.AreEqual(kept.Id, Assert.ContainsSingle(h.Comments).Value.Id);
+        Assert.AreEqual(kept.Id, Assert.ContainsSingle(h.StoredComments()).Id);
     }
 
     [TestMethod]
@@ -528,6 +519,6 @@ public class CommentApiTests
 
         Assert.IsEmpty(await List(copy.Id));
         Assert.ContainsSingle(await List(activityId));
-        Assert.ContainsSingle(h.Comments);
+        Assert.ContainsSingle(h.StoredComments());
     }
 }
