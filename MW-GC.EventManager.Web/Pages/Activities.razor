@@ -264,7 +264,7 @@
     private bool ByGame(ActivityEntity a) => _filterGame is null || a.GameId == _filterGame.Id;
 
     private string GameName(Guid gameId) =>
-        _games?.FirstOrDefault(g => g.Id == gameId)?.Name ?? "—";
+        _games?.FirstOrDefault(g => g.Id == gameId)?.Name ?? PlayStats.NoValue;
 
     private string ThemeName(Guid id) => _themes?.FirstOrDefault(t => t.Id == id)?.Name ?? id.ToString()[..8];
     private string HolidayName(Guid id) => _holidays?.FirstOrDefault(h => h.Id == id)?.Name ?? id.ToString()[..8];

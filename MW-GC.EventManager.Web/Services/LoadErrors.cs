@@ -26,14 +26,21 @@ public sealed class LoadErrors
     /// cleared; on failure the error is recorded and <paramref name="apply"/> is not called. Never throws
     /// for an API failure.
     /// </summary>
-    public async Task LoadAsync<T>(string name, Func<Task<T?>> load, Action<T?> apply)
+    public Task LoadAsync<T>(string name, Func<Task<T?>> load, Action<T?> apply) =>
+        LoadResultAsync(name, () => ApiResult.LoadAsync(load), apply);
+
+    /// <summary>
+    /// Loads one list through a call that returns its failure message instead of throwing (such as
+    /// <see cref="EventMetricsClient.LoadAllAsync"/>); otherwise the same as <see cref="LoadAsync{T}"/>.
+    /// </summary>
+    public async Task LoadResultAsync<T>(string name, Func<Task<(T? Value, string? Error)>> load, Action<T?> apply)
     {
         // Register before awaiting so the message names lists in the order the page asked for them.
         lock (_gate)
         {
             if (!_lists.Any(l => l.Name == name)) _lists.Add((name, null));
         }
-        var (value, error) = await ApiResult.LoadAsync(load);
+        var (value, error) = await load();
         lock (_gate)
         {
             var index = _lists.FindIndex(l => l.Name == name);

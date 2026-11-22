@@ -6,7 +6,7 @@ using MW_GC.EventManager.Web.Services;
 namespace MW_GC.EventManager.Web.Tests;
 
 // #177 items 3 and 6: the list read of every Event's metrics returns a result, like the single read and the
-// save, and never throws for an API failure. (GetAllAsync, which throws, stays for its two callers until they move.)
+// save, and never throws for an API failure. It is the only list read of the metrics; the throwing one is gone.
 [TestClass]
 public sealed class EventMetricsClientTests
 {
