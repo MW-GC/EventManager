@@ -258,9 +258,17 @@ public class ApiValidationRouteTests
         old.Website = "example.com";
 
         var unchanged = await h.GameApi.Update(TestRequests.Json(new { name = "Renamed", website = "example.com" }), old.Id, default);
+
+        Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(unchanged));
+        Assert.AreEqual(ApiMessages.Website, ApiResults.Message(unchanged));
+        Assert.AreEqual(0, h.Writes());
+        // Nothing was written: the stored Game, read back through the GET route, keeps its old name and Website.
+        var stored = ApiResults.Value<GameEntity>(await h.GameApi.Get(TestRequests.Empty(), old.Id, default));
+        Assert.AreEqual("Old", stored.Name);
+        Assert.AreEqual("example.com", stored.Website);
+
         var fixedUp = await h.GameApi.Update(TestRequests.Json(new { name = "Renamed", website = "https://example.com" }), old.Id, default);
 
-        Assert.AreEqual(ApiMessages.Website, ApiResults.Message(unchanged));
         Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(fixedUp));
         Assert.AreEqual("https://example.com", h.Games[old.RowKey].Website);
         Assert.AreEqual("Renamed", h.Games[old.RowKey].Name);

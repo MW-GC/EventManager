@@ -133,11 +133,8 @@ public sealed class ThemesHolidaysPageTests : IDisposable
         var card = page.FindAll("fluent-card").Last(c => c.QuerySelector("fluent-button") is not null && c.TextContent.Contains(item));
         // The card's first icon is the page's own: the palette for Themes, the calendar star for Holidays.
         var drawn = card.QuerySelector("svg path")!.GetAttribute("d");
-        var (own, other) = route == "themes"
-            ? (PathOf(new Size24.Color()), PathOf(new Size24.CalendarStar()))
-            : (PathOf(new Size24.CalendarStar()), PathOf(new Size24.Color()));
+        var own = route == "themes" ? PathOf(new Size24.Color()) : PathOf(new Size24.CalendarStar());
         Assert.AreEqual(own, drawn);
-        Assert.AreNotEqual(other, drawn);
     }
 
     // The outline an icon draws: the d attribute of its one path.

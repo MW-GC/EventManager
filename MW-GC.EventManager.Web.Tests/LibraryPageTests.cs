@@ -529,7 +529,6 @@ public sealed class LibraryPageTests : IDisposable
     public async Task GamesAdd_WebsiteLength_IsTheApis2048Limit_WithItsMessage(int length, string? expected)
     {
         var website = "https://x.test/" + new string('u', length - "https://x.test/".Length);
-        Assert.AreEqual(length, website.Length);
         var page = Games();
         api.Status(HttpMethod.Post, "/api/games", HttpStatusCode.Created);
         await page.Button("Add Game").ClickAsync(new());
