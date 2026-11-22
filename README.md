@@ -117,6 +117,11 @@ on the same Azurite (its base address, ending in `/api`), the conversion test
 reads the converted Comments back through that API too. A blank value of either
 variable counts as unset.
 
+Point `EM_AZURITE_CONNECTION` only at a throwaway local Azurite, never at shared
+or production storage. The conversion tests delete the conversion's marker and
+run the conversion over that storage, which turns the old text of every Activity
+row there into a Comment, not only the rows the tests seeded.
+
 ```sh
 # Azurite running with its default ports, the API (optional) on 7071
 EM_AZURITE_CONNECTION=UseDevelopmentStorage=true EM_API_URL=http://localhost:7071/api \
