@@ -6,7 +6,7 @@
    instead of numbers. *@
 @using static MW_GC.EventManager.Web.Services.PerformanceFormat
 @inject EventService EventSvc
-@inject GameService GameSvc
+@inject LibraryClient<GameEntity> GameClient
 @inject LibraryClient<ActivityEntity> ActivityClient
 @inject EventMetricsClient MetricsClient
 
@@ -73,7 +73,7 @@
         {
             await Task.WhenAll(
                 read("Events") ? _loads.LoadAsync("Events", Events ?? EventSvc.GetAllAsync, v => _events = v ?? []) : Task.CompletedTask,
-                read("Games") ? _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []) : Task.CompletedTask,
+                read("Games") ? _loads.LoadAsync("Games", GameClient.GetAllAsync, v => _games = v ?? []) : Task.CompletedTask,
                 read("Activities") ? _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []) : Task.CompletedTask,
                 read("Event metrics")
                     ? _loads.LoadResultAsync("Event metrics", async () => (await MetricsClient.LoadAllAsync()).ItemsOrError(), v => _metrics = v ?? [])

@@ -1,6 +1,9 @@
+using System.Net;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
+using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
@@ -110,7 +113,7 @@ public sealed class ThemesHolidaysPageTests : IDisposable
         Assert.IsFalse(page.HasConfirmation());
         Assert.IsEmpty(Writes());
 
-        api.Status(HttpMethod.Delete, $"/api/{route}/{id}", System.Net.HttpStatusCode.NoContent);
+        api.Status(HttpMethod.Delete, $"/api/{route}/{id}", HttpStatusCode.NoContent);
         await CardButton(page, item, "Delete").ClickAsync(new());
         await page.ConfirmAsync();
         var delete = Assert.ContainsSingle(Writes());
@@ -118,28 +121,27 @@ public sealed class ThemesHolidaysPageTests : IDisposable
         Assert.IsEmpty(page.PageAlerts());
     }
 
-    // Each page's own look on the shared page (#171): its subtitle under the heading, and its own icon on every card.
+    // Each page's own look on the shared page (#171): its title and subtitle under the heading, and its own icon on
+    // every card (the palette for Themes, the calendar star for Holidays), each given in its row (#196.9).
     [TestMethod]
-    [DataRow("themes", "Manage activity themes for event filtering", "Spooky")]
-    [DataRow("holidays", "Manage holiday tags for activity categorization", "Halloween")]
-    public async Task Page_ShowsItsSubtitle_AndItsCardIcon(string route, string subtitle, string item)
+    [DataRow("themes", "Themes", "Manage activity themes for event filtering", "Spooky", typeof(Size24.Color))]
+    [DataRow("holidays", "Holidays", "Manage holiday tags for activity categorization", "Halloween", typeof(Size24.CalendarStar))]
+    public async Task Page_ShowsItsSubtitle_AndItsCardIcon(string route, string title, string subtitle, string item, Type icon)
     {
         var page = Open(route);
         var heading = page.Find("h1.page-title");
-        Assert.AreEqual(route == "themes" ? "Themes" : "Holidays", heading.TextContent.Trim());
+        Assert.AreEqual(title, heading.TextContent.Trim());
         Assert.AreEqual(subtitle, heading.NextElementSibling!.TextContent.Trim());
 
         await page.Find("fluent-button[title='Card view']").ClickAsync(new());
         var card = page.FindAll("fluent-card").Last(c => c.QuerySelector("fluent-button") is not null && c.TextContent.Contains(item));
-        // The card's first icon is the page's own: the palette for Themes, the calendar star for Holidays.
+        // The card's first icon is the page's own.
         var drawn = card.QuerySelector("svg path")!.GetAttribute("d");
-        var own = route == "themes" ? PathOf(new Size24.Color()) : PathOf(new Size24.CalendarStar());
-        Assert.AreEqual(own, drawn);
+        Assert.AreEqual(PathOf((Icon)Activator.CreateInstance(icon)!), drawn);
     }
 
     // The outline an icon draws: the d attribute of its one path.
-    private static string PathOf(Microsoft.FluentUI.AspNetCore.Components.Icon icon) =>
-        System.Text.RegularExpressions.Regex.Match(icon.Content, "d=\"([^\"]+)\"").Groups[1].Value;
+    private static string PathOf(Icon icon) => Regex.Match(icon.Content, "d=\"([^\"]+)\"").Groups[1].Value;
 
     // ---- Helpers -------------------------------------------------------------------------------
 

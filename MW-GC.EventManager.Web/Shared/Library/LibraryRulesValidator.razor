@@ -3,7 +3,7 @@
    that field again, so a message goes once the field is fixed, and a field that breaks a rule is flagged as soon
    as it is touched; other fields' messages stay as they were. Nothing is checked when the editor opens, so a
    value stored before a rule existed is flagged only once it is touched or saved. Each message shows through a
-   LibraryFieldMessage with the same field name. *@
+   LibraryFieldMessage for the same LibraryField. *@
 @implements IDisposable
 
 @code {
@@ -29,12 +29,10 @@
 
     private IEnumerable<LibraryFieldError> Errors() => Rules?.Invoke() ?? [];
 
-    private FieldIdentifier FieldOf(LibraryFieldError error) => new(_context!.Model, error.Field);
-
     private void Requested(object? sender, ValidationRequestedEventArgs e)
     {
         _store!.Clear();
-        foreach (var error in Errors()) _store.Add(FieldOf(error), error.Message);
+        foreach (var error in Errors()) _store.Add(error.Field.On(_context!.Model), error.Message);
         _context!.NotifyValidationStateChanged();
     }
 
@@ -42,7 +40,7 @@
     {
         if (!ReferenceEquals(e.FieldIdentifier.Model, _context!.Model)) return;
         _store!.Clear(e.FieldIdentifier);
-        foreach (var error in Errors().Where(error => error.Field == e.FieldIdentifier.FieldName))
+        foreach (var error in Errors().Where(error => error.Field.Property == e.FieldIdentifier.FieldName))
             _store.Add(e.FieldIdentifier, error.Message);
         _context.NotifyValidationStateChanged();
     }

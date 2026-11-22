@@ -1,12 +1,15 @@
 @* The editor's messages for one field of the item in the form, shown where this sits (under that field). The
    name rule and a page's own Rules (LibraryRulesValidator) both show their messages through it. The messages sit
-   in an element with a fixed id (IdFor), which the field names in aria-describedby (LibraryEdit.FieldAttributes). *@
-@implements IDisposable
+   in an element with the field's MessageId, which the field names in aria-describedby (LibraryEdit.FieldAttributes).
+   A Fluent text field copies that attribute into its shadow root, where the id cannot be found, so once drawn this
+   also links the field's inner input to the messages through the collocated module (#196.2). *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
 
-<div id="@IdFor(Field)">
+<div id="@Field.MessageId">
     @if (_context is not null)
     {
-        @foreach (var message in _context.GetValidationMessages(new FieldIdentifier(_context.Model, Field)))
+        @foreach (var message in _context.GetValidationMessages(Field.On(_context.Model)))
         {
             <div role="alert" class="validation-message" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@message</div>
         }
@@ -14,15 +17,16 @@
 </div>
 
 @code {
+    /// <summary>The module's path, as the app serves its collocated script.</summary>
+    public const string Module = "./Shared/Library/LibraryFieldMessage.razor.js";
+
     [CascadingParameter] private EditContext? CurrentEditContext { get; set; }
 
-    /// <summary>The property name on the form's item, such as nameof(GameEntity.Website).</summary>
-    [Parameter, EditorRequired] public string Field { get; set; } = string.Empty;
-
-    /// <summary>The id of the element that holds a field's messages; one editor is open at a time.</summary>
-    public static string IdFor(string field) => $"library-field-{field}-message";
+    /// <summary>The field whose messages this shows, the same key the field's rule and attributes use.</summary>
+    [Parameter, EditorRequired] public LibraryField Field { get; set; } = default!;
 
     private EditContext? _context;
+    private IJSObjectReference? _module;
 
     protected override void OnParametersSet()
     {
@@ -34,6 +38,20 @@
         _context.OnValidationStateChanged += StateChanged;
     }
 
+    // The link is a nicety for assistive technology, as focus return is: a missing JS runtime never fails the form.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", Module);
+            await _module.InvokeVoidAsync("link", Field.MessageId);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
+        {
+        }
+    }
+
     private void StateChanged(object? sender, ValidationStateChangedEventArgs e) => StateHasChanged();
 
     private void Detach()
@@ -41,5 +59,11 @@
         if (_context is not null) _context.OnValidationStateChanged -= StateChanged;
     }
 
-    public void Dispose() => Detach();
+    public async ValueTask DisposeAsync()
+    {
+        Detach();
+        if (_module is null) return;
+        try { await _module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+    }
 }

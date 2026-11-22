@@ -1,0 +1,33 @@
+@* An item's own Edit or Delete, wherever the item shows (a table row, the icon card, the Games card): Edit is
+   disabled while this item's row action runs, Delete while any row's runs, and each carries the focus key its
+   dialog returns to. Icon-only by default, titled and named with the item; Labelled shows the word with the icon. *@
+@typeparam T where T : EntityBase
+@using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+
+@if (Labelled)
+{
+    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" data-focus-key="@Key" Disabled="@Disabled" OnClick="@OnClick"
+                  IconStart="@Icon">@Word</FluentButton>
+}
+else
+{
+    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="@Word" aria-label="@($"{Word} {Item.Name}")"
+                  data-focus-key="@Key" Disabled="@Disabled" OnClick="@OnClick">
+        <FluentIcon Value="@Icon" />
+    </FluentButton>
+}
+
+@code {
+    [Parameter, EditorRequired] public LibraryItem<T> Item { get; set; } = default!;
+    [Parameter, EditorRequired] public LibraryItemAction Action { get; set; }
+    /// <summary>Shows the word (Edit, Delete) next to the icon, as the Games card does; the word is then its name.</summary>
+    [Parameter] public bool Labelled { get; set; }
+
+    private bool IsEdit => Action == LibraryItemAction.Edit;
+    private string Word => IsEdit ? "Edit" : "Delete";
+    private Icon Icon => IsEdit ? new Size16.Edit() : new Size16.Delete();
+    private string Key => IsEdit ? Item.EditKey : Item.DeleteKey;
+    // Edit waits only for its own item's action; Delete for any row's.
+    private bool Disabled => IsEdit ? Item.Busy : Item.AnyBusy;
+    private EventCallback<MouseEventArgs> OnClick => IsEdit ? Item.Edit : Item.Delete;
+}

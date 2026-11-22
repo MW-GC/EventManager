@@ -48,7 +48,7 @@ public static class LibraryRules
 }
 
 /// <summary>
-/// One failed field rule from a page's <see cref="LibraryPage{TItem}.Rules"/>: the item's property name, such as
-/// nameof(GameEntity.Website), and the message shown under that field by a <c>LibraryFieldMessage</c>.
+/// One failed field rule from a page's <see cref="LibraryPage{TItem}.Rules"/>: the field, and the message shown
+/// under it by that field's <c>LibraryFieldMessage</c>.
 /// </summary>
-public sealed record LibraryFieldError(string Field, string Message);
+public sealed record LibraryFieldError(LibraryField Field, string Message);

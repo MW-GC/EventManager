@@ -1,7 +1,5 @@
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Web;
 using MW_GC.EventManager.Web.Services;
 
@@ -10,24 +8,7 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 var apiBase = builder.Configuration["ApiBaseUrl"] ?? builder.HostEnvironment.BaseAddress;
-// A stalled API call ends with a message after 30 seconds instead of a spinner that never stops.
-// An API call that finds the session expired sends the user to sign in (SessionExpiredHandler).
-builder.Services.AddScoped(sp => new HttpClient(
-    new SessionExpiredHandler(sp.GetRequiredService<NavigationManager>()) { InnerHandler = new HttpClientHandler() })
-{
-    BaseAddress = new Uri(apiBase),
-    Timeout = TimeSpan.FromSeconds(30)
-});
-
-builder.Services.AddFluentUIComponents();
-
-builder.Services.AddScoped<GameService>();
-// Games, Activities, Themes and Holidays: one LibraryClient each (ServiceRouteContractTests checks the routes).
-builder.Services.AddLibraryClients();
-builder.Services.AddScoped<ActivityService>();
-builder.Services.AddScoped<EventService>();
-builder.Services.AddScoped<EventMetricsClient>();
-builder.Services.AddScoped<CommentClient>();
-builder.Services.AddScoped<FocusReturn>();
+// Every registration lives in AppServices, where a test builds the same services (LibraryClientTests).
+builder.Services.AddAppServices(apiBase);
 
 await builder.Build().RunAsync();

@@ -5,10 +5,12 @@
 @* The shared Library page does the loading, search, dialogs, busy guard, delete confirmation and the card; this
    page adds what is Holidays-only: its subtitle, its card icon, and the Edit dialog's "Save". *@
 <LibraryPage TItem="HolidayEntity" Title="Holidays" Subtitle="Manage holiday tags for activity categorization" Singular="Holiday"
-             Client="@HolidayClient" Name="@(h => h.Name)" SetName="@((h, name) => h.Name = name)" NewItem="NewHoliday" CopyItem="CopyHoliday"
+             Client="@HolidayClient" Name="HolidayName" NewItem="NewHoliday" CopyItem="CopyHoliday"
              SaveText="Save" CardIcon="@(new Size24.CalendarStar())" />
 
 @code {
+    private static readonly LibraryName<HolidayEntity> HolidayName = new(h => h.Name, (h, name) => h.Name = name);
+
     private static HolidayEntity NewHoliday() => new() { Name = string.Empty };
 
     private static HolidayEntity CopyHoliday(HolidayEntity h) => new() { Id = h.Id, Name = h.Name };

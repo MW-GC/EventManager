@@ -195,9 +195,9 @@ public class ApiResultTests
     {
         // A real service load through a stub handler: the non-success status reaches the page as a message.
         using var http = new HttpClient(new StatusHandler(HttpStatusCode.InternalServerError)) { BaseAddress = new Uri("https://example.test/") };
-        var service = new GameService(http);
-        var (games, error) = await ApiResult.LoadAsync(service.GetAllAsync);
-        Assert.IsNull(games);
+        var service = new EventService(http);
+        var (events, error) = await ApiResult.LoadAsync(service.GetAllAsync);
+        Assert.IsNull(events);
         Assert.AreEqual("The server had a problem (HTTP 500). Try again.", error);
     }
 
