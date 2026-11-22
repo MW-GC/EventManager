@@ -164,7 +164,7 @@ public sealed class ActivitiesPageTests : IDisposable
         Assert.AreEqual("Game is required.", LibraryRules.GameMessage(Guid.Empty));
     }
 
-    // The details dialog and its Comments panel are covered in ActivityCommentsPanelTests (#131).
+    // The details dialog and its Comments panel are covered in CommentsPanelTests (#131) and ActivityDetailsDialogTests.
 
     // ---- Search, the Game filter and the view --------------------------------------------------
 

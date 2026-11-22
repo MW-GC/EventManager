@@ -47,6 +47,8 @@
 @code {
     // The Activity whose performance this panel shows.
     [Parameter] public Guid ActivityId { get; set; }
+    // The Events list as the dialog reads it once for all its panels (#186); null reads it here.
+    [Parameter] public Func<Task<List<EventEntity>?>>? Events { get; set; }
 
     private readonly LoadErrors _loads = new();
     private List<EventEntity>? _events;
@@ -70,7 +72,7 @@
         try
         {
             await Task.WhenAll(
-                read("Events") ? _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []) : Task.CompletedTask,
+                read("Events") ? _loads.LoadAsync("Events", Events ?? EventSvc.GetAllAsync, v => _events = v ?? []) : Task.CompletedTask,
                 read("Games") ? _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []) : Task.CompletedTask,
                 read("Activities") ? _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []) : Task.CompletedTask,
                 read("Event metrics")

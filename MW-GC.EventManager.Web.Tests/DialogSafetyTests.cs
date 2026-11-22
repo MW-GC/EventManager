@@ -520,7 +520,7 @@ public sealed class DialogSafetyTests : IDisposable
 
         await RowButton(page, "Old party", "Details").ClickAsync(new());
 
-        var panel = () => page.FormDialog().QuerySelector(".activity-comments")!;
+        var panel = () => page.FormDialog().QuerySelector(".comments")!;
         page.WaitForAssertion(() => Assert.Contains("Comments could not be loaded. Not found. It may have been deleted.", panel().TextContent));
         Assert.AreEqual(1, api.Count(HttpMethod.Get, $"/api/activities/{retired.Id}/comments"));
         Assert.IsEmpty(page.FormDialog().QuerySelectorAll("fluent-text-area").ToList());

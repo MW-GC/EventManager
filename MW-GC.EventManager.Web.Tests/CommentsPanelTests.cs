@@ -8,6 +8,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
+using static MW_GC.EventManager.Web.Tests.CommentsPanelView;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -17,7 +18,7 @@ namespace MW_GC.EventManager.Web.Tests;
 // (ADR 0001): an edit or delete sends that Comment's tag as If-Match, so two Comments never conflict, and a
 // stale tag on one Comment shows the stale-edit message beside it with Reload.
 [TestClass]
-public sealed class ActivityCommentsPanelTests : IDisposable
+public sealed class CommentsPanelTests : IDisposable
 {
     // Azure Table Storage tags are weak and carry quotes; they must reach If-Match as read.
     private const string TagA = "W/\"datetime'2026-11-20T10%3A00%3A00.0000000Z'\"";
@@ -36,17 +37,16 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     private readonly GameEntity kart = new() { Name = "Kart" };
     private readonly ActivityEntity race;
     private readonly string listPath;
-    // Noon UTC, so the local date is the same day in every time zone the tests may run in.
-    private readonly Stored a = new(Guid.NewGuid(), "Ran long", new DateTimeOffset(2025, 3, 14, 12, 0, 0, TimeSpan.Zero), TagA);
-    private readonly Stored b = new(Guid.NewGuid(), "Crowd favourite", new DateTimeOffset(2025, 6, 1, 12, 0, 0, TimeSpan.Zero), TagB);
+    // Added at noon local time and sent in UTC, as the API sends it. The panel shows local time, so the date and
+    // time that name each Comment's buttons are these literals in every time zone.
+    private readonly Stored a = new(Guid.NewGuid(), "Ran long", AddedAtLocal(2025, 3, 14, 12, 0), TagA);
+    private readonly Stored b = new(Guid.NewGuid(), "Crowd favourite", AddedAtLocal(2025, 6, 1, 12, 0), TagB);
+    private const string AAdded = "2025-03-14 12:00";
+    private const string BAdded = "2025-06-01 12:00";
 
-    private sealed record Stored(Guid Id, string Text, DateTimeOffset Added, string Tag)
-    {
-        // The local short date the panel shows (the card's "CreatedUtc as a local short date").
-        public string Date => Added.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
-    }
+    private sealed record Stored(Guid Id, string Text, DateTimeOffset Added, string Tag);
 
-    public ActivityCommentsPanelTests()
+    public CommentsPanelTests()
     {
         race = new ActivityEntity { Name = "Race", GameId = kart.Id, Description = "Three laps" };
         listPath = $"/api/activities/{race.Id}/comments";
@@ -61,7 +61,14 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         harness = new PageHarness(api);
     }
 
-    public void Dispose() => harness.Dispose();
+    // Some tests pin the culture of the shown date; the next test gets the one it started with.
+    private readonly CultureInfo culture = CultureInfo.CurrentCulture;
+
+    public void Dispose()
+    {
+        CultureInfo.CurrentCulture = culture;
+        harness.Dispose();
+    }
 
     // ---- The list ------------------------------------------------------------------------------
 
@@ -74,7 +81,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         Assert.AreEqual("Race", dialog.GetAttribute("aria-label"));
         Assert.Contains("Kart", dialog.TextContent);
         Assert.Contains("Three laps", dialog.TextContent);
-        // The panel reads the Comments rows; the old single-text editor is gone.
+        // The panel reads the Comments rows; the editor of the old text is gone.
         CollectionAssert.AreEqual(new[] { a.Text, b.Text }, Texts(page));
         Assert.DoesNotContain("Event Manager Comments", dialog.TextContent);
         Assert.IsEmpty(dialog.QuerySelectorAll("fluent-button").Where(x => x.TextContent.Trim() == "Save Comments").ToList());
@@ -86,6 +93,8 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     [TestMethod]
     public async Task TheListShowsDatesAndTextInApiOrder_WithLineBreaksKept()
     {
+        // The shown date is the current culture's short date; the invariant culture writes it MM/dd/yyyy.
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         // The API answers oldest first; the panel keeps whatever order it gets and never sorts again.
         var multiLine = a with { Text = "Ran long\nCut the second round" };
         List(b, multiLine);
@@ -93,14 +102,15 @@ public sealed class ActivityCommentsPanelTests : IDisposable
 
         CollectionAssert.AreEqual(new[] { b.Text, "Ran long\nCut the second round" }, Texts(page));
         var times = Items(page).Select(i => i.QuerySelector("time")!).ToList();
-        CollectionAssert.AreEqual(new[] { "2025-06-01T12:00:00Z", "2025-03-14T12:00:00Z" }, times.Select(t => t.GetAttribute("datetime")).ToList());
-        CollectionAssert.AreEqual(new[] { b.Date, a.Date }, times.Select(t => t.TextContent.Trim()).ToList());
-        Assert.AreNotEqual(a.Date, b.Date);
+        // The datetime attribute is the instant in UTC, whatever the local zone.
+        Assert.IsTrue(times.All(t => t.GetAttribute("datetime")!.EndsWith('Z')), "datetime in UTC");
+        CollectionAssert.AreEqual(new[] { b.Added, a.Added }, times.Select(t => DateTimeOffset.Parse(t.GetAttribute("datetime")!, CultureInfo.InvariantCulture)).ToList());
+        CollectionAssert.AreEqual(new[] { "06/01/2025", "03/14/2025" }, times.Select(t => t.TextContent.Trim()).ToList());
         Assert.Contains("white-space: pre-wrap", Items(page)[1].QuerySelector(".comment-text")!.GetAttribute("style")!);
-        Assert.IsNotNull(Btn(page, $"Edit Comment from {a.Date}"));
-        Assert.IsNotNull(Btn(page, $"Delete Comment from {a.Date}"));
-        Assert.IsNotNull(Btn(page, $"Edit Comment from {b.Date}"));
-        Assert.IsNotNull(Btn(page, $"Delete Comment from {b.Date}"));
+        Assert.IsNotNull(ButtonNamed(page, $"Edit Comment from {AAdded}"));
+        Assert.IsNotNull(ButtonNamed(page, $"Delete Comment from {AAdded}"));
+        Assert.IsNotNull(ButtonNamed(page, $"Edit Comment from {BAdded}"));
+        Assert.IsNotNull(ButtonNamed(page, $"Delete Comment from {BAdded}"));
         Assert.DoesNotContain("No Comments yet.", page.FormDialog().TextContent);
     }
 
@@ -155,10 +165,11 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     [TestMethod]
     public async Task Add_AppendsTheReturnedComment_TrimsTheText_AndEmptiesTheBox()
     {
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         List(a);
         var page = await OpenDetails();
-        var added = new Stored(Guid.NewGuid(), "Cut the second round", new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero), TagC);
-        api.On(HttpMethod.Post, listPath, () => One(added, HttpStatusCode.Created));
+        var added = new Stored(Guid.NewGuid(), "Cut the second round", AddedAtLocal(2026, 11, 20, 12, 0), TagC);
+        api.On(HttpMethod.Post, listPath, () => CommentResponse(added, HttpStatusCode.Created));
 
         await TypeNew(page, "  Cut the second round \n ");
         await Click(page.FormDialog().Button("Add Comment"), page);
@@ -166,7 +177,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         Assert.AreEqual("{\"text\":\"Cut the second round\"}", Assert.ContainsSingle(api.Bodies(HttpMethod.Post, listPath)));
         Assert.IsNull(Assert.ContainsSingle(api.IfMatches(HttpMethod.Post, listPath)));
         CollectionAssert.AreEqual(new[] { a.Text, added.Text }, Texts(page));
-        Assert.AreEqual(added.Date, Items(page)[1].QuerySelector("time")!.TextContent.Trim());
+        Assert.AreEqual("11/20/2026", Items(page)[1].QuerySelector("time")!.TextContent.Trim());
         Assert.AreEqual("", NewBox(page)!.GetAttribute("value") ?? "");
         Assert.IsEmpty(page.FormDialog().Alerts());
         // Appended from the answer, not read again.
@@ -207,7 +218,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     {
         var page = await OpenDetails();
         var text = new string('x', 1000);
-        api.On(HttpMethod.Post, listPath, () => One(new Stored(Guid.NewGuid(), text, DateTimeOffset.UtcNow, TagC), HttpStatusCode.Created));
+        api.On(HttpMethod.Post, listPath, () => CommentResponse(new Stored(Guid.NewGuid(), text, DateTimeOffset.UtcNow, TagC), HttpStatusCode.Created));
 
         await TypeNew(page, "  " + text + "  ");
         await Click(page.FormDialog().Button("Add Comment"), page);
@@ -217,21 +228,23 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         Assert.HasCount(3, Items(page));
     }
 
-    // The panel's messages and limit are the API's own (CommentValidator), copied, not shared.
+    // The panel's messages and limit are the API's own (CommentValidator), copied, not shared: the Web's words
+    // and the API's are each checked against the same literals, so a change on either side fails here.
     [TestMethod]
     public async Task TheMessagesAndTheLimitAreTheApis()
     {
+        Assert.AreEqual("Comment text is required.", CommentValidator.ValidateText("  ", out _));
+        Assert.AreEqual("Comment text must be 1000 characters or fewer.", CommentValidator.ValidateText(new string('x', 1001), out _));
+        Assert.IsNull(CommentValidator.ValidateText(new string('x', 1000), out _));
         var page = await OpenDetails();
 
         await TypeNew(page, "  ");
         await Click(page.FormDialog().Button("Add Comment"), page);
-        Assert.AreEqual(CommentValidator.ValidateText("  ", out _), Assert.ContainsSingle(page.FormDialog().Alerts()));
+        Assert.AreEqual("Comment text is required.", Assert.ContainsSingle(page.FormDialog().Alerts()));
 
-        var over = new string('x', FieldRules.CommentTextMaxLength + 1);
-        await TypeNew(page, over);
+        await TypeNew(page, new string('x', 1001));
         await Click(page.FormDialog().Button("Add Comment"), page);
-        Assert.AreEqual(CommentValidator.ValidateText(over, out _), Assert.ContainsSingle(page.FormDialog().Alerts()));
-        Assert.IsNull(CommentValidator.ValidateText(new string('x', FieldRules.CommentTextMaxLength), out _));
+        Assert.AreEqual("Comment text must be 1000 characters or fewer.", Assert.ContainsSingle(page.FormDialog().Alerts()));
         Assert.AreEqual(0, api.Count(HttpMethod.Post, listPath));
     }
 
@@ -260,20 +273,21 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     [TestMethod]
     public async Task Edit_SaveSendsTheTextOnlyWithThatCommentsIfMatch_AndKeepsTheDate()
     {
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         var page = await OpenDetails();
         var path = OnePath(a);
-        api.On(HttpMethod.Put, path, () => One(a with { Text = "Ran longer", Tag = TagA2 }));
+        api.On(HttpMethod.Put, path, () => CommentResponse(a with { Text = "Ran longer", Tag = TagA2 }));
 
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         Assert.AreEqual(a.Text, EditBox(page)!.GetAttribute("value"));
-        Assert.AreEqual($"Edit Comment from {a.Date}", EditBox(page)!.GetAttribute("aria-label"));
+        Assert.AreEqual($"Edit Comment from {AAdded}", EditBox(page)!.GetAttribute("aria-label"));
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = " Ran longer " });
         await Click(page.FormDialog().Button("Save"), page);
 
         Assert.AreEqual("{\"text\":\"Ran longer\"}", Assert.ContainsSingle(api.Bodies(HttpMethod.Put, path)));
         Assert.AreEqual(TagA, Assert.ContainsSingle(api.IfMatches(HttpMethod.Put, path)));
         CollectionAssert.AreEqual(new[] { "Ran longer", b.Text }, Texts(page));
-        Assert.AreEqual(a.Date, Items(page)[0].QuerySelector("time")!.TextContent.Trim());
+        Assert.AreEqual("03/14/2025", Items(page)[0].QuerySelector("time")!.TextContent.Trim());
         Assert.IsNull(EditBox(page));
         Assert.IsEmpty(page.FormDialog().Alerts());
         Assert.AreEqual(0, api.Count(HttpMethod.Put, OnePath(b)));
@@ -287,7 +301,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         if (typed == "1001") typed = new string('x', 1001);
         var page = await OpenDetails();
 
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = typed });
         await Click(page.FormDialog().Button("Save"), page);
 
@@ -301,7 +315,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     {
         var page = await OpenDetails();
 
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Typed but not saved" });
         await Click(page.FormDialog().Button("Cancel"), page);
 
@@ -318,14 +332,14 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     public async Task Edit_OneCommentAtATime()
     {
         var page = await OpenDetails();
-        Assert.IsFalse(Btn(page, $"Edit Comment from {b.Date}").IsBusy());
+        Assert.IsFalse(ButtonNamed(page, $"Edit Comment from {BAdded}").IsBusy());
 
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
 
         Assert.ContainsSingle(page.FormDialog().QuerySelectorAll("fluent-text-area[aria-label^='Edit Comment']").ToList());
-        Assert.IsTrue(Btn(page, $"Edit Comment from {b.Date}").IsBusy());
+        Assert.IsTrue(ButtonNamed(page, $"Edit Comment from {BAdded}").IsBusy());
         await Click(page.FormDialog().Button("Cancel"), page);
-        Assert.IsFalse(Btn(page, $"Edit Comment from {b.Date}").IsBusy());
+        Assert.IsFalse(ButtonNamed(page, $"Edit Comment from {BAdded}").IsBusy());
     }
 
     [TestMethod]
@@ -335,7 +349,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         var path = OnePath(a);
         api.Status(HttpMethod.Put, path, HttpStatusCode.InternalServerError);
 
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Ran longer" });
         await Click(page.FormDialog().Button("Save"), page);
 
@@ -343,7 +357,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         Assert.AreEqual("Ran longer", EditBox(page)!.GetAttribute("value"));
         Assert.IsEmpty(Items(page)[0].QuerySelectorAll("fluent-button").Where(x => x.TextContent.Trim() == "Reload").ToList());
 
-        api.On(HttpMethod.Put, path, () => One(a with { Text = "Ran longer", Tag = TagA2 }));
+        api.On(HttpMethod.Put, path, () => CommentResponse(a with { Text = "Ran longer", Tag = TagA2 }));
         await Click(page.FormDialog().Button("Save"), page);
         CollectionAssert.AreEqual(new[] { "Ran longer", b.Text }, Texts(page));
         Assert.IsEmpty(page.FormDialog().Alerts());
@@ -359,8 +373,8 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         var path = OnePath(a);
         api.Status(HttpMethod.Delete, path, HttpStatusCode.NoContent);
 
-        await Click(Btn(page, $"Delete Comment from {a.Date}"), page);
-        Assert.AreEqual($"Delete Comment from {a.Date}?", page.Confirmation().QuerySelector(".confirm-message")!.TextContent.Trim());
+        await Click(ButtonNamed(page, $"Delete Comment from {AAdded}"), page);
+        Assert.AreEqual($"Delete Comment from {AAdded}?", page.Confirmation().QuerySelector(".confirm-message")!.TextContent.Trim());
         await page.Confirmation().Button("Cancel").ClickAsync(new());
 
         Assert.IsFalse(page.HasConfirmation());
@@ -368,7 +382,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         Assert.AreEqual(0, api.Count(HttpMethod.Delete, path));
         Assert.HasCount(2, Items(page));
 
-        await Click(Btn(page, $"Delete Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Delete Comment from {AAdded}"), page);
         await page.ConfirmAsync();
         page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
 
@@ -386,7 +400,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         var page = await OpenDetails();
         api.Status(HttpMethod.Put, OnePath(a), HttpStatusCode.Conflict, "The request conflicts with the stored data. Reload and try again.");
 
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Mine" });
         await Click(page.FormDialog().Button("Save"), page);
 
@@ -405,8 +419,8 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         Assert.IsEmpty(page.FormDialog().Alerts());
 
         // The next save sends the tag that Reload read.
-        api.On(HttpMethod.Put, OnePath(a), () => One(a with { Text = "Mine again", Tag = TagC }));
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        api.On(HttpMethod.Put, OnePath(a), () => CommentResponse(a with { Text = "Mine again", Tag = TagC }));
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Mine again" });
         await Click(page.FormDialog().Button("Save"), page);
         CollectionAssert.AreEqual(new[] { TagA, TagA2 }, api.IfMatches(HttpMethod.Put, OnePath(a)));
@@ -418,7 +432,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         var page = await OpenDetails();
         api.Status(HttpMethod.Delete, OnePath(b), HttpStatusCode.Conflict, "The request conflicts with the stored data. Reload and try again.");
 
-        await Click(Btn(page, $"Delete Comment from {b.Date}"), page);
+        await Click(ButtonNamed(page, $"Delete Comment from {BAdded}"), page);
         await page.ConfirmAsync();
         page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
 
@@ -434,28 +448,19 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         Assert.AreEqual(2, api.Count(HttpMethod.Get, listPath));
     }
 
+    // The API answers an edit of a Comment deleted meanwhile with 404. (A delete of one is a 204, as for a
+    // Comment still there: ActivityDetailsDialogTests.DeletingACommentAlreadyDeletedElsewhere_RemovesItsRow.)
     [TestMethod]
-    [DataRow("edit")]
-    [DataRow("delete")]
-    public async Task ANotFoundOnEditOrDelete_SaysItMayHaveBeenDeleted_WithReload(string action)
+    public async Task ANotFoundOnEdit_SaysItMayHaveBeenDeleted_WithReload()
     {
         var page = await OpenDetails();
-        if (action == "edit")
-        {
-            api.Status(HttpMethod.Put, OnePath(a), HttpStatusCode.NotFound);
-            await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
-            await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Too late" });
-            await Click(page.FormDialog().Button("Save"), page);
-        }
-        else
-        {
-            api.Status(HttpMethod.Delete, OnePath(a), HttpStatusCode.NotFound);
-            await Click(Btn(page, $"Delete Comment from {a.Date}"), page);
-            await page.ConfirmAsync();
-            page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
-        }
+        api.Status(HttpMethod.Put, OnePath(a), HttpStatusCode.NotFound);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
+        await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Too late" });
+        await Click(page.FormDialog().Button("Save"), page);
 
         Assert.AreEqual(NotFound, Assert.ContainsSingle(Items(page)[0].Alerts()));
+        Assert.AreEqual("Too late", EditBox(page)!.GetAttribute("value"));
 
         List(b);
         await Click(Items(page)[0].Button("Reload"), page);
@@ -468,13 +473,13 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     public async Task SavingCommentAThenCommentB_SendsEachCommentsOwnTag()
     {
         var page = await OpenDetails();
-        api.On(HttpMethod.Put, OnePath(a), () => One(a with { Text = "A edited", Tag = TagA2 }))
-           .On(HttpMethod.Put, OnePath(b), () => One(b with { Text = "B edited", Tag = TagC }));
+        api.On(HttpMethod.Put, OnePath(a), () => CommentResponse(a with { Text = "A edited", Tag = TagA2 }))
+           .On(HttpMethod.Put, OnePath(b), () => CommentResponse(b with { Text = "B edited", Tag = TagC }));
 
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "A edited" });
         await Click(page.FormDialog().Button("Save"), page);
-        await Click(Btn(page, $"Edit Comment from {b.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {BAdded}"), page);
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "B edited" });
         await Click(page.FormDialog().Button("Save"), page);
 
@@ -484,7 +489,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
 
         // A's next save sends the tag A's own save returned.
         api.On(HttpMethod.Delete, OnePath(a), () => new HttpResponseMessage(HttpStatusCode.NoContent));
-        await Click(Btn(page, $"Delete Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Delete Comment from {AAdded}"), page);
         await page.ConfirmAsync();
         page.WaitForAssertion(() => Assert.AreEqual(TagA2, Assert.ContainsSingle(api.IfMatches(HttpMethod.Delete, OnePath(a)))));
     }
@@ -507,15 +512,15 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         {
             case "add":
                 (method, path) = (HttpMethod.Post, listPath);
-                gate = api.Hold(method, path, () => One(new Stored(Guid.NewGuid(), "New", DateTimeOffset.UtcNow, TagC), HttpStatusCode.Created));
+                gate = api.Hold(method, path, () => CommentResponse(new Stored(Guid.NewGuid(), "New", DateTimeOffset.UtcNow, TagC), HttpStatusCode.Created));
                 await TypeNew(page, "New");
                 button = () => page.FormDialog().Button("Add Comment");
                 first = button().ClickAsync(new());
                 break;
             case "save":
                 (method, path) = (HttpMethod.Put, OnePath(a));
-                gate = api.Hold(method, path, () => One(a with { Text = "Edited", Tag = TagA2 }));
-                await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+                gate = api.Hold(method, path, () => CommentResponse(a with { Text = "Edited", Tag = TagA2 }));
+                await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
                 await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Edited" });
                 button = () => page.FormDialog().Button("Save");
                 first = button().ClickAsync(new());
@@ -523,7 +528,7 @@ public sealed class ActivityCommentsPanelTests : IDisposable
             default:
                 (method, path) = (HttpMethod.Delete, OnePath(a));
                 gate = api.Hold(method, path, () => new HttpResponseMessage(HttpStatusCode.NoContent));
-                button = () => Btn(page, $"Delete Comment from {a.Date}");
+                button = () => ButtonNamed(page, $"Delete Comment from {AAdded}");
                 await Click(button(), page);
                 // Not awaited: the confirmation's answer waits for the held request.
                 first = page.ConfirmAsync();
@@ -580,14 +585,14 @@ public sealed class ActivityCommentsPanelTests : IDisposable
     {
         var page = await OpenDetails();
 
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         await Dismiss(page);
         Assert.IsFalse(page.HasConfirmation());
         Assert.IsFalse(page.HasFormDialog());
 
         await DetailsButton(page).ClickAsync(new());
         page.WaitForAssertion(() => Assert.HasCount(2, Items(page)));
-        await Click(Btn(page, $"Edit Comment from {a.Date}"), page);
+        await Click(ButtonNamed(page, $"Edit Comment from {AAdded}"), page);
         await EditBox(page)!.InputAsync(new ChangeEventArgs { Value = "Changed" });
         await Dismiss(page);
 
@@ -609,7 +614,8 @@ public sealed class ActivityCommentsPanelTests : IDisposable
 
     private void List(params Stored[] comments) => api.On(HttpMethod.Get, listPath, () => ListResponse(comments));
 
-    private HttpResponseMessage One(Stored c, HttpStatusCode status = HttpStatusCode.OK)
+    // The API's answer to an add or edit: the stored Comment, with its eTag in the body and the header.
+    private HttpResponseMessage CommentResponse(Stored c, HttpStatusCode status = HttpStatusCode.OK)
     {
         var response = new HttpResponseMessage(status) { Content = JsonContent.Create(Json(c)) };
         response.Headers.TryAddWithoutValidation("ETag", c.Tag);
@@ -638,35 +644,4 @@ public sealed class ActivityCommentsPanelTests : IDisposable
         page.FindAll("tbody tr.fluent-data-grid-row").Single(r => r.Closest("fluent-dialog") is null)
             .QuerySelector("fluent-button[title=Details]")!;
 
-    private static List<IElement> Items(IRenderedComponent<Activities> page) =>
-        page.FormDialog().QuerySelectorAll("li.comment").ToList();
-
-    private static List<string> Texts(IRenderedComponent<Activities> page) =>
-        Items(page).Select(i => (i.QuerySelector(".comment-text")?.TextContent ?? "(editing)")).ToList();
-
-    private static IElement? NewBox(IRenderedComponent<Activities> page) =>
-        page.FormDialog().QuerySelector("fluent-text-area[aria-label='New Comment']");
-
-    private static IElement? EditBox(IRenderedComponent<Activities> page) =>
-        page.FormDialog().QuerySelector("fluent-text-area[aria-label^='Edit Comment from']");
-
-    private static IElement Btn(IRenderedComponent<Activities> page, string label) =>
-        page.FormDialog().QuerySelectorAll("fluent-button").Single(x => x.GetAttribute("aria-label") == label);
-
-    private static Task TypeNew(IRenderedComponent<Activities> page, string text) =>
-        NewBox(page)!.InputAsync(new ChangeEventArgs { Value = text });
-
-    // A click whose request finishes at once; waits for the render after it.
-    private static async Task Click(IElement button, IRenderedComponent<Activities> page)
-    {
-        await button.ClickAsync(new());
-        page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
-    }
-
-    // Overlay click or Escape on the details dialog.
-    private static Task Dismiss(IRenderedComponent<Activities> page)
-    {
-        var dialog = page.FormDialog();
-        return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
-    }
 }
