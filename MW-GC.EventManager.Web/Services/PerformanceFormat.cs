@@ -3,13 +3,15 @@ using System.Globalization;
 namespace MW_GC.EventManager.Web.Services;
 
 /// <summary>
-/// How an Activity performance number reads (#136, #137), shared by the Stats page and the Activity details
-/// dialog, so the same number shows the same text in both places.
+/// How Activity performance reads (#136, #137), shared by the Stats page and the Activity details dialog, so the
+/// same number shows the same text in both places. A number with no value shows <see cref="PlayStats.NoValue"/>
+/// through the <c>PerformanceValue</c> component.
 /// </summary>
 public static class PerformanceFormat
 {
-    /// <summary>Shown for a number that has no value (never offered, or no attendees recorded): the dash PlayStats also uses.</summary>
-    public const string NoValue = PlayStats.UnknownGame;
+    /// <summary>The caveat shown with Activity performance on the Stats page and in the Activity details.</summary>
+    public const string Caveat =
+        "Performance cannot tell a weak Activity from a weak night: an Event has several Selections, so its numbers belong to all of them.";
 
     /// <summary>A whole percent ("50%"), the same in every culture; null when there is no rate.</summary>
     public static string? Percent(decimal? rate) =>

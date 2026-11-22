@@ -11,23 +11,22 @@ namespace MW_GC.EventManager.Web.Services;
 public sealed record GamePlayStats(Guid Id, string Name, int Offered, int Wins, DateTimeOffset? LastOffered, bool Deleted);
 
 /// <summary>
-/// One Activity's row on the Stats page, with the name of its Game, and its Activity performance (#136)
-/// over the same Events that <see cref="Offered"/> counts.
+/// One Activity's row on the Stats page, with the name of its Game, and its <see cref="ActivityPerformance"/>
+/// (#136) over the same Events that <see cref="Offered"/> counts.
 /// </summary>
-public sealed record ActivityPlayStats(Guid Id, string Name, string GameName, int Offered, int Wins, DateTimeOffset? LastOffered, bool Deleted)
-{
-    /// <summary>Wins divided by Offered (0 to 1); null when the Activity was never offered, never 0.</summary>
-    public decimal? WinRate { get; init; }
+public sealed record ActivityPlayStats(Guid Id, string Name, string GameName, int Offered, int Wins, DateTimeOffset? LastOffered, bool Deleted,
+    ActivityPerformance Performance);
 
-    /// <summary>The mean Like count of the Events it was offered at, an Event with no metrics item counting 0; null when never offered.</summary>
-    public decimal? AverageLikes { get; init; }
-
-    /// <summary>
-    /// The mean Attendees of the Events it was offered at that have Attendees recorded. An Event with no
-    /// metrics, or with Attendees cleared, is left out, not counted as 0; null when none has it.
-    /// </summary>
-    public decimal? AverageAttendees { get; init; }
-}
+/// <summary>
+/// Activity performance (#136, ADR 0001): the numbers beside Offered and wins, worked out when read, never stored.
+/// </summary>
+/// <param name="WinRate">Wins divided by Offered (0 to 1); null when the Activity was never offered, never 0.</param>
+/// <param name="AverageLikes">The mean Like count of the Events it was offered at, an Event with no metrics item counting 0; null when never offered.</param>
+/// <param name="AverageAttendees">
+/// The mean Attendees of the Events it was offered at that have Attendees recorded. An Event with no metrics, or
+/// with Attendees cleared, is left out, not counted as 0; null when none has it.
+/// </param>
+public sealed record ActivityPerformance(decimal? WinRate, decimal? AverageLikes, decimal? AverageAttendees);
 
 public sealed record PlayStatsReport(IReadOnlyList<GamePlayStats> Games, IReadOnlyList<ActivityPlayStats> Activities);
 
@@ -45,6 +44,12 @@ public sealed class PlayStats(TimeProvider time)
     /// <summary>Shown for an Activity whose Game is neither in the library nor in any snapshot.</summary>
     public const string UnknownGame = "—";
 
+    /// <summary>
+    /// Shown for a number that has none (an Activity never offered, no attendees recorded) on the Stats page, in the
+    /// Activity details, and for an Activity's Game name on the Activities page while the Games have not loaded.
+    /// </summary>
+    public const string NoValue = "—";
+
     public PlayStatsReport Compute(IEnumerable<EventEntity> events, IEnumerable<GameEntity> games, IEnumerable<ActivityEntity> activities,
         IEnumerable<EventMetricsWithLikes> metrics)
     {
@@ -54,7 +59,7 @@ public sealed class PlayStats(TimeProvider time)
         var gameSnapshots = new Dictionary<Guid, (DateTimeOffset Date, Game Game)>();
         var activitySnapshots = new Dictionary<Guid, (DateTimeOffset Date, Activity Activity)>();
         var metricsByEvent = new Dictionary<Guid, EventMetricsWithLikes>();
-        foreach (var m in metrics ?? []) if (m is not null) metricsByEvent.TryAdd(m.EventId, m);
+        foreach (var m in metrics) metricsByEvent.TryAdd(m.EventId, m);
 
         foreach (var ev in events)
         {
@@ -106,16 +111,12 @@ public sealed class PlayStats(TimeProvider time)
             .Select(id =>
             {
                 var tally = activityTallies.GetValueOrDefault(id) ?? new Tally();
-                var row = libraryActivities.TryGetValue(id, out var current)
-                    ? new ActivityPlayStats(id, current.Name, GameName(current.GameId), tally.Offered, tally.Wins, tally.Last, false)
-                    : new ActivityPlayStats(id, activitySnapshots[id].Activity.Name, GameName(activitySnapshots[id].Activity.GameId),
-                        tally.Offered, tally.Wins, tally.Last, true);
-                return row with
-                {
-                    WinRate = tally.Offered == 0 ? null : (decimal)tally.Wins / tally.Offered,
-                    AverageLikes = tally.Offered == 0 ? null : (decimal)tally.Likes / tally.Offered,
-                    AverageAttendees = tally.AttendeeEvents == 0 ? null : (decimal)tally.Attendees / tally.AttendeeEvents,
-                };
+                if (libraryActivities.TryGetValue(id, out var current))
+                    return new ActivityPlayStats(id, current.Name, GameName(current.GameId), tally.Offered, tally.Wins, tally.Last, false,
+                        tally.Performance);
+                var snapshot = activitySnapshots[id].Activity;
+                return new ActivityPlayStats(id, snapshot.Name, GameName(snapshot.GameId), tally.Offered, tally.Wins, tally.Last, true,
+                    tally.Performance);
             });
 
         return new PlayStatsReport(
@@ -154,6 +155,11 @@ public sealed class PlayStats(TimeProvider time)
             Offered++;
             if (Last is null || date > Last) Last = date;
         }
+
+        public ActivityPerformance Performance => new(
+            Offered == 0 ? null : (decimal)Wins / Offered,
+            Offered == 0 ? null : (decimal)Likes / Offered,
+            AttendeeEvents == 0 ? null : (decimal)Attendees / AttendeeEvents);
 
         public void Observe(int likes, int? attendees)
         {

@@ -78,11 +78,13 @@ One visitor's thumbs-up for an Event, given through the Event's feedback link.
 A visitor address counts once per Event.
 
 **Activity performance**:
-How an Activity has done across every Event it appeared in: offered, won, win
-rate, average Likes and average attendees of those Events. It is raw
+How an Activity has done across every Event that offered it: Offered, wins, win
+rate, average Likes and average attendees of those Events. Offered counts the
+Events whose Selections include the Activity, each Event once. It is raw
 numbers, never a single score, and it is worked out when read, not stored. It
 cannot tell a weak Activity from a weak night, because an Event has several
 Selections.
+_Avoid_: appearances, appeared in (for Offered)
 
 **slot**:
 A position for one Selection while an Event is put together in the create or
@@ -106,7 +108,7 @@ Themes or Holidays, and Themed activities only.
   **Event** it was written from.
 - An **Event** has zero or one set of **Event metrics**.
 - **Activity performance** is built from the **Event metrics** and **Likes** of
-  the **Events** an **Activity** appeared in.
+  the **Events** that offered an **Activity**.
 
 ## Storage
 

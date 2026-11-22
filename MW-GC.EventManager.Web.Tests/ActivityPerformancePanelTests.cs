@@ -16,6 +16,7 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
 {
     private const string Sentence =
         "Performance cannot tell a weak Activity from a weak night: an Event has several Selections, so its numbers belong to all of them.";
+    private const string NoPerformance = "No performance to show for this Activity.";
     private const string Unreachable = "Could not reach the server. Check the connection and try again.";
 
     private readonly StubApiHandler api = new();
@@ -35,9 +36,10 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
         unplayed = new ActivityEntity { Name = "Unplayed", GameId = kart.Id };
         events =
         [
-            // Race and Tiles both offered at two past Events; Race won the first, Tiles the second.
+            // Race offered at two past Events and won the first; Tiles offered only at the first, so the two
+            // Activities differ in every number.
             Event(new DateTimeOffset(2020, 3, 1, 19, 0, 0, TimeSpan.Zero), race.Id, Pick(kart, race), Pick(puzzle, tiles)),
-            Event(new DateTimeOffset(2020, 6, 1, 19, 0, 0, TimeSpan.Zero), tiles.Id, Pick(kart, race), Pick(puzzle, tiles)),
+            Event(new DateTimeOffset(2020, 6, 1, 19, 0, 0, TimeSpan.Zero), null, Pick(kart, race)),
             // In the future: ignored, as on the Stats page.
             Event(new DateTimeOffset(2099, 1, 1, 19, 0, 0, TimeSpan.Zero), race.Id, Pick(kart, race)),
         ];
@@ -61,7 +63,7 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
     public void Dispose() => harness.Dispose();
 
     [TestMethod]
-    public async Task AnActivityWithAppearances_ShowsOfferedWonWinRateLikesAndAttendees_InItsOwnPerformanceSection()
+    public async Task AnActivityOffered_ShowsOfferedWonWinRateLikesAndAttendees_InItsOwnPerformanceSection()
     {
         var page = Open();
         await OpenDetails(page, "Race");
@@ -77,7 +79,7 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
     }
 
     [TestMethod]
-    public async Task AnActivityWithNoAppearances_ShowsZeroZeroAndThreeDashes()
+    public async Task AnActivityNeverOffered_ShowsZeroZeroAndThreeDashes()
     {
         var page = Open();
         await OpenDetails(page, "Unplayed");
@@ -86,23 +88,81 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
     }
 
     [TestMethod]
-    [DataRow("Race")]
-    [DataRow("Tiles")]
-    [DataRow("Unplayed")]
-    public async Task TheNumbersEqualTheStatsRowForTheSameActivity(string name)
+    public async Task AnActivityOfferedInOneEvent_SaysOneEvent()
     {
+        var page = Open();
+        await OpenDetails(page, "Tiles");
+
+        Assert.AreEqual("Offered in 1 Event", Values(page)[0]);
+    }
+
+    // #182.7: Race and Tiles differ in every number, and both the Stats row and the panel are compared with the
+    // numbers worked out by hand, so a panel showing another Activity's row fails.
+    [TestMethod]
+    [DataRow("Race", "2", "1", "50%", "1.5", "15.0")]
+    [DataRow("Tiles", "1", "0", "0%", "2.0", "10.0")]
+    [DataRow("Unplayed", "0", "0", "—", "—", "—")]
+    public async Task TheNumbersEqualTheStatsRowForTheSameActivity(string name, string offered, string wins, string winRate, string likes, string attendees)
+    {
+        var expected = new[] { offered, wins, winRate, likes, attendees };
         var stats = harness.Render<Stats>();
         stats.WaitForAssertion(() => Assert.HasCount(3, StatsRows(stats)));
         var row = StatsRows(stats).Single(r => r.QuerySelector(".stats-name")!.TextContent.Trim() == name);
+        CollectionAssert.AreEqual(expected, new[] { "offered", "wins", "win-rate", "avg-likes", "avg-attendees" }
+            .Select(c => Text(row, ".stats-" + c)).ToArray(), "the Stats row");
 
         var page = Open();
         await OpenDetails(page, name);
 
-        Assert.AreEqual(Text(row, ".stats-offered"), Text(Panel(page), ".performance-offered"));
-        Assert.AreEqual(Text(row, ".stats-wins"), Text(Panel(page), ".performance-wins"));
-        Assert.AreEqual(Text(row, ".stats-win-rate"), Text(Panel(page), ".performance-win-rate"));
-        Assert.AreEqual(Text(row, ".stats-avg-likes"), Text(Panel(page), ".performance-avg-likes"));
-        Assert.AreEqual(Text(row, ".stats-avg-attendees"), Text(Panel(page), ".performance-avg-attendees"));
+        CollectionAssert.AreEqual(expected, new[] { "offered", "wins", "win-rate", "avg-likes", "avg-attendees" }
+            .Select(c => Text(Panel(page), ".performance-" + c)).ToArray(), "the panel");
+    }
+
+    // #182.2: an Activity in neither the Library the panel read nor any past Selection (deleted after the page
+    // loaded, never offered) has no row to show: one line, not a made-up \"never offered\" row marked deleted.
+    [TestMethod]
+    public async Task AnActivityTheComputationDoesNotKnow_ShowsNoPerformanceRows_AndSaysSo()
+    {
+        var page = Open();
+        api.Json(HttpMethod.Get, "/api/activities", new[] { race, tiles });
+
+        await DetailsButton(page, "Unplayed").ClickAsync(new());
+
+        page.WaitForAssertion(() => Assert.Contains(NoPerformance, Normalize(Panel(page).TextContent)));
+        // Nothing but the heading and that line: no Offered, Won or dash.
+        var text = Normalize(Panel(page).TextContent);
+        Assert.StartsWith("Performance", text);
+        Assert.AreEqual(NoPerformance, text["Performance".Length..].Trim());
+        Assert.IsNull(Panel(page).QuerySelector("dl"));
+        Assert.IsNull(Panel(page).QuerySelector("fluent-progress-ring"));
+        Assert.IsEmpty(page.FormDialog().Alerts());
+    }
+
+    // #182.8: the dialog stays open and its Activity changes. The first Activity's metrics read is still held when
+    // the second Activity's panel loads; when it ends, it must not land in the panel now shown. Without the key on
+    // the panel the same panel takes the new Activity, keeps the held read and shows Tiles from the old metrics.
+    [TestMethod]
+    public async Task SwitchingTheActivityWhileTheDialogStaysOpen_IgnoresTheFirstActivitysLateLoad()
+    {
+        var gate = api.Hold(HttpMethod.Get, "/api/event-metrics", () => Ok(metrics));
+        var page = Open();
+        await DetailsButton(page, "Race").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.IsNotNull(Panel(page).QuerySelector("fluent-progress-ring")));
+
+        // Tiles' only Event now has 6 Likes and 30 attendees.
+        api.Json(HttpMethod.Get, "/api/event-metrics", new EventMetricsWithLikes[] { new(events[0].Id, 30, null, null, null, 6) });
+        await DetailsButton(page, "Tiles").ClickAsync(new());
+        Assert.IsTrue(page.HasFormDialog(), "the dialog stayed open");
+        var tiles = new[] { "Offered in 1 Event", "Won 0", "Win rate 0%", "Avg Likes 6.0", "Avg attendees 30.0" };
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(tiles, Values(page)));
+
+        gate.SetResult();
+        await Task.Delay(50);
+
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(tiles, Values(page)));
+        Assert.AreEqual("Tiles", page.FormDialog().GetAttribute("aria-label"));
+        Assert.HasCount(1, page.FindAll(".activity-performance"));
+        Assert.IsFalse(harness.UnhandledException.IsCompleted);
     }
 
     [TestMethod]

@@ -11,22 +11,14 @@ namespace MW_GC.EventManager.Web.Services;
 /// travels in the ETag header: a read returns it (none when the Event has no row yet, which reads as empty
 /// metrics), and a save sends it back as If-Match, or sends no If-Match when there was no row, which only
 /// creates one. <see cref="GetAsync"/>, <see cref="SaveAsync"/> and <see cref="LoadAllAsync"/> never throw for
-/// an API failure: each returns a result that says what happened. <see cref="GetAllAsync"/> is the one call
-/// that throws; it stays only until its callers move to <see cref="LoadAllAsync"/>.
+/// an API failure: each returns a result that says what happened.
 /// </summary>
 public sealed class EventMetricsClient(HttpClient http)
 {
     /// <summary>
-    /// Every Event's metrics with its Like count (<c>GET api/event-metrics</c>, #136). Throws on failure, like
-    /// the other list loads, so <see cref="LoadErrors"/> can name it. Kept for its current callers (the Stats
-    /// page and the Activity performance panel); new code uses <see cref="LoadAllAsync"/>, which reads the same
-    /// route and returns a result instead.
-    /// </summary>
-    public Task<List<EventMetricsWithLikes>?> GetAllAsync() => http.GetFromJsonAsync<List<EventMetricsWithLikes>>("api/event-metrics");
-
-    /// <summary>
-    /// Every Event's metrics with its Like count (<c>GET api/event-metrics</c>, #136). An Event with neither
-    /// metrics nor Likes has no item. Never throws for an API failure.
+    /// Every Event's metrics with its Like count (<c>GET api/event-metrics</c>, #136), read by the Stats page and
+    /// the Activity performance panel. An Event with neither metrics nor Likes has no item. Never throws for an
+    /// API failure.
     /// </summary>
     public async Task<EventMetricsListResult> LoadAllAsync()
     {
@@ -113,6 +105,10 @@ public abstract record EventMetricsResult
 public abstract record EventMetricsListResult
 {
     private EventMetricsListResult() { }
+
+    /// <summary>The items and a null message, or null items and the failure message, as <see cref="LoadErrors.LoadResultAsync{T}"/> takes them.</summary>
+    public (List<EventMetricsWithLikes>? Items, string? Error) ItemsOrError() =>
+        this is Loaded loaded ? (loaded.Items, null) : (null, ((Failed)this).Error);
 
     public sealed record Loaded(List<EventMetricsWithLikes> Items) : EventMetricsListResult;
 

@@ -1,0 +1,15 @@
+@* One Activity performance number as text (PerformanceFormat), or a dimmed dash when it has none. Shared by the
+   Stats page's cells and the Activity details' performance panel, so "no value" reads the same in both. The
+   caller wraps it in its own element and class. *@
+@if (Text is { } text)
+{
+    @text
+}
+else
+{
+    <span style="color: var(--neutral-foreground-hint);">@PlayStats.NoValue</span>
+}
+
+@code {
+    [Parameter] public string? Text { get; set; }
+}

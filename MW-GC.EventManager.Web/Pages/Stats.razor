@@ -49,7 +49,7 @@
         <FluentCard Style="overflow: visible;" AreaRestricted="false">
             <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 4px;">Activities</FluentLabel>
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 4px;">@PastEventsNote</FluentLabel>
-            <FluentLabel Typo="Typography.Body" Class="stats-performance-note" Style="color: var(--neutral-foreground-hint); margin-bottom: 12px;">@PerformanceNote</FluentLabel>
+            <FluentLabel Typo="Typography.Body" Class="stats-performance-note" Style="color: var(--neutral-foreground-hint); margin-bottom: 12px;">@Caveat</FluentLabel>
             <FluentDataGrid Items="@_report.Activities.AsQueryable()" TGridItem="ActivityPlayStats" ItemSize="44"
                             GridTemplateColumns="minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
                             Class="stats-activities" aria-label="Activity stats">
@@ -66,14 +66,14 @@
                     <span class="stats-wins">@context.Wins</span>
                 </TemplateColumn>
                 @* Activity performance (#136): null sorts lowest, so ascending shows the dash first, as Never does. *@
-                <TemplateColumn Title="Win rate" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.WinRate).ThenAscending(a => a.Name))">
-                    @PerformanceCell(("stats-win-rate", Percent(context.WinRate)))
+                <TemplateColumn Title="Win rate" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.Performance.WinRate).ThenAscending(a => a.Name))">
+                    <span class="stats-win-rate"><PerformanceValue Text="@Percent(context.Performance.WinRate)" /></span>
                 </TemplateColumn>
-                <TemplateColumn Title="Avg Likes" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.AverageLikes).ThenAscending(a => a.Name))">
-                    @PerformanceCell(("stats-avg-likes", OneDecimal(context.AverageLikes)))
+                <TemplateColumn Title="Avg Likes" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.Performance.AverageLikes).ThenAscending(a => a.Name))">
+                    <span class="stats-avg-likes"><PerformanceValue Text="@OneDecimal(context.Performance.AverageLikes)" /></span>
                 </TemplateColumn>
-                <TemplateColumn Title="Avg attendees" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.AverageAttendees).ThenAscending(a => a.Name))">
-                    @PerformanceCell(("stats-avg-attendees", OneDecimal(context.AverageAttendees)))
+                <TemplateColumn Title="Avg attendees" Sortable="true" SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.Performance.AverageAttendees).ThenAscending(a => a.Name))">
+                    <span class="stats-avg-attendees"><PerformanceValue Text="@OneDecimal(context.Performance.AverageAttendees)" /></span>
                 </TemplateColumn>
                 <TemplateColumn Title="Last offered" Sortable="true" IsDefaultSortColumn="true"
                                 SortBy="@(GridSort<ActivityPlayStats>.ByAscending(a => a.LastOffered).ThenDescending(a => a.Offered).ThenAscending(a => a.Name))">
@@ -86,21 +86,6 @@
 
 @code {
     private const string PastEventsNote = "Counts Events dated up to now; future Events are not included.";
-    private const string PerformanceNote =
-        "Performance cannot tell a weak Activity from a weak night: an Event has several Selections, so its numbers belong to all of them.";
-
-    // One performance number (PerformanceFormat, shared with the Activity details), or a dimmed dash when it has none.
-    private static readonly RenderFragment<(string Class, string? Text)> PerformanceCell = cell =>
-        @<span class="@cell.Class">
-            @if (cell.Text is { } text)
-            {
-                @text
-            }
-            else
-            {
-                <span style="color: var(--neutral-foreground-hint);">@NoValue</span>
-            }
-        </span>;
 
     // The name, and for an item no longer in the library a "Deleted" chip: visible text with its own
     // icon, so it differs by more than colour, and a tooltip that says where the name came from.
@@ -150,7 +135,7 @@
             _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
             _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
             _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []),
-            _loads.LoadAsync("Event metrics", MetricsClient.GetAllAsync, v => _metrics = v ?? []));
+            _loads.LoadResultAsync("Event metrics", async () => (await MetricsClient.LoadAllAsync()).ItemsOrError(), v => _metrics = v ?? []));
         if (_events is not null && _games is not null && _activities is not null && _metrics is not null)
             _report = _stats.Compute(_events, _games, _activities, _metrics);
     }

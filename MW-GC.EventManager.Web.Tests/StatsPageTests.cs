@@ -215,9 +215,9 @@ public sealed class StatsPageTests : IDisposable
         CollectionAssert.AreEqual(new[] { "Old activity", "Tiles", "Sprint" }, rows.Select(Name).ToList());
         // Sprint: 2 of 2 won, Likes (4 + 0) / 2, attendees (10 + 20) / 2. Tiles: 0 of 1 won, the first Event's 4
         // Likes and 10 attendees. Old activity: its Event has Likes but no attendees.
-        Assert.AreEqual(("100%", "1.0", "—"), Performance(rows[0]));
-        Assert.AreEqual(("0%", "4.0", "10.0"), Performance(rows[1]));
-        Assert.AreEqual(("100%", "2.0", "15.0"), Performance(rows[2]));
+        CollectionAssert.AreEqual(new[] { "100%", "1.0", "—" }, PerformanceCells(rows[0]));
+        CollectionAssert.AreEqual(new[] { "0%", "4.0", "10.0" }, PerformanceCells(rows[1]));
+        CollectionAssert.AreEqual(new[] { "100%", "2.0", "15.0" }, PerformanceCells(rows[2]));
         Assert.AreEqual(1, api.Count(HttpMethod.Get, "/api/event-metrics"));
         Assert.IsEmpty(page.FindAll("table.stats-games .stats-win-rate, table.stats-games .stats-avg-likes, table.stats-games .stats-avg-attendees"),
             "Games get no performance columns");
@@ -245,7 +245,7 @@ public sealed class StatsPageTests : IDisposable
 
         var row = Rows(page, "stats-activities").Single(r => Name(r) == "Sprint");
         // 2/3 won, 1/3 Likes, 32/3 attendees.
-        Assert.AreEqual(("67%", "0.3", "10.7"), Performance(row));
+        CollectionAssert.AreEqual(new[] { "67%", "0.3", "10.7" }, PerformanceCells(row));
     }
 
     [TestMethod]
@@ -258,7 +258,7 @@ public sealed class StatsPageTests : IDisposable
         page.WaitForAssertion(() => Assert.HasCount(4, Rows(page, "stats-activities")));
 
         var row = Rows(page, "stats-activities").Single(r => Name(r) == "Unplayed");
-        Assert.AreEqual(("—", "—", "—"), Performance(row));
+        CollectionAssert.AreEqual(new[] { "—", "—", "—" }, PerformanceCells(row));
         Assert.AreEqual(("0", "0", "Never"), Measures(row));
     }
 
@@ -312,15 +312,14 @@ public sealed class StatsPageTests : IDisposable
 
         page.WaitForAssertion(() => Assert.HasCount(3, Rows(page, "stats-activities")));
         Assert.IsEmpty(page.PageAlerts());
-        Assert.AreEqual(("100%", "2.0", "15.0"), Performance(Rows(page, "stats-activities").Single(r => Name(r) == "Sprint")));
+        CollectionAssert.AreEqual(new[] { "100%", "2.0", "15.0" }, PerformanceCells(Rows(page, "stats-activities").Single(r => Name(r) == "Sprint")));
     }
 
     // ---- Helpers -------------------------------------------------------------------------------
 
-    private static (string WinRate, string AverageLikes, string AverageAttendees) Performance(IElement row) => (
-        row.QuerySelector(".stats-win-rate")!.TextContent.Trim(),
-        row.QuerySelector(".stats-avg-likes")!.TextContent.Trim(),
-        row.QuerySelector(".stats-avg-attendees")!.TextContent.Trim());
+    // The win rate, average Likes and average attendees cells of one row, as read.
+    private static string[] PerformanceCells(IElement row) =>
+        new[] { ".stats-win-rate", ".stats-avg-likes", ".stats-avg-attendees" }.Select(c => row.QuerySelector(c)!.TextContent.Trim()).ToArray();
 
     private IRenderedComponent<Stats> Loaded()
     {
