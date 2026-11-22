@@ -1,12 +1,14 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
-using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
+using MW_GC.EventManager.Web.Shared.Events;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -44,8 +46,9 @@ public sealed class EventsPageWiringTests : IDisposable
         stored = [night];
         api.Json(HttpMethod.Get, "/api/games", new[] { kart, brawl })
            .Json(HttpMethod.Get, "/api/activities", new[] { grandPrix, stock })
-           .Json(HttpMethod.Get, "/api/themes", Array.Empty<ThemeEntity>())
-           .Json(HttpMethod.Get, "/api/holidays", Array.Empty<HolidayEntity>())
+           // Non-empty, and of different lengths, so a Theme list handed over as the Holidays (or none) shows.
+           .Json(HttpMethod.Get, "/api/themes", new[] { new ThemeEntity { Name = "Spooky" }, new ThemeEntity { Name = "Cozy" } })
+           .Json(HttpMethod.Get, "/api/holidays", new[] { new HolidayEntity { Name = "Halloween" } })
            .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>())
            .Json(HttpMethod.Get, $"/api/activities/{stock.Id}/comments", Array.Empty<CommentEntity>())
            .Json(HttpMethod.Get, $"{nightPath}/metrics", new { id = night.Id })
@@ -72,12 +75,6 @@ public sealed class EventsPageWiringTests : IDisposable
     }
 
     public void Dispose() => harness.Dispose();
-
-    private static Selection Pick(GameEntity game, ActivityEntity act) => new()
-    {
-        Game = new Game { Id = game.Id, Name = game.Name },
-        Activity = new Activity { Id = act.Id, GameId = act.GameId, Name = act.Name }
-    };
 
     // EventList OnDetails -> OpenDetails, the details dialog's @ref and its Games.
     [TestMethod]
@@ -181,7 +178,82 @@ public sealed class EventsPageWiringTests : IDisposable
         Assert.IsEmpty(page.FormDialog().Alerts());
     }
 
+    // EventEditDialog Themes and Holidays: each filter list shows the page's own list, never the other one.
+    [TestMethod]
+    public async Task TheCreateDialogFiltersOfferTheLibrarysThemesAndHolidays()
+    {
+        var page = Loaded();
+
+        await page.Button("Create Event").ClickAsync(new());
+
+        CollectionAssert.AreEqual(new[] { "Spooky", "Cozy" }, FilterOptions(page, "Filter by themes"));
+        CollectionAssert.AreEqual(new[] { "Halloween" }, FilterOptions(page, "Filter by holidays"));
+    }
+
+    // EventEditDialog PageError: a save clears the page's message first. Here the message is the page's own, after a
+    // saved Event whose list refresh failed; the next save clears it.
+    [TestMethod]
+    public async Task TheNextSave_ClearsThePagesMessage()
+    {
+        var page = Loaded();
+        api.Offline(HttpMethod.Get, "/api/events");
+        await RowButton(page, "Game night", "Edit").ClickAsync(new());
+        await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Game night renamed" });
+        await page.FormDialog().Button("Update Event").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.AreEqual(RefreshFailed, Assert.ContainsSingle(PlainPageAlerts(page))));
+
+        // The list was not refreshed, so its row still shows the old name.
+        api.On(HttpMethod.Get, "/api/events", () => Answer(HttpStatusCode.OK, stored));
+        await RowButton(page, "Game night", "Edit").ClickAsync(new());
+        await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Game night again" });
+        await page.FormDialog().Button("Update Event").ClickAsync(new());
+
+        page.WaitForAssertion(() => Assert.Contains("Game night again", Assert.ContainsSingle(page.Rows())));
+        Assert.IsEmpty(page.PageAlerts());
+    }
+
+    // EventEditDialog ActionError: a save that fails after its dialog was closed shows in the page's dismissable
+    // error bar. While a save runs no page event closes the dialog (Cancel and Escape wait), so the test closes it
+    // through the dialog's own close method, as DialogSafetyTests does.
+    [TestMethod]
+    public async Task AnEditSaveFailingAfterItsDialogClosed_ShowsInThePagesErrorBar()
+    {
+        var page = Loaded();
+        var gate = api.Hold(HttpMethod.Put, nightPath, () => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        await RowButton(page, "Game night", "Edit").ClickAsync(new());
+        await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Game night renamed" });
+        var save = page.FormDialog().Button("Update Event").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
+        await CloseThrough(page, page.FindComponent<EventEditDialog>().Instance, "CloseCustomize");
+
+        gate.SetResult();
+        await save;
+
+        AssertInErrorBar(page, "The event was not saved. The server had a problem (HTTP 500). Try again.");
+    }
+
+    // EventDetailsDialog ActionError: a Select Winner that fails after its dialog was closed shows in the page's
+    // error bar. No page event closes the dialog while it runs, so the test closes it through its own close method.
+    [TestMethod]
+    public async Task ASelectWinnerFailingAfterItsDialogClosed_ShowsInThePagesErrorBar()
+    {
+        var page = Loaded();
+        var gate = api.Hold(HttpMethod.Put, nightPath, () => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        await RowButton(page, "Game night", "Details").ClickAsync(new());
+        var select = Card(page, "Stock").Button("Select Winner").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Close").IsBusy()));
+        await CloseThrough(page, page.FindComponent<EventDetailsDialog>().Instance, "CloseDetails");
+
+        gate.SetResult();
+        await select;
+
+        AssertInErrorBar(page, "The winner was not saved. The server had a problem (HTTP 500). Try again.");
+        Assert.AreEqual(grandPrix.Id, Assert.ContainsSingle(stored).WinnerActivityId);
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
+
+    private const string RefreshFailed = "The event was saved, but the list could not be refreshed. Reload the page to see the saved event.";
 
     private IRenderedComponent<Events> Loaded()
     {
@@ -189,6 +261,33 @@ public sealed class EventsPageWiringTests : IDisposable
         page.WaitForRows(1);
         return page;
     }
+
+    // The checkbox labels of one filter group in the open dialog, in order.
+    private static List<string> FilterOptions(IRenderedComponent<Events> page, string group) =>
+        page.FormDialog().QuerySelector($"[role=group][aria-label='{group}']")!
+            .QuerySelectorAll("fluent-checkbox").Select(c => c.TextContent.Trim()).ToList();
+
+    // The page's plain messages (its own div), outside any dialog and outside the error bars.
+    private static List<string> PlainPageAlerts(IRenderedComponent<Events> page) =>
+        page.FindAll("[role=alert]").Where(a => a.Closest("fluent-dialog") is null && a.QuerySelector(".fluent-messagebar-message") is null)
+            .Select(a => a.TextContent.Trim()).ToList();
+
+    // The message shows once, in the page's error bar with its Dismiss button, and Dismiss clears it.
+    private static void AssertInErrorBar(IRenderedComponent<Events> page, string message)
+    {
+        page.WaitForAssertion(() => Assert.AreEqual(message, Assert.ContainsSingle(page.PageAlerts())));
+        Assert.IsEmpty(PlainPageAlerts(page), "an error-bar message, not the page's plain message");
+        var bar = page.FindAll("[role=alert]").Single(a => a.Closest("fluent-dialog") is null);
+        bar.Button("Dismiss").Click();
+        Assert.IsEmpty(page.PageAlerts());
+    }
+
+    // Runs a dialog's own close method, then renders, as an event handler would.
+    private static Task CloseThrough(IRenderedComponent<Events> page, IComponent dialog, string method) => page.InvokeAsync(() =>
+    {
+        dialog.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(dialog, []);
+        dialog.GetType().GetMethod("StateHasChanged", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(dialog, []);
+    });
 
     // Serialized when answered, so a later change to the stored list never alters an answer already sent.
     private static HttpResponseMessage Answer<T>(HttpStatusCode status, T body) =>
@@ -198,19 +297,8 @@ public sealed class EventsPageWiringTests : IDisposable
     private EventEntity Sent(HttpMethod method, string path) =>
         JsonSerializer.Deserialize<EventEntity>(api.Bodies(method, path).Last()!, JsonSerializerOptions.Web)!;
 
-    private static IElement RowButton(IRenderedComponent<Events> page, string item, string title) =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
-
     private static IElement EventName(IRenderedComponent<Events> page) =>
         page.FormDialog().QuerySelector("fluent-text-field[placeholder='Enter event name...']")!;
-
-    // The Selection card of one Activity in the details dialog.
-    private static IElement Card(IRenderedComponent<Events> page, string activity) =>
-        page.FormDialog().QuerySelectorAll("fluent-card")
-            .Single(c => c.QuerySelectorAll(".fluent-typography").Any(l => l.TextContent.Trim() == activity));
 
     // The Activity on the card that carries the Winner badge in the details dialog.
     private string WinnerInDialog(IRenderedComponent<Events> page)
