@@ -5,6 +5,7 @@ using Azure.Data.Tables;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
+using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
@@ -62,7 +63,7 @@ public class DeleteInUseRefusalTests
     private void SeedActivity(Guid gameId, IEnumerable<Guid>? themeIds = null, IEnumerable<Guid>? holidayIds = null)
     {
         var id = Guid.NewGuid().ToString("D");
-        h.Activities[id] = new TableEntity("Activity", id)
+        h.Activities[id] = new TableEntity(TableNames.ActivityPartition, id)
         {
             ["GameId"] = gameId,
             ["Name"] = "Act",

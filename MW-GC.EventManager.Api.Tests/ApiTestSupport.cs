@@ -104,16 +104,16 @@ internal static partial class TableMocks
     {
         var table = new Mock<TableClient>();
         table.Setup(t => t.UpsertEntityAsync(It.IsAny<T>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
-            .Returns((T row, TableUpdateMode _, CancellationToken _) => Task.FromResult(Store(rows, row)));
+            .Returns((T row, TableUpdateMode _, CancellationToken _) => Task.FromResult(Store(rows, row.RowKey, row)));
         table.Setup(t => t.AddEntityAsync(It.IsAny<T>(), It.IsAny<CancellationToken>()))
             .Returns((T row, CancellationToken _) => rows.TryAdd(row.RowKey, row)
-                ? Task.FromResult(Store(rows, row))
+                ? Task.FromResult(Store(rows, row.RowKey, row))
                 : throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null));
         table.Setup(t => t.UpdateEntityAsync(It.IsAny<T>(), It.IsAny<ETag>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
             .Returns((T row, ETag ifMatch, TableUpdateMode _, CancellationToken _) =>
             {
                 Check(rows, row.RowKey, ifMatch);
-                return Task.FromResult(Store(rows, row));
+                return Task.FromResult(Store(rows, row.RowKey, row));
             });
         table.Setup(t => t.DeleteEntityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ETag>(), It.IsAny<CancellationToken>()))
             .Returns((string _, string id, ETag ifMatch, CancellationToken _) =>
@@ -145,16 +145,19 @@ internal static partial class TableMocks
         return table;
     }
 
-    private static Response Store<T>(ConcurrentDictionary<string, T> rows, T row) where T : class, ITableEntity
+    // Stores the row under its key (the RowKey in a Table, partition and row key in a PartitionedTable)
+    // with a fresh ETag, and answers with that ETag.
+    private static Response Store<T>(ConcurrentDictionary<string, T> rows, string key, T row) where T : class, ITableEntity
     {
         row.ETag = NextETag();
-        rows[row.RowKey] = row;
+        rows[key] = row;
         return new StorageResponse(row.ETag);
     }
 
-    private static void Check<T>(ConcurrentDictionary<string, T> rows, string id, ETag ifMatch) where T : class, ITableEntity
+    // A conditional write to the row under that key: 404 when there is none, 412 when If-Match is stale.
+    private static void Check<T>(ConcurrentDictionary<string, T> rows, string key, ETag ifMatch) where T : class, ITableEntity
     {
-        if (!rows.TryGetValue(id, out var current))
+        if (!rows.TryGetValue(key, out var current))
             throw new RequestFailedException(404, "The specified resource does not exist.", "ResourceNotFound", null);
         if (ifMatch != ETag.All && ifMatch != current.ETag)
             throw new RequestFailedException(412, "The update condition specified in the request was not satisfied.", "UpdateConditionNotSatisfied", null);
@@ -203,7 +206,7 @@ internal sealed class LibraryHarness
     public ListLogger<EventFunctions> EventLog { get; } = new();
     public ListLogger<EventMetricsFunctions> EventMetricsLog { get; } = new();
     public ListLogger<CommentFunctions> CommentLog { get; } = new();
-    public ListLogger<ActivityNoteConversion> NoteConversionLog { get; } = new();
+    public ListLogger<ActivityNoteConversion> OldTextConversionLog { get; } = new();
 
     public GameFunctions GameApi { get; }
     public ThemeFunctions ThemeApi { get; }
@@ -212,7 +215,8 @@ internal sealed class LibraryHarness
     public EventFunctions EventApi { get; }
     public EventMetricsFunctions EventMetricsApi { get; }
     public CommentFunctions CommentApi { get; }
-    public ActivityNoteConversion NoteConversion { get; }
+    /// <summary>The old-text conversion (<see cref="ActivityNoteConversion"/>) over this library.</summary>
+    public ActivityNoteConversion OldTextConversion { get; }
 
     public LibraryHarness()
     {
@@ -229,26 +233,26 @@ internal sealed class LibraryHarness
             .Returns(() => AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(Likes.Values.ToList(), null, Mock.Of<Response>())]));
 
         var service = new Mock<TableServiceClient>();
-        service.Setup(s => s.GetTableClient("Games")).Returns(GameTable.Object);
-        service.Setup(s => s.GetTableClient("Themes")).Returns(ThemeTable.Object);
-        service.Setup(s => s.GetTableClient("Holidays")).Returns(HolidayTable.Object);
+        service.Setup(s => s.GetTableClient(TableNames.Games)).Returns(GameTable.Object);
+        service.Setup(s => s.GetTableClient(TableNames.Themes)).Returns(ThemeTable.Object);
+        service.Setup(s => s.GetTableClient(TableNames.Holidays)).Returns(HolidayTable.Object);
         service.Setup(s => s.GetTableClient(TableNames.Activities)).Returns(ActivityTable.Object);
-        service.Setup(s => s.GetTableClient("Events")).Returns(EventTable.Object);
-        service.Setup(s => s.GetTableClient("EventMetrics")).Returns(EventMetricsTable.Object);
+        service.Setup(s => s.GetTableClient(TableNames.Events)).Returns(EventTable.Object);
+        service.Setup(s => s.GetTableClient(TableNames.EventMetrics)).Returns(EventMetricsTable.Object);
         service.Setup(s => s.GetTableClient(TableNames.Comments)).Returns(CommentTable.Object);
         service.Setup(s => s.GetTableClient(FeedbackStore.LinksTable)).Returns(TableMocks.Table(new ConcurrentDictionary<string, TableEntity>()).Object);
         service.Setup(s => s.GetTableClient(FeedbackStore.LikesTable)).Returns(LikesTable.Object);
 
-        var games = new TableStore<GameEntity>(service.Object, "Games", "Game");
+        var games = new TableStore<GameEntity>(service.Object, TableNames.Games, TableNames.GamePartition);
         var activities = new TableStore<ActivityEntity>(service.Object, TableNames.Activities, TableNames.ActivityPartition);
-        var events = new TableStore<EventEntity>(service.Object, "Events", "Event");
-        var metrics = new TableStore<EventMetricsEntity>(service.Object, "EventMetrics", "Metrics");
+        var events = new TableStore<EventEntity>(service.Object, TableNames.Events, TableNames.EventPartition);
+        var metrics = new TableStore<EventMetricsEntity>(service.Object, TableNames.EventMetrics, TableNames.EventMetricsPartition);
         var comments = new TableStore<CommentEntity>(service.Object, TableNames.Comments, TableNames.CommentPartition);
         GameApi = new GameFunctions(games, activities, GameLog);
-        ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, "Themes", "Theme"), activities, ThemeLog);
-        HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, "Holidays", "Holiday"), activities, HolidayLog);
-        NoteConversion = new ActivityNoteConversion(activities, comments, service.Object, NoteConversionLog);
-        ActivityApi = new ActivityFunctions(activities, games, comments, NoteConversion, ActivityLog);
+        ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, TableNames.Themes, TableNames.ThemePartition), activities, ThemeLog);
+        HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, TableNames.Holidays, TableNames.HolidayPartition), activities, HolidayLog);
+        OldTextConversion = new ActivityNoteConversion(activities, comments, service.Object, OldTextConversionLog);
+        ActivityApi = new ActivityFunctions(activities, games, comments, OldTextConversion, ActivityLog);
         EventApi = new EventFunctions(events, games, activities, metrics, EventLog);
         EventMetricsApi = new EventMetricsFunctions(metrics, events, new FeedbackStore(service.Object), EventMetricsLog);
         CommentApi = new CommentFunctions(comments, activities, events, CommentLog);
@@ -288,7 +292,7 @@ internal sealed class LibraryHarness
     /// <summary>Stores a Game directly and returns it, for routes that need one to exist.</summary>
     public GameEntity SeedGame(string name = "Alpha")
     {
-        var game = new GameEntity { Id = Guid.NewGuid(), Name = name, PartitionKey = "Game" };
+        var game = new GameEntity { Id = Guid.NewGuid(), Name = name, PartitionKey = TableNames.GamePartition };
         Games[game.RowKey] = game;
         return game;
     }
