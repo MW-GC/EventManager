@@ -16,6 +16,9 @@ namespace MW_GC.EventManager.E2ETests;
 [TestClass]
 public sealed class DiscardAndDeleteFlows
 {
+    private static readonly LocatorAssertionsToBeVisibleOptions Visible = new() { Timeout = UiTimeoutMs };
+    private static readonly LocatorAssertionsToBeHiddenOptions Hidden = new() { Timeout = UiTimeoutMs };
+
     [TestMethod]
     public Task CreateEventDialog_TypedNameThenEscape_AsksToDiscard_KeepEditingKeepsTheText() => RunAsync(async session =>
     {
@@ -23,31 +26,31 @@ public sealed class DiscardAndDeleteFlows
         await session.OpenEventsPageAsync();
 
         await session.Button("Create Event").ClickAsync();
-        var dialog = Dialog(page, "Customize Event");
-        await Expect(dialog).ToBeVisibleAsync();
+        var dialog = session.Dialog("Customize Event");
+        await Expect(dialog).ToBeVisibleAsync(Visible);
 
         const string typed = "E2E unsaved name";
         var name = page.GetByRole(AriaRole.Textbox, new() { Name = "Event Name", Exact = true });
         await name.FillAsync(typed);
         await name.PressAsync("Escape");
 
-        var discard = Dialog(page, "Discard changes?");
-        await Expect(discard).ToBeVisibleAsync();
+        var discard = session.Dialog("Discard changes?");
+        await Expect(discard).ToBeVisibleAsync(Visible);
         await Expect(page.GetByText("Your changes in this dialog have not been saved.", new() { Exact = true }))
-            .ToBeVisibleAsync();
+            .ToBeVisibleAsync(Visible);
 
         // Keep editing answers the question and leaves the dialog and the typed text alone.
         await session.Button("Keep editing").ClickAsync();
-        await Expect(discard).ToBeHiddenAsync();
-        await Expect(dialog).ToBeVisibleAsync();
-        await Expect(name).ToHaveValueAsync(typed);
+        await Expect(discard).ToBeHiddenAsync(Hidden);
+        await Expect(dialog).ToBeVisibleAsync(Visible);
+        await Expect(name).ToHaveValueAsync(typed, new() { Timeout = UiTimeoutMs });
 
         // Asked again, Discard closes the dialog without saving.
         await name.PressAsync("Escape");
-        await Expect(discard).ToBeVisibleAsync();
+        await Expect(discard).ToBeVisibleAsync(Visible);
         await session.Button("Discard").ClickAsync();
-        await Expect(discard).ToBeHiddenAsync();
-        await Expect(dialog).ToBeHiddenAsync();
+        await Expect(discard).ToBeHiddenAsync(Hidden);
+        await Expect(dialog).ToBeHiddenAsync(Hidden);
     });
 
     [TestMethod]
@@ -55,46 +58,34 @@ public sealed class DiscardAndDeleteFlows
     {
         // The library starts empty, so the test brings its own Game, Activity and Event; the session removes them
         // after (a 204 also covers the Event the flow deleted).
-        var tag = Guid.NewGuid().ToString("N")[..8];
-        var game = await session.AddGameAsync($"E2E Game {tag}");
-        var activity = await session.PostAsync("/api/activities",
-            new { gameId = Id(game), name = $"E2E Activity {tag}", description = "d", rules = "r" });
-        var eventName = $"E2E Delete {tag}";
-        var created = await session.AddEventAsync(new
-        {
-            name = eventName,
-            date = DateTimeOffset.UtcNow,
-            uniqueGamesOnly = true,
-            selections = new[] { new { game, activity } },
-        });
-        var eventId = Id(created);
+        var tag = NewTag();
+        var game = await session.Api.AddGameAsync($"E2E Game {tag}");
+        var activity = await session.Api.AddActivityAsync(game, $"E2E Activity {tag}");
+        var created = await session.Api.AddEventAsync(EventBody.Of($"E2E Delete {tag}", true, new SelectionBody(game, activity)));
+        var eventPath = $"/api/events/{created.Id}";
 
         var page = session.Page;
         await session.OpenEventsPageAsync();
-        var rowDelete = session.Button($"Delete {eventName}");
+        var rowDelete = session.Button($"Delete {created.Name}");
         await Expect(rowDelete).ToBeVisibleAsync(new() { Timeout = AppLoadTimeoutMs });
 
         // The question names the Event; Cancel sends nothing and the Event stays.
         await rowDelete.ClickAsync();
-        var confirm = Dialog(page, "Delete event");
-        await Expect(confirm).ToBeVisibleAsync();
-        await Expect(page.GetByText($"Delete {eventName}? This cannot be undone.", new() { Exact = true }))
-            .ToBeVisibleAsync();
+        var confirm = session.Dialog("Delete event");
+        await Expect(confirm).ToBeVisibleAsync(Visible);
+        await Expect(page.GetByText($"Delete {created.Name}? This cannot be undone.", new() { Exact = true }))
+            .ToBeVisibleAsync(Visible);
         await session.Button("Cancel").ClickAsync();
-        await Expect(confirm).ToBeHiddenAsync();
-        await Expect(rowDelete).ToBeVisibleAsync();
-        Assert.AreEqual(200, await session.GetStatusAsync($"/api/events/{eventId}"), "Cancel must keep the Event.");
+        await Expect(confirm).ToBeHiddenAsync(Hidden);
+        await Expect(rowDelete).ToBeVisibleAsync(Visible);
+        Assert.AreEqual(200, await session.Api.GetStatusAsync(eventPath), "Cancel must keep the Event.");
 
         // Confirm deletes it: the row goes from the list and the API no longer has it.
         await rowDelete.ClickAsync();
-        await Expect(confirm).ToBeVisibleAsync();
+        await Expect(confirm).ToBeVisibleAsync(Visible);
         await session.Button("Delete").ClickAsync();
-        await Expect(confirm).ToBeHiddenAsync();
-        await Expect(rowDelete).ToHaveCountAsync(0);
-        Assert.AreEqual(404, await session.GetStatusAsync($"/api/events/{eventId}"), "Confirm must delete the Event.");
+        await Expect(confirm).ToBeHiddenAsync(Hidden);
+        await Expect(rowDelete).ToHaveCountAsync(0, new() { Timeout = UiTimeoutMs });
+        Assert.AreEqual(404, await session.Api.GetStatusAsync(eventPath), "Confirm must delete the Event.");
     });
-
-    // Every page dialog is a FluentDialog whose accessible name is its title.
-    private static ILocator Dialog(IPage page, string name) =>
-        page.GetByRole(AriaRole.Dialog, new() { Name = name, Exact = true });
 }
