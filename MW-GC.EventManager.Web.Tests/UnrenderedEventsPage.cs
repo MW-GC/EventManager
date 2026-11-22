@@ -10,7 +10,9 @@ namespace MW_GC.EventManager.Web.Tests;
 // each other as the page's markup wires them, for tests that drive the page's handlers directly.
 // A member is looked up on the create-and-edit dialog, then the details dialog, then the page, so a
 // test names a handler or field as it did before the split. The library lists are the page's, and
-// are handed to both dialogs, as the page's render does.
+// are handed to the dialogs as the page's render does: Games to both, Activities to the create-and-edit
+// dialog only. Because this wiring is written out here by hand, a mis-wired parameter in Events.razor
+// does not fail these tests; EventsPageWiringTests render the real page for that.
 internal sealed class UnrenderedEventsPage
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -45,9 +47,12 @@ internal sealed class UnrenderedEventsPage
         if (name is "_games" or "_activities")
         {
             Field(Page, name)!.SetValue(Page, value);
-            var parameter = name == "_games" ? "Games" : "Activities";
-            SetProperty(Edit, parameter, value);
-            SetProperty(Details, parameter, value);
+            if (name == "_games")
+            {
+                SetProperty(Edit, nameof(EventEditDialog.Games), value);
+                SetProperty(Details, nameof(EventDetailsDialog.Games), value);
+            }
+            else SetProperty(Edit, nameof(EventEditDialog.Activities), value);
             return;
         }
         var owner = Parts.First(p => Field(p, name) is not null);
@@ -60,7 +65,7 @@ internal sealed class UnrenderedEventsPage
         return Invoke(owner, name, args);
     }
 
-    // An injected service (EventSvc, ActivitySvc), set on every part that injects it.
+    // An injected service, such as EventSvc, set on every part that injects it under that name.
     public void SetService(string name, object service)
     {
         foreach (var part in Parts)

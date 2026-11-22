@@ -15,8 +15,13 @@ public sealed class ConfirmRequest(string title, string message, string confirmT
     public Func<Task> OnConfirm { get; } = onConfirm;
 
     /// <summary>
-    /// Asked over an open form dialog (Discard changes?). Answering it leaves focus to that dialog,
-    /// which returns focus to its own opener when it closes; any other question returns focus itself.
+    /// A Discard changes? question, always asked over an open form dialog. The page that shows a question
+    /// sends focus back to the element it remembered (a row's Delete button) only when this is false.
+    /// A Discard leaves focus to the form dialog instead: Keep editing hands it back into that dialog
+    /// (ConfirmDialog, focus.js), and Discard closes the dialog, which returns focus to its own opener.
+    /// A dialog that asks its own questions, such as a details dialog asking Delete Comment for its
+    /// Comments panel, never sends focus back to its opener on an answer, whatever this says: the
+    /// question gives focus back to the dialog that stays open.
     /// </summary>
     public bool OverDialog { get; private init; }
 
@@ -28,6 +33,13 @@ public sealed class ConfirmRequest(string title, string message, string confirmT
     public static ConfirmRequest Discard(Action discard) =>
         new("Discard changes?", "Your changes in this dialog have not been saved.", "Discard", "Keep editing", true,
             () => { discard(); return Task.CompletedTask; }) { OverDialog = true };
+
+    /// <summary>
+    /// The same question before an action that would drop unsaved changes without closing the dialog, such as
+    /// Select Winner swapping the Comments panel; Discard runs <paramref name="discard"/> and waits for it.
+    /// </summary>
+    public static ConfirmRequest Discard(Func<Task> discard) =>
+        new("Discard changes?", "Your changes in this dialog have not been saved.", "Discard", "Keep editing", true, discard) { OverDialog = true };
 
     /// <summary>
     /// What overlay click or Escape on a form dialog does; returns the page's next open question.

@@ -532,8 +532,7 @@ public sealed class EventMetricsTests
         {
             new EventMetricsWithLikes(first, 12, 4, 8, 30m, 1),
             new EventMetricsWithLikes(second, null, null, 7, null, 4),
-        }, items);
-        Assert.IsFalse(items.Any(i => i.EventId == neither));
+        }, items, $"exactly these two items: none for {neither}");
     }
 
     [TestMethod]
@@ -549,6 +548,21 @@ public sealed class EventMetricsTests
     }
 
     [TestMethod]
+    [DataRow("B")]
+    [DataRow("N")]
+    public async Task GetAll_DoesNotCountALikesPartitionKeyInAnotherGuidForm(string format)
+    {
+        var (id, _) = await CreateEvent();
+        SeedLikes(id, 1);
+        // The same Event id in braces or without hyphens: Like rows are written in the "D" form only.
+        SeedLikes(id.ToString(format), 3);
+
+        var item = Assert.ContainsSingle(await GetAllMetrics());
+
+        Assert.AreEqual(new EventMetricsWithLikes(id, null, null, null, null, 1), item);
+    }
+
+    [TestMethod]
     public async Task GetAll_CountsLikesInOneQueryOfTheWholeTable_SelectingOnlyTheKeys()
     {
         var (first, _) = await CreateEvent("First");
@@ -556,11 +570,15 @@ public sealed class EventMetricsTests
         SeedLikes(first, 2);
         SeedLikes(second, 1);
 
-        await GetAllMetrics();
+        var items = await GetAllMetrics();
 
-        var query = Assert.ContainsSingle(h.LikesTable.Invocations.Where(i => i.Method.Name == nameof(TableClient.QueryAsync)));
-        Assert.IsNull(query.Arguments[0], "no filter: every Event's Likes in one pass");
-        CollectionAssert.AreEquivalent(new[] { "PartitionKey", "RowKey" }, ((IEnumerable<string>)query.Arguments[2]!).ToArray());
+        CollectionAssert.AreEquivalent(new[] { (first, 2), (second, 1) }, items.Select(i => (i.EventId, i.Likes)).ToArray());
+        // One read of the Likes table, with no filter (every Event's Likes in one pass) and only the keys selected.
+        h.LikesTable.Verify(t => t.QueryAsync<TableEntity>(
+            (string?)null, It.IsAny<int?>(),
+            It.Is<IEnumerable<string>>(select => select.Order().SequenceEqual(new[] { "PartitionKey", "RowKey" })),
+            It.IsAny<CancellationToken>()), Times.Once());
+        Assert.AreEqual(1, h.LikesTable.Invocations.Count(i => i.Method.Name == nameof(TableClient.QueryAsync)));
     }
 
     [TestMethod]

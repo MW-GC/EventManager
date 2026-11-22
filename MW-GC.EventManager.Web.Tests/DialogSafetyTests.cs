@@ -32,7 +32,7 @@ public sealed class DialogSafetyTests : IDisposable
     private readonly ActivityEntity grandPrix;
     private readonly ActivityEntity timeTrial;
     private readonly ActivityEntity stock;
-    // Used by the "Party" Event but no longer in the library.
+    // Used by the "Party" Event but no longer in the library (Party's Winner is Grand Prix, which is).
     private readonly Activity retired;
     private readonly ThemeEntity spooky = new() { Name = "Spooky" };
     private readonly HolidayEntity halloween = new() { Name = "Halloween" };
@@ -52,23 +52,23 @@ public sealed class DialogSafetyTests : IDisposable
             UniqueGamesOnly = false,
             Selections = [Pick(kart, grandPrix), Pick(brawl, stock), Pick(kart, timeTrial)]
         };
+        // One Selection no longer in the library, and a Winner that is (its details show the Comments panel).
         party = new EventEntity
         {
             Name = "Party",
             Date = new DateTimeOffset(2026, 10, 31, 20, 0, 0, TimeSpan.Zero),
-            Selections = [new Selection { Game = new Game { Id = brawl.Id, Name = brawl.Name }, Activity = retired }],
-            WinnerActivityId = retired.Id
+            Selections = [new Selection { Game = new Game { Id = brawl.Id, Name = brawl.Name }, Activity = retired }, Pick(kart, grandPrix)],
+            WinnerActivityId = grandPrix.Id
         };
         api.Json(HttpMethod.Get, "/api/games", new[] { kart, brawl, puzzle })
            .Json(HttpMethod.Get, "/api/activities", new[] { grandPrix, timeTrial, stock })
            .Json(HttpMethod.Get, "/api/themes", new[] { spooky })
            .Json(HttpMethod.Get, "/api/holidays", new[] { halloween })
            .Json(HttpMethod.Get, "/api/events", new[] { night, party })
-           // The Activity details dialog's Comments panel (#131): none yet, so its first text box is New Comment.
-           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>())
-           // The Party Event's Winner, in its Event details (#132): none yet, so its first text box is New Comment.
-           // (The real API answers 404 for an Activity no longer in the library; these tests only need a text box.)
-           .Json(HttpMethod.Get, $"/api/activities/{retired.Id}/comments", Array.Empty<CommentEntity>());
+           // Grand Prix's Comments, in its Activity details (#131) and as the Party Event's Winner in Event details
+           // (#132): none yet, so the first text box is New Comment. The retired Activity's are not routed, so they
+           // answer 404, as the real API does for an Activity no longer in the library.
+           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>());
         harness = new PageHarness(api);
     }
 
@@ -501,6 +501,35 @@ public sealed class DialogSafetyTests : IDisposable
         await save;
         Assert.IsFalse(page.HasFormDialog());
         Assert.IsFalse(page.HasConfirmation());
+    }
+
+    // #186 item 3: an Event whose Winner is no longer in the library. The API answers 404 for that Activity's
+    // Comments, so the details dialog shows the load error and no text box, and has nothing to discard.
+    [TestMethod]
+    public async Task EventDetails_ARetiredWinner_ShowsTheCommentsLoadError()
+    {
+        var old = new EventEntity
+        {
+            Name = "Old party",
+            Date = new DateTimeOffset(2025, 10, 31, 20, 0, 0, TimeSpan.Zero),
+            Selections = [new Selection { Game = new Game { Id = brawl.Id, Name = brawl.Name }, Activity = retired }],
+            WinnerActivityId = retired.Id
+        };
+        api.Json(HttpMethod.Get, "/api/events", new[] { night, old });
+        var page = Open("events");
+
+        await RowButton(page, "Old party", "Details").ClickAsync(new());
+
+        var panel = () => page.FormDialog().QuerySelector(".activity-comments")!;
+        page.WaitForAssertion(() => Assert.Contains("Comments could not be loaded. Not found. It may have been deleted.", panel().TextContent));
+        Assert.AreEqual(1, api.Count(HttpMethod.Get, $"/api/activities/{retired.Id}/comments"));
+        Assert.IsEmpty(page.FormDialog().QuerySelectorAll("fluent-text-area").ToList());
+        Assert.IsNotNull(panel().Button("Retry"));
+
+        await Dismiss(page);
+        Assert.IsFalse(page.HasFormDialog());
+        Assert.IsFalse(page.HasConfirmation());
+        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
     }
 
     [TestMethod]

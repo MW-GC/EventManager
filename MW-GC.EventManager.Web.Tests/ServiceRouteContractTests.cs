@@ -51,6 +51,7 @@ public sealed class ServiceRouteContractTests
         new(typeof(EventService), nameof(EventService.GetLikesAsync), "GET", "api/events/{id}/likes", h => new EventService(h).GetLikesAsync(Id)),
 
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.GetAllAsync), "GET", "api/event-metrics", h => new EventMetricsClient(h).GetAllAsync()),
+        new(typeof(EventMetricsClient), nameof(EventMetricsClient.LoadAllAsync), "GET", "api/event-metrics", h => new EventMetricsClient(h).LoadAllAsync()),
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.GetAsync), "GET", "api/events/{id}/metrics", h => new EventMetricsClient(h).GetAsync(Id)),
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.SaveAsync), "PUT", "api/events/{id}/metrics", h => new EventMetricsClient(h).SaveAsync(Id, new EventMetricsEntity(), null)),
 

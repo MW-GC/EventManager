@@ -124,12 +124,7 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
     public async Task<List<TEntity>> GetAllAsync(CancellationToken ct = default)
     {
         if (ComplexProps.Length == 0)
-        {
-            var results = new List<TEntity>();
-            await foreach (var entity in _table.QueryAsync<TEntity>(e => e.PartitionKey == _partitionKey, cancellationToken: ct))
-                results.Add(entity);
-            return results;
-        }
+            return await QueryPartitionAsync(null, ct);
 
         // When complex props exist, read as TableEntity and hydrate manually.
         var raw = new List<TableEntity>();
@@ -150,13 +145,22 @@ internal sealed class TableStore<TEntity> where TEntity : EntityBase, new()
         if (ComplexProps.Length != 0)
             throw new NotSupportedException($"{typeof(TEntity).Name} has complex properties; filter after GetAllAsync instead.");
 
-        Expression<Func<TEntity, bool>> inPartition = e => e.PartitionKey == _partitionKey;
-        var parameter = inPartition.Parameters[0];
-        var body = new ParameterSwap(filter.Parameters[0], parameter).Visit(filter.Body);
-        var combined = Expression.Lambda<Func<TEntity, bool>>(Expression.AndAlso(inPartition.Body, body), parameter);
+        return await QueryPartitionAsync(filter, ct);
+    }
+
+    /// <summary>The typed rows of the partition, <paramref name="filter"/> (if any) ANDed into the one query storage runs.</summary>
+    private async Task<List<TEntity>> QueryPartitionAsync(Expression<Func<TEntity, bool>>? filter, CancellationToken ct)
+    {
+        Expression<Func<TEntity, bool>> query = e => e.PartitionKey == _partitionKey;
+        if (filter is not null)
+        {
+            var parameter = query.Parameters[0];
+            var body = new ParameterSwap(filter.Parameters[0], parameter).Visit(filter.Body);
+            query = Expression.Lambda<Func<TEntity, bool>>(Expression.AndAlso(query.Body, body), parameter);
+        }
 
         var results = new List<TEntity>();
-        await foreach (var entity in _table.QueryAsync<TEntity>(combined, cancellationToken: ct))
+        await foreach (var entity in _table.QueryAsync(query, cancellationToken: ct))
             results.Add(entity);
         return results;
     }

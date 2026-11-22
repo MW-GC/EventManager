@@ -1,6 +1,6 @@
-using System.Text.Json;
 using Microsoft.Playwright;
 using static Microsoft.Playwright.Assertions;
+using static MW_GC.EventManager.E2ETests.BrowserSession;
 
 namespace MW_GC.EventManager.E2ETests;
 
@@ -16,22 +16,13 @@ namespace MW_GC.EventManager.E2ETests;
 [TestClass]
 public sealed class DiscardAndDeleteFlows
 {
-    // The first load downloads the WebAssembly runtime; give it room on a cold runner.
-    private const float AppLoadTimeoutMs = 120_000;
-
     [TestMethod]
-    public async Task CreateEventDialog_TypedNameThenEscape_AsksToDiscard_KeepEditingKeepsTheText()
+    public Task CreateEventDialog_TypedNameThenEscape_AsksToDiscard_KeepEditingKeepsTheText() => RunAsync(async session =>
     {
-        var appUrl = E2EEnvironment.AppUrlOrSkip();
+        var page = session.Page;
+        await session.OpenEventsPageAsync();
 
-        using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
-        await using var context = await browser.NewContextAsync();
-        await EmulatorSignIn.AsAdminAsync(context, appUrl);
-        var page = await context.NewPageAsync();
-        await OpenEventsPageAsync(page, appUrl);
-
-        await Button(page, "Create Event").ClickAsync();
+        await session.Button("Create Event").ClickAsync();
         var dialog = Dialog(page, "Customize Event");
         await Expect(dialog).ToBeVisibleAsync();
 
@@ -46,7 +37,7 @@ public sealed class DiscardAndDeleteFlows
             .ToBeVisibleAsync();
 
         // Keep editing answers the question and leaves the dialog and the typed text alone.
-        await Button(page, "Keep editing").ClickAsync();
+        await session.Button("Keep editing").ClickAsync();
         await Expect(discard).ToBeHiddenAsync();
         await Expect(dialog).ToBeVisibleAsync();
         await Expect(name).ToHaveValueAsync(typed);
@@ -54,96 +45,56 @@ public sealed class DiscardAndDeleteFlows
         // Asked again, Discard closes the dialog without saving.
         await name.PressAsync("Escape");
         await Expect(discard).ToBeVisibleAsync();
-        await Button(page, "Discard").ClickAsync();
+        await session.Button("Discard").ClickAsync();
         await Expect(discard).ToBeHiddenAsync();
         await Expect(dialog).ToBeHiddenAsync();
-    }
+    });
 
     [TestMethod]
-    public async Task DeleteEvent_ConfirmationNamesIt_CancelKeepsIt_ConfirmRemovesIt()
+    public Task DeleteEvent_ConfirmationNamesIt_CancelKeepsIt_ConfirmRemovesIt() => RunAsync(async session =>
     {
-        var appUrl = E2EEnvironment.AppUrlOrSkip();
-
-        using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
-        await using var context = await browser.NewContextAsync();
-        await EmulatorSignIn.AsAdminAsync(context, appUrl);
-        var api = context.APIRequest;
-
-        // The library starts empty, so the test brings its own Game, Activity and Event and removes them after.
+        // The library starts empty, so the test brings its own Game, Activity and Event; the session removes them
+        // after (a 204 also covers the Event the flow deleted).
         var tag = Guid.NewGuid().ToString("N")[..8];
-        string? gameId = null, activityId = null, eventId = null;
-        try
+        var game = await session.AddGameAsync($"E2E Game {tag}");
+        var activity = await session.PostAsync("/api/activities",
+            new { gameId = Id(game), name = $"E2E Activity {tag}", description = "d", rules = "r" });
+        var eventName = $"E2E Delete {tag}";
+        var created = await session.AddEventAsync(new
         {
-            var game = await PostAsync(api, appUrl, "/api/games", new { name = $"E2E Game {tag}" });
-            gameId = game.GetProperty("id").GetString();
-            var activity = await PostAsync(api, appUrl, "/api/activities",
-                new { gameId, name = $"E2E Activity {tag}", description = "d", rules = "r" });
-            activityId = activity.GetProperty("id").GetString();
-            var eventName = $"E2E Delete {tag}";
-            var created = await PostAsync(api, appUrl, "/api/events", new
-            {
-                name = eventName,
-                date = DateTimeOffset.UtcNow,
-                uniqueGamesOnly = true,
-                selections = new[] { new { game, activity } },
-            });
-            eventId = created.GetProperty("id").GetString();
+            name = eventName,
+            date = DateTimeOffset.UtcNow,
+            uniqueGamesOnly = true,
+            selections = new[] { new { game, activity } },
+        });
+        var eventId = Id(created);
 
-            var page = await context.NewPageAsync();
-            await OpenEventsPageAsync(page, appUrl);
-            var rowDelete = Button(page, $"Delete {eventName}");
-            await Expect(rowDelete).ToBeVisibleAsync(new() { Timeout = AppLoadTimeoutMs });
+        var page = session.Page;
+        await session.OpenEventsPageAsync();
+        var rowDelete = session.Button($"Delete {eventName}");
+        await Expect(rowDelete).ToBeVisibleAsync(new() { Timeout = AppLoadTimeoutMs });
 
-            // The question names the Event; Cancel sends nothing and the Event stays.
-            await rowDelete.ClickAsync();
-            var confirm = Dialog(page, "Delete event");
-            await Expect(confirm).ToBeVisibleAsync();
-            await Expect(page.GetByText($"Delete {eventName}? This cannot be undone.", new() { Exact = true }))
-                .ToBeVisibleAsync();
-            await Button(page, "Cancel").ClickAsync();
-            await Expect(confirm).ToBeHiddenAsync();
-            await Expect(rowDelete).ToBeVisibleAsync();
-            Assert.AreEqual(200, (await api.GetAsync($"{appUrl}/api/events/{eventId}")).Status,
-                "Cancel must keep the Event.");
+        // The question names the Event; Cancel sends nothing and the Event stays.
+        await rowDelete.ClickAsync();
+        var confirm = Dialog(page, "Delete event");
+        await Expect(confirm).ToBeVisibleAsync();
+        await Expect(page.GetByText($"Delete {eventName}? This cannot be undone.", new() { Exact = true }))
+            .ToBeVisibleAsync();
+        await session.Button("Cancel").ClickAsync();
+        await Expect(confirm).ToBeHiddenAsync();
+        await Expect(rowDelete).ToBeVisibleAsync();
+        Assert.AreEqual(200, await session.GetStatusAsync($"/api/events/{eventId}"), "Cancel must keep the Event.");
 
-            // Confirm deletes it: the row goes from the list and the API no longer has it.
-            await rowDelete.ClickAsync();
-            await Expect(confirm).ToBeVisibleAsync();
-            await Button(page, "Delete").ClickAsync();
-            await Expect(confirm).ToBeHiddenAsync();
-            await Expect(rowDelete).ToHaveCountAsync(0);
-            Assert.AreEqual(404, (await api.GetAsync($"{appUrl}/api/events/{eventId}")).Status,
-                "Confirm must delete the Event.");
-        }
-        finally
-        {
-            // Child first: a Game with Activities refuses its delete. A 204 also covers an item already gone.
-            if (eventId is not null) await api.DeleteAsync($"{appUrl}/api/events/{eventId}");
-            if (activityId is not null) await api.DeleteAsync($"{appUrl}/api/activities/{activityId}");
-            if (gameId is not null) await api.DeleteAsync($"{appUrl}/api/games/{gameId}");
-        }
-    }
-
-    private static async Task OpenEventsPageAsync(IPage page, string appUrl)
-    {
-        await page.GotoAsync(appUrl + "/events", new() { Timeout = AppLoadTimeoutMs });
-        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Events", Level = 1, Exact = true }))
-            .ToBeVisibleAsync(new() { Timeout = AppLoadTimeoutMs });
-    }
+        // Confirm deletes it: the row goes from the list and the API no longer has it.
+        await rowDelete.ClickAsync();
+        await Expect(confirm).ToBeVisibleAsync();
+        await session.Button("Delete").ClickAsync();
+        await Expect(confirm).ToBeHiddenAsync();
+        await Expect(rowDelete).ToHaveCountAsync(0);
+        Assert.AreEqual(404, await session.GetStatusAsync($"/api/events/{eventId}"), "Confirm must delete the Event.");
+    });
 
     // Every page dialog is a FluentDialog whose accessible name is its title.
     private static ILocator Dialog(IPage page, string name) =>
         page.GetByRole(AriaRole.Dialog, new() { Name = name, Exact = true });
-
-    private static ILocator Button(IPage page, string name) =>
-        page.GetByRole(AriaRole.Button, new() { Name = name, Exact = true });
-
-    // Calls the API through the emulator with the context's admin cookie and returns the saved item.
-    private static async Task<JsonElement> PostAsync(IAPIRequestContext api, string appUrl, string path, object body)
-    {
-        var response = await api.PostAsync(appUrl + path, new() { DataObject = body });
-        Assert.IsTrue(response.Ok, $"POST {path} returned {response.Status}: {await response.TextAsync()}");
-        return (await response.JsonAsync())!.Value;
-    }
 }
