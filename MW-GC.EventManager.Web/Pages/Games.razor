@@ -89,11 +89,11 @@
                         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Wrap="true">
                             @foreach (var tid in context.ThemeIds)
                             {
-                                <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ResolveTheme(tid)" Style="font-size: 0.7rem;" />
+                                <TagBadge Kind="TagBadge.TagKind.Theme" Text="@NameLookup.NameOrIdStart(_themes, tid, t => t.Name)" Style="font-size: 0.7rem;" />
                             }
                             @foreach (var hid in context.HolidayIds)
                             {
-                                <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@ResolveHoliday(hid)" Style="font-size: 0.7rem;" />
+                                <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@NameLookup.NameOrIdStart(_holidays, hid, h => h.Name)" Style="font-size: 0.7rem;" />
                             }
                         </FluentStack>
                     </TemplateColumn>
@@ -171,9 +171,6 @@
             ? $"Delete {g.Name}? This cannot be undone."
             : $"{g.Name} has {count} {(count == 1 ? "activity" : "activities")}. The server refuses to delete a game that activities still use, so delete or move them first.";
     }
-
-    private string ResolveTheme(Guid id) => _themes?.FirstOrDefault(t => t.Id == id)?.Name ?? id.ToString()[..8];
-    private string ResolveHoliday(Guid id) => _holidays?.FirstOrDefault(h => h.Id == id)?.Name ?? id.ToString()[..8];
 
     private static string TruncateUrl(string url)
     {

@@ -4,7 +4,6 @@ using Bunit;
 using Microsoft.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
-using MW_GC.EventManager.Web.Services;
 
 namespace MW_GC.EventManager.Web.Tests;
 

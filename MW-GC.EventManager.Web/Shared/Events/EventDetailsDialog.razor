@@ -1,5 +1,5 @@
 @* The Event details dialog: its Selections as cards, Select Winner, the Like count and feedback
-   link (#101), the Comments panel of the Winner Activity (ActivityCommentsPanel, #132), and the Event
+   link (#101), the Comments panel of the Winner Activity (CommentsPanel, #132), and the Event
    metrics form (EventMetricsForm, #135). A Comment added here lands on the Winner Activity and records
    this Event; the panel reads the Activity's Comments live each time it opens, never this Event's
    Selection snapshot. The dialog owns its busy guard (Select Winner, a metrics save, a Comment request)
@@ -127,10 +127,10 @@
                             @if (isWinner)
                             {
                                 <FluentDivider />
-                                <ActivityCommentsPanel @key="selection.Activity.Id" @ref="_comments" ActivityId="selection.Activity.Id"
-                                                       EventId="_detailEvent.Id"
-                                                       SavingChanged="@((bool saving) => _savingComments = saving)"
-                                                       Ask="@((ConfirmRequest question) => _confirm = question)" />
+                                <CommentsPanel @key="selection.Activity.Id" @ref="_commentsPanel" ActivityId="selection.Activity.Id"
+                                               EventId="_detailEvent.Id"
+                                               SavingChanged="@((bool running) => _commentRequestRunning = running)"
+                                               Ask="@((ConfirmRequest question) => _confirm = question)" />
                             }
                         </FluentStack>
                     </FluentCard>
@@ -179,10 +179,10 @@
     private EventMetricsForm? _metrics;
     private bool _savingMetrics;
     // The Winner's Comments panel (#132), and whether one of its adds, saves or deletes is running.
-    private ActivityCommentsPanel? _comments;
-    private bool _savingComments;
+    private CommentsPanel? _commentsPanel;
+    private bool _commentRequestRunning;
     // Holds Close, overlay click, Escape and Select Winner (which swaps the Comments panel) alike.
-    private bool Busy => _selectingWinner || _savingMetrics || _savingComments;
+    private bool Busy => _selectingWinner || _savingMetrics || _commentRequestRunning;
 
     // A row's Details button.
     internal void Open(EventEntity e) { ShowDetails(e); StateHasChanged(); }
@@ -259,10 +259,10 @@
     // The Close button closes at once without asking, but never while Select Winner, a metrics save or a
     // Comment request runs.
     private void CancelDetails() { if (!Busy) CloseDetails(); }
-    private void CloseDetails() { _detailEvent = null; _comments = null; _details.Close(); _ = Focus.RestoreAsync(); }
+    private void CloseDetails() { _detailEvent = null; _commentsPanel = null; _details.Close(); _ = Focus.RestoreAsync(); }
     // Overlay click or Escape: unsaved Comment text or unsaved Event metrics ask first.
     private void DismissDetails() =>
-        _confirm = ConfirmRequest.ForDismiss(_confirm, Busy, _comments?.IsDirty == true || _metrics?.IsDirty == true, CloseDetails);
+        _confirm = ConfirmRequest.ForDismiss(_confirm, Busy, _commentsPanel?.IsDirty == true || _metrics?.IsDirty == true, CloseDetails);
 
     // A Discard closes this dialog, which returns focus to its opener itself; a Delete Comment leaves it open,
     // and the question gives focus back to it as it closes.
@@ -287,7 +287,7 @@
     private Task SelectWinner(Guid activityId)
     {
         if (_detailEvent is null || Busy || _confirm is not null) return Task.CompletedTask;
-        if (_comments?.IsDirty == true)
+        if (_commentsPanel?.IsDirty == true)
         {
             _confirm = ConfirmRequest.Discard(() => SaveWinner(activityId));
             return Task.CompletedTask;

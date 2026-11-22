@@ -8,6 +8,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
+using static MW_GC.EventManager.Web.Tests.CommentsPanelView;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -99,7 +100,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
         Assert.IsNotNull(NewBox(page));
         Assert.AreEqual(1, api.Count(HttpMethod.Get, ListPath(grandPrix.Id)));
         Assert.AreEqual(0, api.Count(HttpMethod.Get, ListPath(timeTrial.Id)));
-        // The old single-text editor is gone, and the old text an Event stored in its snapshot shows nowhere:
+        // The editor of the old text is gone, and the old text an Event stored in its snapshot shows nowhere:
         // not as text and not as the value of a text box.
         var dialog = page.FormDialog();
         Assert.DoesNotContain("Event Manager Comments", dialog.TextContent);
@@ -243,7 +244,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
     {
         var page = await OpenEventDetails("Game night");
         var path = ListPath(grandPrix.Id);
-        var gate = api.Hold(HttpMethod.Post, path, () => One(grandPrix.Id, new Stored(Guid.NewGuid(), "New", night.Id, TagC), HttpStatusCode.Created));
+        var gate = api.Hold(HttpMethod.Post, path, () => CommentResponse(grandPrix.Id, new Stored(Guid.NewGuid(), "New", night.Id, TagC), HttpStatusCode.Created));
         var rewon = Rewon(night, timeTrial);
         api.Json(HttpMethod.Put, $"/api/events/{night.Id}", rewon)
            .Json(HttpMethod.Get, "/api/events", new[] { rewon, open });
@@ -275,7 +276,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
     {
         var page = await OpenEventDetails("Game night");
         var eventPath = $"/api/events/{night.Id}";
-        var gate = api.Hold(HttpMethod.Post, ListPath(grandPrix.Id), () => One(grandPrix.Id, new Stored(Guid.NewGuid(), "Half a thought", night.Id, TagC), HttpStatusCode.Created));
+        var gate = api.Hold(HttpMethod.Post, ListPath(grandPrix.Id), () => CommentResponse(grandPrix.Id, new Stored(Guid.NewGuid(), "Half a thought", night.Id, TagC), HttpStatusCode.Created));
         var rewon = Rewon(night, timeTrial);
         api.Json(HttpMethod.Put, eventPath, rewon)
            .Json(HttpMethod.Get, "/api/events", new[] { rewon, open });
@@ -355,7 +356,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
             gone,
             new Stored(Guid.NewGuid(), "From game night", night.Id, TagB),
             new Stored(Guid.NewGuid(), "Written on the Activities page", null, TagC)]);
-        api.On(HttpMethod.Put, OnePath(grandPrix.Id, gone.Id), () => One(grandPrix.Id, gone with { Text = "Edited", Tag = TagA2 }));
+        api.On(HttpMethod.Put, OnePath(grandPrix.Id, gone.Id), () => CommentResponse(grandPrix.Id, gone with { Text = "Edited", Tag = TagA2 }));
         var page = await OpenEventDetails("Game night");
 
         page.WaitForAssertion(() => CollectionAssert.AreEqual(
@@ -467,7 +468,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
     {
         var page = await OpenEventDetails("Game night");
         var path = ListPath(grandPrix.Id);
-        var gate = api.Hold(HttpMethod.Post, path, () => One(grandPrix.Id, new Stored(Guid.NewGuid(), "New", night.Id, TagC), HttpStatusCode.Created));
+        var gate = api.Hold(HttpMethod.Post, path, () => CommentResponse(grandPrix.Id, new Stored(Guid.NewGuid(), "New", night.Id, TagC), HttpStatusCode.Created));
         await TypeNew(page, "New");
 
         var first = page.FormDialog().Button("Add Comment").ClickAsync(new());
@@ -561,7 +562,8 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
     private HttpResponseMessage ListResponse(Guid activityId) =>
         new(HttpStatusCode.OK) { Content = JsonContent.Create(comments[activityId].Select(c => Json(activityId, c)).ToArray()) };
 
-    private static HttpResponseMessage One(Guid activityId, Stored c, HttpStatusCode status = HttpStatusCode.OK)
+    // The API's answer to an add or edit: the stored Comment, with its eTag in the body and the header.
+    private static HttpResponseMessage CommentResponse(Guid activityId, Stored c, HttpStatusCode status = HttpStatusCode.OK)
     {
         var response = new HttpResponseMessage(status) { Content = JsonContent.Create(Json(activityId, c)) };
         response.Headers.TryAddWithoutValidation("ETag", c.Tag);
@@ -575,7 +577,7 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
         Guid? eventId = body.RootElement.TryGetProperty("eventId", out var id) ? id.GetGuid() : null;
         var stored = new Stored(Guid.NewGuid(), body.RootElement.GetProperty("text").GetString()!, eventId, TagC);
         comments[activityId].Add(stored);
-        return One(activityId, stored, HttpStatusCode.Created);
+        return CommentResponse(activityId, stored, HttpStatusCode.Created);
     }
 
     private async Task<IRenderedComponent<Events>> OpenEventDetails(string name)
@@ -597,12 +599,6 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
         return page;
     }
 
-    private static IElement RowButton<T>(IRenderedComponent<T> page, string item, string title) where T : IComponent =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
-
     private static IElement EventDetailsButton(IRenderedComponent<Events> page, string name) => RowButton(page, name, "Details");
 
     private static IElement ActivityDetailsButton(IRenderedComponent<Activities> page, string name) => RowButton(page, name, "Details");
@@ -613,40 +609,11 @@ public sealed class CommentsFromEventDetailsTests : IDisposable
             .Single(c => c.QuerySelectorAll(".fluent-typography").Any(l => l.TextContent.Trim() == activity));
 
     private static List<IElement> Panels<T>(IRenderedComponent<T> page) where T : IComponent =>
-        page.FormDialog().QuerySelectorAll(".activity-comments").ToList();
-
-    private static List<IElement> Items<T>(IRenderedComponent<T> page) where T : IComponent =>
-        page.FormDialog().QuerySelectorAll("li.comment").ToList();
-
-    private static List<string> Texts<T>(IRenderedComponent<T> page) where T : IComponent =>
-        Items(page).Select(i => i.QuerySelector(".comment-text")?.TextContent ?? "(editing)").ToList();
+        page.FormDialog().QuerySelectorAll(".comments").ToList();
 
     // The origin beside a Comment's date, or null for a Comment that names no Event.
     private static string? Origin(IElement item) => item.QuerySelector(".comment-origin")?.TextContent.Trim();
 
     private static List<string> Origins<T>(IRenderedComponent<T> page) where T : IComponent =>
         Items(page).Select(Origin).OfType<string>().ToList();
-
-    private static IElement? NewBox<T>(IRenderedComponent<T> page) where T : IComponent =>
-        page.FormDialog().QuerySelector("fluent-text-area[aria-label='New Comment']");
-
-    private static IElement? EditBox<T>(IRenderedComponent<T> page) where T : IComponent =>
-        page.FormDialog().QuerySelector("fluent-text-area[aria-label^='Edit Comment from']");
-
-    private static Task TypeNew<T>(IRenderedComponent<T> page, string text) where T : IComponent =>
-        NewBox(page)!.InputAsync(new ChangeEventArgs { Value = text });
-
-    // A click whose request finishes at once; waits for the render after it.
-    private static async Task Click<T>(IElement button, IRenderedComponent<T> page) where T : IComponent
-    {
-        await button.ClickAsync(new());
-        page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
-    }
-
-    // Overlay click or Escape on the details dialog.
-    private static Task Dismiss<T>(IRenderedComponent<T> page) where T : IComponent
-    {
-        var dialog = page.FormDialog();
-        return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
-    }
 }

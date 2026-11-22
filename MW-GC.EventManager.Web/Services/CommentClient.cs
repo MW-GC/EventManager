@@ -8,9 +8,8 @@ namespace MW_GC.EventManager.Web.Services;
 /// An Activity's Comments on the API (#131, ADR 0001): <c>GET</c> and <c>POST api/activities/{id}/comments</c>,
 /// <c>PUT</c> and <c>DELETE api/activities/{id}/comments/{commentId}</c>. Each Comment is its own row with its
 /// own eTag (<see cref="EntityBase.ETag"/>, read from the JSON body), which an edit or delete sends back as
-/// If-Match, so two Comments never conflict with each other. Never throws for an API failure: the result
-/// carries the message, or <see cref="CommentResult.Conflict"/> for a 409 and
-/// <see cref="CommentResult.NotFound"/> for a 404.
+/// If-Match, so two Comments never conflict with each other. Never throws for an API failure: a write returns
+/// a <see cref="CommentResult"/> that says what happened.
 /// </summary>
 public sealed class CommentClient(HttpClient http)
 {
@@ -36,17 +35,22 @@ public sealed class CommentClient(HttpClient http)
     /// written from (#132), sent only when given; the API refuses an Event that does not exist.
     /// </summary>
     public Task<CommentResult> AddAsync(Guid activityId, string text, Guid? eventId = null) =>
-        SendAsync(HttpMethod.Post, $"api/activities/{activityId}/comments",
-            eventId is { } id ? JsonContent.Create(new { text, eventId = id }) : JsonContent.Create(new { text }), null);
+        SendAsync(HttpMethod.Post, $"api/activities/{activityId}/comments", TextBody(text, eventId), null);
 
     /// <summary>Changes only the text. <paramref name="eTag"/> is that Comment's tag as last read.</summary>
     public Task<CommentResult> UpdateAsync(Guid activityId, Guid commentId, string text, string? eTag) =>
-        SendAsync(HttpMethod.Put, $"api/activities/{activityId}/comments/{commentId}", JsonContent.Create(new { text }), eTag);
+        SendAsync(HttpMethod.Put, $"api/activities/{activityId}/comments/{commentId}", TextBody(text), eTag);
 
     /// <summary>Deletes one Comment. <paramref name="eTag"/> is that Comment's tag as last read.</summary>
     public Task<CommentResult> DeleteAsync(Guid activityId, Guid commentId, string? eTag) =>
         SendAsync(HttpMethod.Delete, $"api/activities/{activityId}/comments/{commentId}", null, eTag);
 
+    // The body of an add or edit: the text, and the Event only when one is given.
+    private static JsonContent TextBody(string text, Guid? eventId = null) =>
+        eventId is { } id ? JsonContent.Create(new { text, eventId = id }) : JsonContent.Create(new { text });
+
+    // The try/catch, If-Match and 409 handling repeat EventMetricsClient.SaveAsync on purpose: that file belongs to
+    // another change, so a helper both can share is left for a later one.
     private async Task<CommentResult> SendAsync(HttpMethod method, string path, HttpContent? body, string? eTag)
     {
         try
@@ -56,17 +60,17 @@ public sealed class CommentClient(HttpClient http)
             // Azure's weak tags (W/"datetime'...'") are sent as read, without .NET's header parsing.
             if (eTag is not null) request.Headers.TryAddWithoutValidation("If-Match", eTag);
             using var response = await http.SendAsync(request);
-            if (response.StatusCode == HttpStatusCode.Conflict) return CommentResult.Stale;
-            if (await ApiResult.ErrorAsync(response) is { } error)
-                return new(null, error, false, response.StatusCode == HttpStatusCode.NotFound);
-            if (method == HttpMethod.Delete) return CommentResult.Done;
+            if (response.StatusCode == HttpStatusCode.Conflict) return CommentResult.Stale.Instance;
+            if (response.StatusCode == HttpStatusCode.NotFound) return CommentResult.NotFound.Instance;
+            if (await ApiResult.ErrorAsync(response) is { } error) return new CommentResult.Failed(error);
+            if (method == HttpMethod.Delete) return new CommentResult.Stored(null);
             return await response.Content.ReadFromJsonAsync<CommentEntity>() is { } comment
-                ? new(comment, null, false, false)
-                : CommentResult.Failed(ApiResult.UnreadableMessage);
+                ? new CommentResult.Stored(comment)
+                : new CommentResult.Failed(ApiResult.UnreadableMessage);
         }
         catch (Exception ex) when (ApiResult.IsApiFailure(ex))
         {
-            return CommentResult.Failed(ApiResult.FromException(ex));
+            return new CommentResult.Failed(ApiResult.FromException(ex));
         }
     }
 }
@@ -74,14 +78,29 @@ public sealed class CommentClient(HttpClient http)
 /// <summary>A read of an Activity's Comments: the list, or the failure message.</summary>
 public sealed record CommentListResult(List<CommentEntity>? Comments, string? Error);
 
-/// <summary>
-/// An add, edit or delete of one Comment: the stored Comment (none for a delete), or the failure message,
-/// or <see cref="Conflict"/> when someone else changed it first (409), or <see cref="NotFound"/> (404, with
-/// the message too).
-/// </summary>
-public sealed record CommentResult(CommentEntity? Comment, string? Error, bool Conflict, bool NotFound)
+/// <summary>An add, edit or delete of one Comment: exactly one of the four outcomes below.</summary>
+public abstract record CommentResult
 {
-    public static CommentResult Failed(string error) => new(null, error, false, false);
-    public static readonly CommentResult Stale = new(null, null, true, false);
-    public static readonly CommentResult Done = new(null, null, false, false);
+    private CommentResult() { }
+
+    /// <summary>The API stored the write: the Comment as stored, with its new tag; null for a delete.</summary>
+    public sealed record Stored(CommentEntity? Comment) : CommentResult;
+
+    /// <summary>The request failed; the message says why.</summary>
+    public sealed record Failed(string Error) : CommentResult;
+
+    /// <summary>Someone else changed the Comment first (409): the tag sent was stale.</summary>
+    public sealed record Stale : CommentResult
+    {
+        public static readonly Stale Instance = new();
+    }
+
+    /// <summary>
+    /// The API has no such Comment or Activity (404); <see cref="ApiResult.NotFoundMessage"/> says so. A delete
+    /// never gets it for a Comment that is already gone: the API answers that with 204.
+    /// </summary>
+    public sealed record NotFound : CommentResult
+    {
+        public static readonly NotFound Instance = new();
+    }
 }

@@ -29,7 +29,7 @@ public sealed class EditEventSnapshotTests : IDisposable
         grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id, Description = "Four races", Rules = "150cc", SetupRequirements = "Four controllers" };
         timeTrial = new ActivityEntity { Name = "Time Trial", GameId = kart.Id };
         stock = new ActivityEntity { Name = "Stock Battle", GameId = brawl.Id, Description = "Three lives", Rules = "No items", SetupRequirements = "One TV" };
-        teams = new ActivityEntity { Name = "Team Battle", GameId = brawl.Id };
+        teams = new ActivityEntity { Name = "Team Battle", GameId = brawl.Id, Description = "Two against two", Rules = "Shared stocks", SetupRequirements = "Four controllers" };
         harness = new PageHarness(api);
     }
 
@@ -132,20 +132,24 @@ public sealed class EditEventSnapshotTests : IDisposable
         var saved = await SaveWithName(page, ev.Name);
 
         Assert.AreEqual(grandPrix.Id, saved.WinnerActivityId);
-        Assert.AreEqual(teams.Id, saved.Selections[1].Activity.Id);
         AssertSameSelections(ev.Selections.Take(1), saved.Selections.Take(1));
-        // A replaced slot is rebuilt from today's library.
-        Assert.AreEqual("Team Battle", saved.Selections[1].Activity.Name);
+        // A replaced slot is rebuilt from today's Library (SelectionSnapshot.From), written out here by hand.
+        var expected = new Activity
+        {
+            Id = teams.Id, GameId = brawl.Id, Name = "Team Battle", Description = "Two against two",
+            Rules = "Shared stocks", SetupRequirements = "Four controllers"
+        };
+        Assert.AreEqual(JsonSerializer.Serialize(expected, Web), JsonSerializer.Serialize(saved.Selections[1].Activity, Web));
     }
 
-    // A slot's tags name each Theme and Holiday the library has, and show the first 8 characters of the id
-    // of one it does not have, also when that list is empty (#128).
+    // A slot's tags name each Theme and Holiday the Library has, and show the first 8 characters of the id
+    // of one it does not have, also when that list is empty (#128). Each slot shows its own tags only.
     [TestMethod]
-    public async Task EditEvent_SlotTags_NameLibraryTags_AndShowTheIdStartOfTagsNotInTheLibrary()
+    public async Task SlotTags_SomeTagsNotInTheLibrary_ShowTheirIdStartAndEachSlotOnlyItsOwn()
     {
-        var spooky = new ThemeEntity { Name = "Spooky" };
         grandPrix.ThemeIds = [spooky.Id, Guid.Parse("0badc0de-1111-4222-8333-444455556666")];
         grandPrix.HolidayIds = [Guid.Parse("5eedfeed-7777-4888-9999-aaaabbbbcccc")];
+        stock.ThemeIds = [spooky.Id];
         StoreEvent(winner: null);
         UseLibrary([kart, brawl], [grandPrix, timeTrial, stock, teams]);
         api.Json(HttpMethod.Get, "/api/themes", new[] { spooky }); // The Holidays list stays empty.
@@ -153,10 +157,33 @@ public sealed class EditEventSnapshotTests : IDisposable
 
         page.WaitForAssertion(() =>
             Assert.AreEqual("Theme: Spooky | Theme: 0badc0de | Holiday: 5eedfeed", string.Join(" | ", Tags(page, 0))));
+        Assert.AreEqual("Theme: Spooky", Assert.ContainsSingle(Tags(page, 1)));
+        // A slot whose Activity has no tags shows none, beside a slot that has them.
+        await Choose(page, 1, Picker.Activity, teams);
         Assert.IsEmpty(Tags(page, 1));
+        Assert.HasCount(3, Tags(page, 0));
+    }
+
+    // While the Themes list is not loaded (here its load failed, so the page has none: the null list), a tag shows
+    // the first 8 characters of its id; the Holiday the Library has keeps its name.
+    [TestMethod]
+    public async Task SlotTags_ThemesListNotLoaded_ShowTheIdStart()
+    {
+        var easter = new HolidayEntity { Name = "Easter" };
+        grandPrix.ThemeIds = [spooky.Id];
+        grandPrix.HolidayIds = [easter.Id];
+        StoreEvent(winner: null);
+        UseLibrary([kart, brawl], [grandPrix, timeTrial, stock, teams]);
+        api.Status(HttpMethod.Get, "/api/themes", System.Net.HttpStatusCode.InternalServerError)
+           .Json(HttpMethod.Get, "/api/holidays", new[] { easter });
+        var page = await OpenEdit();
+
+        page.WaitForAssertion(() =>
+            Assert.AreEqual("Theme: 5b00c1e5 | Holiday: Easter", string.Join(" | ", Tags(page, 0))));
     }
 
     private const string ReplaceNotice = "Replacing this activity clears the Winner.";
+    private readonly ThemeEntity spooky = new() { Id = Guid.Parse("5b00c1e5-0000-4000-8000-000000000001"), Name = "Spooky" };
 
     private enum Picker { Game = 0, Activity = 1 }
 
@@ -167,18 +194,30 @@ public sealed class EditEventSnapshotTests : IDisposable
         {
             Name = "Game night",
             Date = new DateTimeOffset(2026, 10, 9, 19, 0, 0, TimeSpan.Zero),
-            Selections = [Snapshot(kart, grandPrix), Snapshot(brawl, stock)],
+            Selections = [StoredGrandPrix(), StoredStockBattle()],
             WinnerActivityId = winner?.Id
         };
     }
 
-    private static Selection Snapshot(GameEntity game, ActivityEntity act) => new()
+    // The two stored snapshots, written out by hand rather than mapped from the Library entities, so the
+    // mapping under test (SelectionSnapshot.From) is never what builds the expected value.
+    private Selection StoredGrandPrix() => new()
     {
-        Game = new Game { Id = game.Id, Name = game.Name, IconUrl = "https://example.test/old.png" },
+        Game = new Game { Id = kart.Id, Name = "Kart", IconUrl = "https://example.test/old.png" },
         Activity = new Activity
         {
-            Id = act.Id, GameId = act.GameId, Name = act.Name, Description = act.Description,
-            Rules = act.Rules, SetupRequirements = act.SetupRequirements
+            Id = grandPrix.Id, GameId = kart.Id, Name = "Grand Prix", Description = "Four races",
+            Rules = "150cc", SetupRequirements = "Four controllers"
+        }
+    };
+
+    private Selection StoredStockBattle() => new()
+    {
+        Game = new Game { Id = brawl.Id, Name = "Brawl", IconUrl = "https://example.test/old.png" },
+        Activity = new Activity
+        {
+            Id = stock.Id, GameId = brawl.Id, Name = "Stock Battle", Description = "Three lives",
+            Rules = "No items", SetupRequirements = "One TV"
         }
     };
 

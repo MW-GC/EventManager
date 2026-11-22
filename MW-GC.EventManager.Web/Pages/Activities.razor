@@ -6,6 +6,7 @@
 @inject LibraryClient<GameEntity> GameClient
 @inject LibraryClient<ThemeEntity> ThemeClient
 @inject LibraryClient<HolidayEntity> HolidayClient
+@inject EventService EventSvc
 @inject FocusReturn Focus
 
 @* The shared Library page does the loading, search, Add and Edit dialog, busy guard and delete confirmation; this
@@ -38,11 +39,11 @@
             <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Wrap="true">
                 @foreach (var tid in context.ThemeIds)
                 {
-                    <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ThemeName(tid)" Style="font-size: 0.7rem;" />
+                    <TagBadge Kind="TagBadge.TagKind.Theme" Text="@NameLookup.NameOrIdStart(_themes, tid, t => t.Name)" Style="font-size: 0.7rem;" />
                 }
                 @foreach (var hid in context.HolidayIds)
                 {
-                    <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@HolidayName(hid)" Style="font-size: 0.7rem;" />
+                    <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@NameLookup.NameOrIdStart(_holidays, hid, h => h.Name)" Style="font-size: 0.7rem;" />
                 }
             </FluentStack>
         </TemplateColumn>
@@ -132,7 +133,7 @@
         <FluentDialogBody>
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween" VerticalAlignment="VerticalAlignment.Top" Style="margin-bottom: 4px;">
                 <FluentLabel aria-level="2" Typo="Typography.H3">@_detailActivity.Name</FluentLabel>
-                <FluentButton Appearance="Appearance.Stealth" Title="Close" aria-label="Close" Disabled="@_savingComments" OnClick="CancelDetails">
+                <FluentButton Appearance="Appearance.Stealth" Title="Close" aria-label="Close" Disabled="@_commentRequestRunning" OnClick="CancelDetails">
                     <FluentIcon Value="@(new Size20.Dismiss())" />
                 </FluentButton>
             </FluentStack>
@@ -146,11 +147,11 @@
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="6" Wrap="true" Style="margin-bottom: 16px;">
                     @foreach (var tid in _detailActivity.ThemeIds)
                     {
-                        <TagBadge Kind="TagBadge.TagKind.Theme" Text="@ThemeName(tid)" />
+                        <TagBadge Kind="TagBadge.TagKind.Theme" Text="@NameLookup.NameOrIdStart(_themes, tid, t => t.Name)" />
                     }
                     @foreach (var hid in _detailActivity.HolidayIds)
                     {
-                        <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@HolidayName(hid)" />
+                        <TagBadge Kind="TagBadge.TagKind.Holiday" Text="@NameLookup.NameOrIdStart(_holidays, hid, h => h.Name)" />
                     }
                 </FluentStack>
             }
@@ -189,22 +190,23 @@
                 @* #137: the Activity's performance, its row of the Stats page. Keyed by the Activity, so a load that
                    ends after the dialog closed or moved on never shows in another Activity; wrapped, because sibling
                    keys must differ and the Comments panel uses the same one. It only reads, so it takes no part in
-                   the busy guard or the Discard question. *@
+                   the busy guard or the Discard question. It shares the dialog's one Events read with the Comments
+                   panel (#186). *@
                 <div>
-                    <ActivityPerformancePanel @key="_detailActivity.Id" ActivityId="_detailActivity.Id" />
+                    <ActivityPerformancePanel @key="_detailActivity.Id" ActivityId="_detailActivity.Id" Events="DetailEvents" />
                 </div>
 
                 <FluentDivider />
 
                 @* #131: the Activity's Comments, read and written through their own routes (ADR 0001). Keyed by
                    the Activity, so another Activity gets a new panel. *@
-                <ActivityCommentsPanel @key="_detailActivity.Id" @ref="_comments" ActivityId="_detailActivity.Id"
-                                       SavingChanged="@((bool saving) => _savingComments = saving)"
-                                       Ask="@((ConfirmRequest question) => _confirm = question)" />
+                <CommentsPanel @key="_detailActivity.Id" @ref="_commentsPanel" ActivityId="_detailActivity.Id" Events="DetailEvents"
+                               SavingChanged="@((bool running) => _commentRequestRunning = running)"
+                               Ask="@((ConfirmRequest question) => _confirm = question)" />
             </FluentStack>
 
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" Style="margin-top: 24px;">
-                <FluentButton Appearance="Appearance.Neutral" Disabled="@_savingComments" OnClick="CancelDetails">Close</FluentButton>
+                <FluentButton Appearance="Appearance.Neutral" Disabled="@_commentRequestRunning" OnClick="CancelDetails">Close</FluentButton>
             </FluentStack>
         </FluentDialogBody>
     </FluentDialog>
@@ -226,14 +228,16 @@
     private IReadOnlyList<LibraryLookup> _lookups = [];
     private GameEntity? _filterGame;
     // Set while the Comments panel adds, saves or deletes a Comment: the details dialog neither closes nor asks meanwhile.
-    private bool _savingComments;
+    private bool _commentRequestRunning;
     // The open details dialog.
     private readonly DialogSession _details = new();
     // The open question of the details dialog (Discard changes?, or the panel's Delete Comment), if any.
     private ConfirmRequest? _confirm;
     private ActivityEntity? _detailActivity;
     // The open dialog's Comments panel (#131), whose unsaved text joins the Discard question.
-    private ActivityCommentsPanel? _comments;
+    private CommentsPanel? _commentsPanel;
+    // The open dialog's Events list, read once for its Performance and Comments panels (#186); null until one asks.
+    private Task<List<EventEntity>?>? _detailEvents;
 
     // The Games name each row's Game and fill the Game pickers; the Themes and Holidays name the tags.
     protected override void OnInitialized() => _lookups =
@@ -266,9 +270,6 @@
     private string GameName(Guid gameId) =>
         _games?.FirstOrDefault(g => g.Id == gameId)?.Name ?? PlayStats.NoValue;
 
-    private string ThemeName(Guid id) => _themes?.FirstOrDefault(t => t.Id == id)?.Name ?? id.ToString()[..8];
-    private string HolidayName(Guid id) => _holidays?.FirstOrDefault(h => h.Id == id)?.Name ?? id.ToString()[..8];
-
     private static void ToggleId(List<Guid> list, Guid id, bool add)
     {
         if (add && !list.Contains(id)) list.Add(id);
@@ -278,27 +279,37 @@
     // Run by the shared page's row-action guard, which shows a failure above the list and reloads after a success.
     private Task<string?> Duplicate(Guid id) => ApiResult.SendAsync(() => ActivitySvc.DuplicateAsync(id));
 
+    // The Events list for the open details dialog: the first panel to ask starts the read and the other gets the
+    // same one. A failed read is not kept, so the Performance panel's Retry reads again.
+    private Task<List<EventEntity>?> DetailEvents()
+    {
+        if (_detailEvents is null || _detailEvents.IsFaulted || _detailEvents.IsCanceled) _detailEvents = EventSvc.GetAllAsync();
+        return _detailEvents;
+    }
+
     private void ShowDetails(ActivityEntity a)
     {
         _detailActivity = a;
+        _detailEvents = null;
         _details.Open();
         _ = Focus.RememberAsync($"details-{a.Id}");
     }
 
     // The Close buttons close at once without asking, but never while a Comment request runs.
-    private void CancelDetails() { if (!_savingComments) CloseDetails(); }
+    private void CancelDetails() { if (!_commentRequestRunning) CloseDetails(); }
 
     private void CloseDetails()
     {
         _detailActivity = null;
-        _comments = null;
+        _commentsPanel = null;
+        _detailEvents = null;
         _details.Close();
         _ = Focus.RestoreAsync();
     }
 
     // Overlay click or Escape: unsaved Comment text asks first.
     private void DismissDetails() =>
-        _confirm = ConfirmRequest.ForDismiss(_confirm, _savingComments, _comments?.IsDirty == true, CloseDetails);
+        _confirm = ConfirmRequest.ForDismiss(_confirm, _commentRequestRunning, _commentsPanel?.IsDirty == true, CloseDetails);
 
     private async Task Confirmed(ConfirmRequest confirm)
     {

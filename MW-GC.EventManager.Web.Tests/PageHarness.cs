@@ -111,3 +111,55 @@ internal static class Rendered
     private static string AlertText(IElement alert) =>
         (alert.QuerySelector(".fluent-messagebar-message span") ?? alert).TextContent.Trim();
 }
+
+// The Comments panel inside a page's details dialog (Activities or Events), as a user sees it (#131, #132).
+// Shared by the tests of both dialogs; import with `using static`.
+internal static class CommentsPanelView
+{
+    // The page's row (outside any dialog) that names the item, and its button with this title, such as Details.
+    public static IElement RowButton<T>(IRenderedComponent<T> page, string item, string title) where T : IComponent =>
+        page.FindAll("tbody tr.fluent-data-grid-row")
+            .Where(r => r.Closest("fluent-dialog") is null)
+            .Single(r => r.TextContent.Contains(item))
+            .QuerySelector($"fluent-button[title={title}]")!;
+
+    // One list item per Comment, in the order shown.
+    public static List<IElement> Items<T>(IRenderedComponent<T> page) where T : IComponent =>
+        page.FormDialog().QuerySelectorAll("li.comment").ToList();
+
+    // Each Comment's text, or "(editing)" for the one open in its edit box.
+    public static List<string> Texts<T>(IRenderedComponent<T> page) where T : IComponent =>
+        Items(page).Select(i => i.QuerySelector(".comment-text")?.TextContent ?? "(editing)").ToList();
+
+    public static IElement? NewBox<T>(IRenderedComponent<T> page) where T : IComponent =>
+        page.FormDialog().QuerySelector("fluent-text-area[aria-label='New Comment']");
+
+    public static IElement? EditBox<T>(IRenderedComponent<T> page) where T : IComponent =>
+        page.FormDialog().QuerySelector("fluent-text-area[aria-label^='Edit Comment from']");
+
+    // The dialog's one button with this accessible name, such as "Delete Comment from 2025-03-14 12:00".
+    public static IElement ButtonNamed<T>(IRenderedComponent<T> page, string label) where T : IComponent =>
+        page.FormDialog().QuerySelectorAll("fluent-button").Single(x => x.GetAttribute("aria-label") == label);
+
+    public static Task TypeNew<T>(IRenderedComponent<T> page, string text) where T : IComponent =>
+        NewBox(page)!.InputAsync(new ChangeEventArgs { Value = text });
+
+    // A click whose request finishes at once; waits for the render after it.
+    public static async Task Click<T>(IElement button, IRenderedComponent<T> page) where T : IComponent
+    {
+        await button.ClickAsync(new());
+        page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
+    }
+
+    // Overlay click or Escape on the details dialog.
+    public static Task Dismiss<T>(IRenderedComponent<T> page) where T : IComponent
+    {
+        var dialog = page.FormDialog();
+        return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
+    }
+
+    // A Comment's added time: a local wall-clock time, sent in UTC as the API sends it. The panel shows local
+    // time, so a test can write the shown date and time as a literal in any time zone.
+    public static DateTimeOffset AddedAtLocal(int year, int month, int day, int hour, int minute) =>
+        new DateTimeOffset(new DateTime(year, month, day, hour, minute, 0, DateTimeKind.Local)).ToUniversalTime();
+}

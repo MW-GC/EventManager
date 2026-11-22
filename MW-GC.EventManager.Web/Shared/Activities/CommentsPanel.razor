@@ -7,12 +7,14 @@
    #132: the Event details dialog shows the same panel for the winning Activity and passes EventId, so a
    Comment added there records that Event. A Comment that names an Event shows "from {Event name}" beside
    its date in both dialogs; the names come from the Events list, read once per panel and only when a
-   Comment names an Event. *@
+   Comment names an Event. On the Activities page the dialog reads the Events list once for this panel and the
+   Performance panel (Events). Each Comment is named by its added date and time (local), so two Comments added
+   on one day never share a button name or a Delete question. *@
 @using System.Globalization
 @inject CommentClient Client
 @inject EventService EventSvc
 
-<div class="activity-comments">
+<div class="comments">
     <FluentLabel aria-level="3" Typo="Typography.Subject" Weight="FontWeight.Bold" Style="margin-bottom: 4px;">Comments</FluentLabel>
     <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 8px;">
         How this Activity went, oldest first. Each Comment keeps the date it was added.
@@ -49,6 +51,7 @@
                 {
                     var c = comment;
                     var date = DateText(c);
+                    var named = AddedText(c);
                     <li @key="c.Id" class="comment" style="padding: 8px 0; border-top: 1px solid var(--neutral-stroke-divider-rest);">
                         <time datetime="@IsoDate(c)" style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">@date</time>
                         @if (Origin(c) is { } origin)
@@ -59,7 +62,7 @@
                         {
                             <div style="margin-top: 4px;">
                                 <FluentTextArea Value="@_editText" ValueChanged="@((string? v) => SetEditText(v))" Immediate="true"
-                                                Rows="3" Style="width: 100%;" Disabled="@Busy" aria-label="@($"Edit Comment from {date}")" />
+                                                Rows="3" Style="width: 100%;" Disabled="@Busy" aria-label="@($"Edit Comment from {named}")" />
                                 @if (_editError is not null)
                                 {
                                     <div role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@_editError</div>
@@ -75,17 +78,17 @@
                         {
                             <div class="comment-text" style="white-space: pre-wrap; line-height: 1.5; margin-top: 2px;">@c.Text</div>
                             <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4" Style="margin-top: 4px;">
-                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" aria-label="@($"Edit Comment from {date}")"
+                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" aria-label="@($"Edit Comment from {named}")"
                                               Disabled="@(Busy || _editing is not null)" OnClick="@(() => StartEdit(c))">Edit</FluentButton>
-                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" aria-label="@($"Delete Comment from {date}")"
+                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small" aria-label="@($"Delete Comment from {named}")"
                                               Loading="@(_running == Request.Delete && _deleting == c.Id)"
                                               Disabled="@(Busy || _editing is not null)" OnClick="@(() => AskDelete(c))">Delete</FluentButton>
                             </FluentStack>
                         }
-                        @if (_row is { } row && row.Id == c.Id)
+                        @if (_commentMessage is { } message && message.Id == c.Id)
                         {
-                            <div role="alert" style="color: var(--error); margin-top: 6px;">@row.Message</div>
-                            @if (row.Reload)
+                            <div role="alert" style="color: var(--error); margin-top: 6px;">@message.Text</div>
+                            @if (message.Reload)
                             {
                                 <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Style="margin-top: 6px;"
                                               Loading="@_loading" Disabled="@Busy" OnClick="Load">Reload</FluentButton>
@@ -120,6 +123,8 @@
     [Parameter] public EventCallback<ConfirmRequest> Ask { get; set; }
     // The Event whose details show this panel (#132): an added Comment records it. Null on the Activities page.
     [Parameter] public Guid? EventId { get; set; }
+    // The Events list as the dialog reads it once for all its panels (#186); null reads it here.
+    [Parameter] public Func<Task<List<EventEntity>?>>? Events { get; set; }
 
     public const string StaleMessage = "This Comment was changed by someone else. Reload and try again.";
 
@@ -130,8 +135,8 @@
 
     private enum Request { None, Add, Save, Delete }
 
-    // A message beside one Comment, with Reload when the list must be read again (409 or 404).
-    private sealed record RowMessage(Guid Id, string Message, bool Reload);
+    // The message beside one Comment, with Reload when the list must be read again (409 or 404).
+    private sealed record CommentMessage(Guid Id, string Text, bool Reload);
 
     // The list as the API returned it, oldest first; null until the first read succeeds.
     private List<CommentEntity>? _comments;
@@ -140,17 +145,16 @@
     private string? _reloadError;
     private Request _running;
     private Guid? _deleting;
-    private RowMessage? _row;
+    private CommentMessage? _commentMessage;
     private string _newText = string.Empty;
     private string? _addError;
     // The Comment being edited (one at a time) and the text typed for it.
     private CommentEntity? _editing;
     private string _editText = string.Empty;
     private string? _editError;
-    // The names of the Events Comments were written from, by id; null until read. Read at most once per panel.
-    private Dictionary<Guid, string>? _eventNames;
-    private bool _eventNamesRead;
-    private bool _eventNamesFailed;
+    // The names of the Events Comments were written from, by id: null until the read starts, then that read,
+    // whose result is null when the Events list could not be read. Read at most once per panel.
+    private Task<Dictionary<Guid, string>?>? _eventNames;
 
     private bool Busy => _running != Request.None || _loading;
 
@@ -161,14 +165,18 @@
 
     private static string DateText(CommentEntity c) => c.CreatedUtc.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
 
+    // The added date and local time that name a Comment's buttons and its Delete question, e.g. 2026-11-20 14:05.
+    private static string AddedText(CommentEntity c) =>
+        c.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
     private static string IsoDate(CommentEntity c) =>
         c.CreatedUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
     // The tag as the API sent it in the body, sent back as If-Match; null when the API sent none.
-    private static string? Tag(CommentEntity c) => c.ETag == default ? null : c.ETag.ToString();
+    private static string? IfMatchOf(CommentEntity c) => c.ETag == default ? null : c.ETag.ToString();
 
     // The API's text rule: trimmed, required, at most MaxLength characters. Null when the text may be sent.
-    private static string? Check(string typed, out string text)
+    private static string? TextRuleMessage(string typed, out string text)
     {
         text = typed.Trim();
         if (text.Length == 0) return RequiredMessage;
@@ -204,7 +212,7 @@
             }
             _comments = result.Comments!;
             _loadError = _reloadError = null;
-            _row = null;
+            _commentMessage = null;
             _editing = null;
             _editText = string.Empty;
             _editError = null;
@@ -217,28 +225,32 @@
     // error bar: an Events list that cannot be read only makes the origin vaguer ("from an Event").
     private async Task ReadEventNames()
     {
-        if (_eventNamesRead || _comments is null || !_comments.Any(c => c.EventId is not null)) return;
-        _eventNamesRead = true;
+        if (_eventNames is not null || _comments is null || !_comments.Any(c => c.EventId is not null)) return;
+        _eventNames = ReadNamesAsync();
         // Show the Comments while the names load.
         StateHasChanged();
-        var (events, _) = await ApiResult.LoadAsync(EventSvc.GetAllAsync);
-        if (events is null) _eventNamesFailed = true;
-        else _eventNames = events.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First().Name);
+        await _eventNames;
+    }
+
+    private async Task<Dictionary<Guid, string>?> ReadNamesAsync()
+    {
+        var (events, _) = await ApiResult.LoadAsync(Events ?? EventSvc.GetAllAsync);
+        return events?.ToDictionary(e => e.Id, e => e.Name);
     }
 
     // Beside the date: the Event the Comment was written from. Nothing while the names load.
     private string? Origin(CommentEntity c)
     {
-        if (c.EventId is not { } id) return null;
-        if (_eventNames is not null) return _eventNames.TryGetValue(id, out var name) ? $"from {name}" : "from a deleted Event";
-        return _eventNamesFailed ? "from an Event" : null;
+        if (c.EventId is not { } id || _eventNames is not { IsCompletedSuccessfully: true } read) return null;
+        if (read.Result is not { } names) return "from an Event";
+        return names.TryGetValue(id, out var name) ? $"from {name}" : "from a deleted Event";
     }
 
     private async Task Add()
     {
         // One request at a time: a second click while one runs sends nothing.
         if (Busy || _comments is null) return;
-        if (Check(_newText, out var text) is { } message)
+        if (TextRuleMessage(_newText, out var text) is { } message)
         {
             _addError = message;
             return;
@@ -247,9 +259,9 @@
         await RunAsync(Request.Add, async () =>
         {
             var result = await Client.AddAsync(ActivityId, text, EventId);
-            if (result.Comment is not { } added)
+            if (result is not CommentResult.Stored { Comment: { } added })
             {
-                _addError = $"The Comment was not added. {result.Error}";
+                _addError = $"The Comment was not added. {Reason(result)}";
                 return;
             }
             _comments.Add(added);
@@ -264,13 +276,13 @@
         _editing = c;
         _editText = c.Text;
         _editError = null;
-        if (_row?.Id == c.Id && !_row.Reload) _row = null;
+        if (_commentMessage?.Id == c.Id && !_commentMessage.Reload) _commentMessage = null;
     }
 
     private void CancelEdit()
     {
         if (Busy) return;
-        if (_editing is { } c && _row?.Id == c.Id && !_row.Reload) _row = null;
+        if (_editing is { } c && _commentMessage?.Id == c.Id && !_commentMessage.Reload) _commentMessage = null;
         _editing = null;
         _editText = string.Empty;
         _editError = null;
@@ -279,20 +291,24 @@
     private async Task SaveEdit()
     {
         if (Busy || _editing is not { } c || _comments is null) return;
-        if (Check(_editText, out var text) is { } message)
+        if (TextRuleMessage(_editText, out var text) is { } message)
         {
             _editError = message;
             return;
         }
         _editError = null;
-        _row = null;
+        _commentMessage = null;
         await RunAsync(Request.Save, async () =>
         {
-            var result = await Client.UpdateAsync(ActivityId, c.Id, text, Tag(c));
-            if (Failed(c, result, "saved")) return;
+            var result = await Client.UpdateAsync(ActivityId, c.Id, text, IfMatchOf(c));
+            if (result is not CommentResult.Stored { Comment: { } saved })
+            {
+                ShowFailure(c, result, "saved");
+                return;
+            }
             // The API keeps the added date; the returned Comment carries it and the new tag.
             var index = _comments.FindIndex(x => x.Id == c.Id);
-            if (index >= 0) _comments[index] = result.Comment!;
+            if (index >= 0) _comments[index] = saved;
             _editing = null;
             _editText = string.Empty;
         });
@@ -301,32 +317,42 @@
     private Task AskDelete(CommentEntity c)
     {
         if (Busy || _editing is not null) return Task.CompletedTask;
-        return Ask.InvokeAsync(ConfirmRequest.Delete("Delete Comment", $"Delete Comment from {DateText(c)}?", () => Delete(c)));
+        return Ask.InvokeAsync(ConfirmRequest.Delete("Delete Comment", $"Delete Comment from {AddedText(c)}?", () => Delete(c)));
     }
 
     private async Task Delete(CommentEntity c)
     {
         if (Busy || _comments is null) return;
-        _row = null;
+        _commentMessage = null;
         _deleting = c.Id;
         await RunAsync(Request.Delete, async () =>
         {
-            var result = await Client.DeleteAsync(ActivityId, c.Id, Tag(c));
-            if (Failed(c, result, "deleted")) return;
+            // A Comment already deleted elsewhere is a success too: the API answers 204.
+            var result = await Client.DeleteAsync(ActivityId, c.Id, IfMatchOf(c));
+            if (result is not CommentResult.Stored)
+            {
+                ShowFailure(c, result, "deleted");
+                return;
+            }
             _comments.RemoveAll(x => x.Id == c.Id);
         });
         _deleting = null;
     }
 
-    // A failed edit or delete: the message beside that Comment. A 409 or 404 also offers Reload; typed text stays.
-    private bool Failed(CommentEntity c, CommentResult result, string verb)
+    // Why a write was not stored, in the words shown to the user.
+    private static string Reason(CommentResult result) => result switch
     {
-        if (result.Conflict) _row = new(c.Id, StaleMessage, true);
-        else if (result.NotFound) _row = new(c.Id, result.Error!, true);
-        else if (result.Error is { } error) _row = new(c.Id, $"The Comment was not {verb}. {error}", false);
-        else return false;
-        return true;
-    }
+        CommentResult.Failed failed => failed.Error,
+        CommentResult.Stale => StaleMessage,
+        CommentResult.NotFound => ApiResult.NotFoundMessage,
+        _ => ApiResult.UnreadableMessage
+    };
+
+    // A failed edit or delete: the message beside that Comment. A 409 or 404 also offers Reload; typed text stays.
+    private void ShowFailure(CommentEntity c, CommentResult result, string verb) =>
+        _commentMessage = result is CommentResult.Stale or CommentResult.NotFound
+            ? new(c.Id, Reason(result), true)
+            : new(c.Id, $"The Comment was not {verb}. {Reason(result)}", false);
 
     // Runs one write with every button disabled and the dialog held open. A delete starts from the dialog's
     // question rather than this panel's own button, so the panel renders itself before and after.
