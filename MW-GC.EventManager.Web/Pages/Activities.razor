@@ -3,16 +3,16 @@
 @using MW_GC.EventManager.Web.Shared.Activities
 @inject LibraryClient<ActivityEntity> ActivityClient
 @inject ActivityService ActivitySvc
-@inject GameService GameSvc
-@inject LibraryClient<ThemeEntity> ThemeSvc
-@inject LibraryClient<HolidayEntity> HolidaySvc
+@inject LibraryClient<GameEntity> GameClient
+@inject LibraryClient<ThemeEntity> ThemeClient
+@inject LibraryClient<HolidayEntity> HolidayClient
 @inject FocusReturn Focus
 
 @* The shared Library page does the loading, search, Add and Edit dialog, busy guard and delete confirmation; this
-   page adds what is Activities-only: the Game (required on Add) and the Game filter, the tags, Duplicate, and the
-   details dialog with its Comments panel (#131). *@
+   page adds what is Activities-only: the Game (required; chosen on Add, or on Edit when an old Activity has none)
+   and the Game filter, the tags, Details and Duplicate, and the details dialog with its Comments panel (#131). *@
 <LibraryPage TItem="ActivityEntity" Title="Activities" Subtitle="Manage game activities, rules, and descriptions" Singular="Activity"
-             Client="@ActivityClient" Name="@(a => a.Name)" NewItem="NewActivity" CopyItem="CopyActivity"
+             Client="@ActivityClient" Name="@(a => a.Name)" SetName="@((a, name) => a.Name = name)" NewItem="NewActivity" CopyItem="CopyActivity"
              DirtyFields="FormFields" Lookups="_lookups" Filter="ByGame" Rules="Rules" HasSelect="true"
              NameLabel="Activity Name" DialogWidth="@(_ => "680px")"
              GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 152px">
@@ -47,28 +47,22 @@
             </FluentStack>
         </TemplateColumn>
     </Columns>
-    <RowActions Context="row">
-        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" aria-label="@($"Details {row.Name}")" data-focus-key="@($"details-{row.Item.Id}")"
-                          OnClick="@(() => ShowDetails(row.Item))">
-                <FluentIcon Value="@(new Size16.Eye())" />
-            </FluentButton>
-            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {row.Name}")" data-focus-key="@row.EditKey"
-                          Disabled="@row.Busy" OnClick="@row.Edit">
-                <FluentIcon Value="@(new Size16.Edit())" />
-            </FluentButton>
-            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Duplicate" aria-label="@($"Duplicate {row.Name}")"
-                          Disabled="@row.Running" OnClick="@(() => row.RunAsync(() => Duplicate(row.Item.Id), "The activity was not duplicated."))">
-                <FluentIcon Value="@(new Size16.Copy())" />
-            </FluentButton>
-            <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {row.Name}")" data-focus-key="@row.DeleteKey"
-                          Disabled="@row.Running" OnClick="@row.Delete">
-                <FluentIcon Value="@(new Size16.Delete())" />
-            </FluentButton>
-        </FluentStack>
-    </RowActions>
+    @* Details and Duplicate around the shared page's own Edit and Delete: Details, Edit, Duplicate, Delete. *@
+    <ActionsBeforeEdit Context="row">
+        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" aria-label="@($"Details {row.Name}")" data-focus-key="@($"details-{row.Item.Id}")"
+                      OnClick="@(() => ShowDetails(row.Item))">
+            <FluentIcon Value="@(new Size16.Eye())" />
+        </FluentButton>
+    </ActionsBeforeEdit>
+    <ActionsBeforeDelete Context="row">
+        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Duplicate" aria-label="@($"Duplicate {row.Name}")"
+                      Disabled="@row.AnyBusy" OnClick="@(() => row.RunAsync(() => Duplicate(row.Item.Id), "The activity was not duplicated."))">
+            <FluentIcon Value="@(new Size16.Copy())" />
+        </FluentButton>
+    </ActionsBeforeDelete>
     <EditorLead Context="edit">
-        @* The Game can only be chosen on Add; a new Activity without one is refused before anything is sent. *@
+        @* The Game is chosen on Add and stays on Edit, except for an old Activity stored with none: its picker is
+           open, so the user can give it the Game it needs. Without one, nothing is sent. *@
         <div style="width: 100%;">
             <FluentSelect TOption="GameEntity"
                           Items="@_games"
@@ -77,8 +71,9 @@
                           SelectedOption="@(_games?.FirstOrDefault(g => g.Id == edit.Item.GameId))"
                           SelectedOptionChanged="@(g => { if (g is not null) edit.Item.GameId = g.Id; })"
                           Field="@(new FieldIdentifier(edit.Item, nameof(ActivityEntity.GameId)))"
+                          @attributes="@edit.FieldAttributes(nameof(ActivityEntity.GameId))"
                           Label="Game"
-                          Disabled="@edit.IsEdit"
+                          Disabled="@(edit.Stored is { } stored && stored.GameId != Guid.Empty)"
                           Style="width: 100%;" />
             <LibraryFieldMessage Field="@nameof(ActivityEntity.GameId)" />
         </div>
@@ -243,9 +238,9 @@
     // The Games name each row's Game and fill the Game pickers; the Themes and Holidays name the tags.
     protected override void OnInitialized() => _lookups =
     [
-        new(loads => loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? [])),
-        new(loads => loads.LoadAsync("Themes", ThemeSvc.GetAllAsync, v => _themes = v ?? [])),
-        new(loads => loads.LoadAsync("Holidays", HolidaySvc.GetAllAsync, v => _holidays = v ?? []))
+        new(loads => loads.LoadAsync("Games", GameClient.GetAllAsync, v => _games = v ?? [])),
+        new(loads => loads.LoadAsync("Themes", ThemeClient.GetAllAsync, v => _themes = v ?? [])),
+        new(loads => loads.LoadAsync("Holidays", HolidayClient.GetAllAsync, v => _holidays = v ?? []))
     ];
 
     private static ActivityEntity NewActivity() => new() { Name = string.Empty };
@@ -262,9 +257,9 @@
     private static object FormFields(ActivityEntity a) =>
         new { a.GameId, a.Name, a.Description, a.Rules, a.SetupRequirements, ThemeIds = a.ThemeIds.Order(), HolidayIds = a.HolidayIds.Order() };
 
-    // A new Activity needs a Game; the API refuses one without it too.
+    // An Activity needs a Game; the API refuses one without it too.
     private static IEnumerable<LibraryFieldError> Rules(ActivityEntity a) =>
-        LibraryRules.Game(a.GameId) is { } message ? [new LibraryFieldError(nameof(ActivityEntity.GameId), message)] : [];
+        LibraryRules.GameMessage(a.GameId) is { } message ? [new LibraryFieldError(nameof(ActivityEntity.GameId), message)] : [];
 
     private bool ByGame(ActivityEntity a) => _filterGame is null || a.GameId == _filterGame.Id;
 

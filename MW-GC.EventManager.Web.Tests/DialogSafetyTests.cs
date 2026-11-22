@@ -4,6 +4,7 @@ using System.Reflection;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
@@ -161,6 +162,10 @@ public sealed class DialogSafetyTests : IDisposable
         var page = Open("activities");
         var path = $"/api/activities/{grandPrix.Id}/duplicate";
         var gate = api.Hold(HttpMethod.Post, path, () => new HttpResponseMessage(HttpStatusCode.Created) { Content = JsonContent.Create(grandPrix) });
+        // The row's Duplicate button handler, as the page wired it, taken while the button is still enabled.
+        var duplicate = page.FindComponents<FluentButton>()
+            .Single(b => b.Instance.AdditionalAttributes?.TryGetValue("aria-label", out var label) == true && Equals(label, "Duplicate Grand Prix"))
+            .Instance.OnClick;
 
         var first = RowButton(page, "Grand Prix", "Duplicate").ClickAsync(new());
 
@@ -174,12 +179,10 @@ public sealed class DialogSafetyTests : IDisposable
             Assert.IsTrue(page.FindAll("fluent-button[title=Delete]").All(b => b.IsBusy()));
         });
         await RowButton(page, "Grand Prix", "Duplicate").ClickAsync(new());
-        // A click that lands before the re-render reaches the handler itself, which sends nothing.
-        // Not awaited before the release: without the guard it would wait on the held request too.
-        // The row-action guard moved into the shared Library page the Activities page renders (#126).
-        var library = page.FindComponent<LibraryPage<ActivityEntity>>().Instance;
-        var second = page.InvokeAsync(() => (Task)Call(library, "RunRowAction", grandPrix.Id,
-            (Func<Task<string?>>)(() => (Task<string?>)Call(page.Instance, "Duplicate", grandPrix.Id)!), "The activity was not duplicated.")!);
+        // A click that lands before the re-render reaches the handler itself, which sends nothing: run the
+        // button's own handler again, past its disabled state. Not awaited before the release: without the
+        // guard it would wait on the held request too. The guard lives in the shared Library page (#126).
+        var second = page.InvokeAsync(() => duplicate.InvokeAsync(new MouseEventArgs()));
 
         gate.SetResult();
         await first;

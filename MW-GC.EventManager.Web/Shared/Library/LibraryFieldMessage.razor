@@ -1,20 +1,26 @@
-@* The editor's messages for one field of the item in the form, shown where this sits (under that field).
-   The name rule and a page's own Rules (LibraryRulesValidator) both show their messages through it. *@
+@* The editor's messages for one field of the item in the form, shown where this sits (under that field). The
+   name rule and a page's own Rules (LibraryRulesValidator) both show their messages through it. The messages sit
+   in an element with a fixed id (IdFor), which the field names in aria-describedby (LibraryEdit.FieldAttributes). *@
 @implements IDisposable
 
-@if (_context is not null)
-{
-    @foreach (var message in _context.GetValidationMessages(new FieldIdentifier(_context.Model, Field)))
+<div id="@IdFor(Field)">
+    @if (_context is not null)
     {
-        <div role="alert" class="validation-message" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@message</div>
+        @foreach (var message in _context.GetValidationMessages(new FieldIdentifier(_context.Model, Field)))
+        {
+            <div role="alert" class="validation-message" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@message</div>
+        }
     }
-}
+</div>
 
 @code {
     [CascadingParameter] private EditContext? CurrentEditContext { get; set; }
 
     /// <summary>The property name on the form's item, such as nameof(GameEntity.Website).</summary>
     [Parameter, EditorRequired] public string Field { get; set; } = string.Empty;
+
+    /// <summary>The id of the element that holds a field's messages; one editor is open at a time.</summary>
+    public static string IdFor(string field) => $"library-field-{field}-message";
 
     private EditContext? _context;
 

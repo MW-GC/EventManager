@@ -1,15 +1,15 @@
-@* A page's own field rules (LibraryPage.Rules) as a form validator, next to the name rule. EditForm asks it on
-   submit, so a failing rule sends nothing. When a field changes it checks that field again, so a message goes
-   once the field is fixed, and a field that breaks a rule is flagged as soon as it is touched; other fields'
-   messages stay as they were. Nothing is checked when the editor opens, so a value stored before a rule
-   existed is flagged only once it is touched or saved. Each message shows through a LibraryFieldMessage
-   with the same field name. *@
+@* The editor's field rules as a form validator: the name rule and the page's own Rules (LibraryPage hands both
+   over as one list). EditForm asks it on submit, so a failing rule sends nothing. When a field changes it checks
+   that field again, so a message goes once the field is fixed, and a field that breaks a rule is flagged as soon
+   as it is touched; other fields' messages stay as they were. Nothing is checked when the editor opens, so a
+   value stored before a rule existed is flagged only once it is touched or saved. Each message shows through a
+   LibraryFieldMessage with the same field name. *@
 @implements IDisposable
 
 @code {
     [CascadingParameter] private EditContext? CurrentEditContext { get; set; }
 
-    /// <summary>The page's rules for the item in the form (LibraryPage.Rules); null checks nothing.</summary>
+    /// <summary>The failed rules for the item in the form; null checks nothing.</summary>
     [Parameter] public Func<IEnumerable<LibraryFieldError>>? Rules { get; set; }
 
     private EditContext? _context;

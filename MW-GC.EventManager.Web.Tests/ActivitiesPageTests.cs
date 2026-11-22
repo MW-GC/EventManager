@@ -10,7 +10,7 @@ using MW_GC.EventManager.Web.Shared.Library;
 
 namespace MW_GC.EventManager.Web.Tests;
 
-// Issue #126: the Activities page on the shared Library page. A new Activity needs a Game: the form says so
+// Issue #126: the Activities page on the shared Library page. An Activity needs a Game: the form says so
 // under the Game field and sends nothing until one is chosen. The rest is the page as it was: search with
 // the Game filter, and no card view.
 [TestClass]
@@ -94,9 +94,9 @@ public sealed class ActivitiesPageTests : IDisposable
         await page.Button("Add Activity").ClickAsync(new());
         await GameOption(page, kart).ClickAsync(new());
         await NameField(page).ChangeAsync(new ChangeEventArgs { Value = "Ghost lap" });
-        Assert.IsEmpty(page.FormDialog().Alerts());
         await Submit(page);
 
+        // The Game rule ran on the save and let it through: one POST with the chosen Game.
         Assert.AreEqual(kart.Id, Json(Assert.ContainsSingle(api.Bodies(HttpMethod.Post, "/api/activities"))).GetProperty("gameId").GetGuid());
         Assert.IsFalse(page.HasFormDialog());
         Assert.AreEqual(reads + 1, api.Count(HttpMethod.Get, "/api/activities"));
@@ -104,29 +104,64 @@ public sealed class ActivitiesPageTests : IDisposable
         Assert.IsEmpty(page.PageAlerts());
     }
 
+    // An Activity that has its Game keeps it on Edit (the picker is disabled), and the Game rule passes on save.
     [TestMethod]
-    public async Task Edit_ShowsTheGameItCannotChange_AndNoGameMessage()
+    public async Task Edit_ShowsTheGameItCannotChange_AndSavesWithIt()
     {
         var page = Open();
+        api.Status(HttpMethod.Put, $"/api/activities/{race.Id}", HttpStatusCode.NoContent);
         await RowButton(page, "Race", "Edit").ClickAsync(new());
 
         Assert.AreEqual("Edit Activity", page.DialogTitle());
         Assert.AreEqual(kart.Id.ToString(), GameSelect(page).GetAttribute("current-value"));
         Assert.IsTrue(GameSelect(page).HasAttribute("disabled"));
-        Assert.IsEmpty(page.FormDialog().Alerts());
+
+        await Submit(page);
+
+        Assert.AreEqual(kart.Id, Json(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, $"/api/activities/{race.Id}"))).GetProperty("gameId").GetGuid());
+        Assert.IsFalse(page.HasFormDialog());
     }
 
-    // The message has one home in the form (LibraryRules.GameRequired). The API refuses the same case with its
-    // own words, which this page leaves as they are.
+    // #175: an old Activity stored with no Game opens in Edit with the Game picker open, so the user can fix it.
+    // Saving without one says "Game is required." under the picker and sends nothing; choosing one saves it.
     [TestMethod]
-    public void GameRule_MessageLivesInOnePlace_AndTheApiRefusesTheSameCase()
+    public async Task Edit_AnOldActivityWithNoGame_HasTheGamePickerOpen_AndSavesOnceOneIsChosen()
     {
-        Assert.AreEqual(GameRequired, LibraryRules.Game(Guid.Empty));
-        Assert.AreEqual(LibraryRules.GameRequired, LibraryRules.Game(Guid.Empty));
-        Assert.IsNull(LibraryRules.Game(Guid.NewGuid()));
+        var orphan = new ActivityEntity { Name = "Orphan", GameId = Guid.Empty };
+        api.Json(HttpMethod.Get, "/api/activities", new[] { race, sprint, stock, orphan })
+           .Status(HttpMethod.Put, $"/api/activities/{orphan.Id}", HttpStatusCode.NoContent);
+        var page = harness.Render<Activities>();
+        page.WaitForRows(4);
 
+        await RowButton(page, "Orphan", "Edit").ClickAsync(new());
+        Assert.AreEqual("Edit Activity", page.DialogTitle());
+        Assert.IsFalse(GameSelect(page).HasAttribute("disabled"));
+
+        await Submit(page);
+        Assert.AreEqual(GameRequired, Assert.ContainsSingle(GameSelect(page).ParentElement!.Alerts()));
+        AssertNoWrites();
+
+        await GameOption(page, brawl).ClickAsync(new());
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        await Submit(page);
+
+        Assert.AreEqual(brawl.Id, Json(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, $"/api/activities/{orphan.Id}"))).GetProperty("gameId").GetGuid());
+        Assert.IsFalse(page.HasFormDialog());
+    }
+
+    // The form's Game rule refuses exactly what the API refuses (no Game), in its own words for the field the user
+    // sees ("Game is required.", not the API's "GameId is required.").
+    [TestMethod]
+    public void GameRule_RefusesWhatTheApiRefuses_InTheFormsOwnWords()
+    {
+        foreach (var gameId in new[] { Guid.Empty, Guid.NewGuid() })
+        {
+            var api = ActivityValidator.Validate(new ActivityEntity { Name = "Ghost lap", GameId = gameId });
+            var form = LibraryRules.GameMessage(gameId);
+            Assert.AreEqual(api is null, form is null, $"GameId {gameId}");
+        }
         Assert.AreEqual("GameId is required.", ActivityValidator.Validate(new ActivityEntity { Name = "Ghost lap" }));
-        Assert.IsNull(ActivityValidator.Validate(new ActivityEntity { Name = "Ghost lap", GameId = Guid.NewGuid() }));
+        Assert.AreEqual("Game is required.", LibraryRules.GameMessage(Guid.Empty));
     }
 
     // The details dialog and its Comments panel are covered in ActivityCommentsPanelTests (#131).
@@ -148,16 +183,8 @@ public sealed class ActivitiesPageTests : IDisposable
         AssertNoWrites();
     }
 
-    // The old page had a table only, so the shared page offers it no card view.
-    [TestMethod]
-    public void TheListIsATable_WithNoCardView_AsBefore()
-    {
-        var page = Open();
-
-        Assert.IsEmpty(page.FindAll("fluent-button[title='Card view']"));
-        Assert.IsEmpty(page.FindAll("fluent-button[title='Table view']"));
-        Assert.HasCount(3, page.Rows());
-    }
+    // The page has a table only, as the old page did: LibraryPageTests.CardView_IsOfferedOnlyToAPageThatGivesACardTemplate
+    // renders this page and checks it gets no view toggle.
 
     // ---- Helpers -------------------------------------------------------------------------------
 

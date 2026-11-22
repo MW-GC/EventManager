@@ -19,14 +19,13 @@ internal sealed class PageHarness : IDisposable
         _context.Services.AddFluentUIComponents();
         var http = api.Client();
         _context.Services.AddSingleton(new GameService(http));
-        _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.GameEntity>(http, "games"));
-        _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.ActivityEntity>(http, "activities"));
+        // The four Library clients as the app registers them (Program.cs), over the stub's HttpClient.
+        _context.Services.AddSingleton(http);
+        _context.Services.AddLibraryClients();
         _context.Services.AddSingleton(new ActivityService(http));
         _context.Services.AddSingleton(new EventService(http));
         _context.Services.AddSingleton(new EventMetricsClient(http));
         _context.Services.AddSingleton(new CommentClient(http));
-        _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.ThemeEntity>(http, "themes"));
-        _context.Services.AddSingleton(new LibraryClient<MW_GC.EventManager.Shared.Entities.HolidayEntity>(http, "holidays"));
         _context.Services.AddScoped<FocusReturn>();
     }
 

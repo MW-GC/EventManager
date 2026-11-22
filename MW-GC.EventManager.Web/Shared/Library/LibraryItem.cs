@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Web;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Services;
@@ -8,9 +9,11 @@ namespace MW_GC.EventManager.Web.Shared.Library;
 /// <summary>
 /// One item as a <see cref="LibraryPage{T}"/> row or card template sees it: the item, its row-action
 /// state, and the page's own Edit and Delete for it. Edit asks nothing; Delete asks first and names the item.
+/// The seven values stay one object on purpose: they are one item's view as a template sees it, and a split
+/// would only make every template take two parameters.
 /// </summary>
 public sealed class LibraryItem<T>(
-    T item, string name, bool busy, bool running,
+    T item, string name, bool busy, bool anyBusy,
     EventCallback<MouseEventArgs> edit, EventCallback<MouseEventArgs> delete,
     Func<Func<Task<string?>>, string, Task> run) where T : EntityBase
 {
@@ -21,14 +24,14 @@ public sealed class LibraryItem<T>(
     /// <summary>This item's row action is running: its Edit is disabled.</summary>
     public bool Busy => busy;
 
-    /// <summary>Some row action is running: every Delete (and any other row action) is disabled.</summary>
-    public bool Running => running;
+    /// <summary>Some row's action is running: every Delete (and any other row action) is disabled.</summary>
+    public bool AnyBusy => anyBusy;
 
     /// <summary>The data-focus-key of the Edit button, so focus returns to it when the dialog closes.</summary>
-    public string EditKey => $"edit-{item.Id}";
+    public string EditKey => EditKeyOf(item.Id);
 
     /// <summary>The data-focus-key of the Delete button, so focus returns to it when the question closes.</summary>
-    public string DeleteKey => $"delete-{item.Id}";
+    public string DeleteKey => DeleteKeyOf(item.Id);
 
     public EventCallback<MouseEventArgs> Edit => edit;
 
@@ -40,10 +43,42 @@ public sealed class LibraryItem<T>(
     /// shows above the list as "<paramref name="failed"/> message", a success reloads the list.
     /// </summary>
     public Task RunAsync(Func<Task<string?>> write, string failed) => run(write, failed);
+
+    // The one place the focus keys are built: the buttons carry them, and the page remembers them as a dialog opens.
+    internal static string EditKeyOf(Guid id) => $"edit-{id}";
+
+    internal static string DeleteKeyOf(Guid id) => $"delete-{id}";
 }
 
-/// <summary>The item in the open editor, and whether it is an edit (else an add).</summary>
-public sealed record LibraryEdit<T>(T Item, bool IsEdit) where T : EntityBase;
+/// <summary>
+/// The item in the open editor (a copy, so Cancel leaves the list as it was), and the item as listed when this
+/// is an edit (null for an add). The editor's form lives here too, so a field can say whether it has a message
+/// (<see cref="FieldAttributes"/>).
+/// </summary>
+public sealed class LibraryEdit<T>(T item, T? stored) where T : EntityBase
+{
+    public T Item => item;
+
+    /// <summary>The item as the list holds it, before any change in the editor; null for an add.</summary>
+    public T? Stored => stored;
+
+    public bool IsEdit => stored is not null;
+
+    /// <summary>The editor's form: its fields, rules and messages.</summary>
+    internal EditContext Form { get; } = new(item);
+
+    /// <summary>
+    /// The attributes that tie a field to its <see cref="LibraryFieldMessage"/>: <c>aria-describedby</c> names the
+    /// message, and <c>aria-invalid</c> is set while the field has one. <paramref name="field"/> is the name the
+    /// field's rule and message use, such as nameof(GameEntity.Website).
+    /// </summary>
+    public IReadOnlyDictionary<string, object> FieldAttributes(string field)
+    {
+        var attributes = new Dictionary<string, object> { ["aria-describedby"] = LibraryFieldMessage.IdFor(field) };
+        if (Form.GetValidationMessages(new FieldIdentifier(Item, field)).Any()) attributes["aria-invalid"] = "true";
+        return attributes;
+    }
+}
 
 /// <summary>
 /// Another list a <see cref="LibraryPage{T}"/> loads with its own, into the same error bar and Retry, such
