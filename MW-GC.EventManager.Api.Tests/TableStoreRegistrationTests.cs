@@ -54,6 +54,21 @@ public class TableStoreRegistrationTests
         };
 
         CollectionAssert.AreEqual(StoredNames.Stores, registered);
-        Assert.HasCount(7, clients, "No other table is asked for.");
+    }
+
+    [TestMethod]
+    public void TheExtensionRegistersTheSevenStoresEachOnceAndNothingElse()
+    {
+        // The registrations themselves, not what resolving them asks for: a second registration of a
+        // store type, or a store for an eighth table, adds a descriptor here even though resolving one
+        // store per type (the test above) never sees it.
+        var services = new ServiceCollection().AddTableStores();
+
+        CollectionAssert.AreEquivalent(new[]
+        {
+            typeof(TableStore<GameEntity>), typeof(TableStore<ActivityEntity>), typeof(TableStore<EventEntity>),
+            typeof(TableStore<ThemeEntity>), typeof(TableStore<HolidayEntity>), typeof(TableStore<EventMetricsEntity>),
+            typeof(TableStore<CommentEntity>),
+        }, services.Select(d => d.ServiceType).ToArray());
     }
 }

@@ -61,10 +61,26 @@ public class StoredNamesTests
         // Every mismatch in one message, so a rename names everything it moved.
         var renamed = actual.Where(n => n.Expected != n.Actual).Select(n => $"{n.What}: \"{n.Actual}\", stored data is under \"{n.Expected}\"");
         Assert.AreEqual("", string.Join("; ", renamed));
-        // The literal lists the other tests use say the same.
-        CollectionAssert.AreEquivalent(StoredNames.Stores.SelectMany(s => new[] { s.Table, s.Partition }).ToArray(),
-            actual.Take(14).Select(n => n.Expected).ToArray());
-        CollectionAssert.AreEquivalent(StoredNames.AllTables,
-            actual.Where(n => n.What.EndsWith(" table", StringComparison.Ordinal)).Select(n => n.Expected).ToArray());
+    }
+
+    [TestMethod]
+    public void TheLiteralListsTheOtherTestsUseMatchTheProductionNames()
+    {
+        // Each literal list against the production values, so a list that drifts from the app fails here.
+        CollectionAssert.AreEqual(StoredNames.Stores, new[]
+        {
+            (TableNames.Games, TableNames.GamePartition),
+            (TableNames.Activities, TableNames.ActivityPartition),
+            (TableNames.Events, TableNames.EventPartition),
+            (TableNames.Themes, TableNames.ThemePartition),
+            (TableNames.Holidays, TableNames.HolidayPartition),
+            (TableNames.EventMetrics, TableNames.EventMetricsPartition),
+            (TableNames.Comments, TableNames.CommentPartition),
+        }, "StoredNames.Stores");
+        CollectionAssert.AreEquivalent(StoredNames.AllTables, new[]
+        {
+            TableNames.Games, TableNames.Activities, TableNames.Events, TableNames.Themes, TableNames.Holidays,
+            TableNames.EventMetrics, TableNames.Comments, FeedbackStore.LinksTable, FeedbackStore.LikesTable,
+        }, "StoredNames.AllTables");
     }
 }

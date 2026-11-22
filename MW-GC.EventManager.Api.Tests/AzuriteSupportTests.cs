@@ -18,12 +18,13 @@ public class AzuriteSupportTests
 
     [TestMethod]
     [DataRow("UseDevelopmentStorage=true")]
-    [DataRow("usedevelopmentstorage=TRUE;")]
+    // The keyword's case is free; the Tables client reads only a lower-case "true" (see the refused rows).
+    [DataRow("usedevelopmentstorage=true;")]
     [DataRow("DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=" + Key + ";TableEndpoint=http://127.0.0.1:10012/devstoreaccount1;")]
     [DataRow("DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=" + Key + ";BlobEndpoint=http://127.0.0.1:10010/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10011/devstoreaccount1;TableEndpoint=http://127.0.0.1:10012/devstoreaccount1;")]
     [DataRow("AccountName=dev;AccountKey=" + Key + ";TableEndpoint=http://localhost:10002/dev")]
     [DataRow("AccountName=dev;AccountKey=" + Key + ";TableEndpoint=http://[::1]:10002/dev")]
-    [DataRow("AccountName=devstoreaccount1;AccountKey=" + Key + ";TableEndpoint=http://azurite:10002/devstoreaccount1")]
+    [DataRow("UseDevelopmentStorage=true;DevelopmentStorageProxyUri=http://127.0.0.1")]
     public void AConnectionStringToLocalAzuriteRuns(string connection)
     {
         Assert.IsTrue(AzuriteSupport.IsLocalAzurite(connection));
@@ -37,8 +38,15 @@ public class AzuriteSupportTests
     [DataRow("AccountName=prodaccount;AccountKey=" + Key + ";TableEndpoint=http://127.0.0.1.example.test:10002/prodaccount")]
     [DataRow("AccountName=prodaccount;AccountKey=" + Key + ";TableEndpoint=http://localhost.example.test/prodaccount")]
     [DataRow("AccountName=prodaccount;AccountKey=" + Key + ";BlobEndpoint=http://127.0.0.1:10000/x;TableEndpoint=https://prodaccount.table.core.windows.net/")]
+    // Strings the Tables client cannot read: the tests could not build their client from them.
+    [DataRow("UseDevelopmentStorage=TRUE")]
     [DataRow("TableEndpoint=not a uri")]
     [DataRow("just text")]
+    // Azurite's well-known account on a host that is not loopback is still other storage.
+    [DataRow("AccountName=devstoreaccount1;AccountKey=" + Key + ";TableEndpoint=http://azurite:10002/devstoreaccount1")]
+    // The text says development storage or devstoreaccount1, but the Tables client would talk to a remote host.
+    [DataRow("UseDevelopmentStorage=true;DevelopmentStorageProxyUri=http://evil.example.test")]
+    [DataRow("AccountName=devstoreaccount1;AccountKey=" + Key + ";TableEndpoint=https://evil.example.test/devstoreaccount1")]
     public void AConnectionStringToOtherStorageDoesNotRun(string connection)
     {
         Assert.IsFalse(AzuriteSupport.IsLocalAzurite(connection));
@@ -58,6 +66,26 @@ public class AzuriteSupportTests
 
             Assert.Contains("does not point at local Azurite", skipped.Message);
             Assert.Contains(AzuriteSupport.ConnectionVariable, skipped.Message);
+            Assert.Contains("prodaccount.table.core.windows.net", skipped.Message, "The skip names the host it refused.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(AzuriteSupport.ConnectionVariable, before);
+        }
+    }
+
+    [TestMethod]
+    public void AConnectionStringThatCannotBeReadSkipsAndSaysWhy()
+    {
+        var before = Environment.GetEnvironmentVariable(AzuriteSupport.ConnectionVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(AzuriteSupport.ConnectionVariable, "TableEndpoint=not a uri");
+
+            var skipped = Assert.ThrowsExactly<AssertInconclusiveException>(() => AzuriteSupport.Connection());
+
+            Assert.Contains("does not point at local Azurite", skipped.Message);
+            Assert.Contains("cannot be read as a connection string", skipped.Message);
         }
         finally
         {

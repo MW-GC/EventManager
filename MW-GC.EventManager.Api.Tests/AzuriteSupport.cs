@@ -7,8 +7,8 @@ namespace MW_GC.EventManager.Api.Tests;
 /// The two environment variables of the tests that run against real Table Storage (Azurite), and the
 /// guard that keeps them on local Azurite. Both variables are optional, so <c>dotnet test</c> on the
 /// solution needs no emulator: without <see cref="ConnectionVariable"/> those tests are reported as
-/// skipped (inconclusive). They write, delete and convert rows, so they also skip, before any client
-/// is built, when the connection string does not point at local Azurite (<see cref="IsLocalAzurite"/>).
+/// skipped (inconclusive). They write, delete and convert rows, so they also skip, before anything is
+/// contacted, when the connection string does not point at local Azurite (<see cref="IsLocalAzurite"/>).
 /// </summary>
 internal static class AzuriteSupport
 {
@@ -30,49 +30,44 @@ internal static class AzuriteSupport
         var connection = Environment.GetEnvironmentVariable(ConnectionVariable);
         if (string.IsNullOrWhiteSpace(connection))
             Assert.Inconclusive($"Azurite test skipped: set {ConnectionVariable} to an Azurite connection string.");
-        if (!IsLocalAzurite(connection))
-            Assert.Inconclusive(NotLocalMessage);
+        if (WhyNotLocal(connection) is { } reason)
+            Assert.Inconclusive(NotLocalMessage(reason));
         return connection;
     }
 
     /// <summary>Why an Azurite test skipped a connection string that is set but not local Azurite.</summary>
-    public const string NotLocalMessage =
-        $"Azurite test skipped: {ConnectionVariable} does not point at local Azurite (UseDevelopmentStorage=true, " +
-        "an endpoint on 127.0.0.1 or localhost, or the devstoreaccount1 account). These tests write, delete and " +
-        "convert rows, so they never run against other storage.";
+    public static string NotLocalMessage(string reason) =>
+        $"Azurite test skipped: {ConnectionVariable} does not point at local Azurite: {reason}. These tests write, " +
+        "delete and convert rows, so they run only when the Tables client it builds talks to a loopback host " +
+        "(127.0.0.1, localhost or ::1).";
 
     /// <summary>
-    /// Whether a connection string points at local Azurite: <c>UseDevelopmentStorage=true</c>; or every
-    /// endpoint it names is on a loopback host (<c>127.0.0.1</c>, <c>localhost</c>, <c>::1</c>); or it
-    /// names Azurite's well-known account <c>devstoreaccount1</c> together with its own endpoints (an
-    /// Azurite container reached by name). Account settings with no endpoint at all address Azure's
-    /// public cloud, so they are never local, whatever the account name. A string that cannot be read is
-    /// not local. Reads the string only; nothing is contacted.
+    /// Whether a connection string points at local Azurite: the Tables client built from it would talk to
+    /// a loopback host (<c>127.0.0.1</c>, <c>localhost</c>, <c>::1</c>). See <see cref="WhyNotLocal"/>.
     /// </summary>
-    public static bool IsLocalAzurite(string? connection)
+    public static bool IsLocalAzurite(string? connection) => WhyNotLocal(connection) is null;
+
+    /// <summary>
+    /// Null when the connection string points at local Azurite, otherwise why not. The decision is made on
+    /// the endpoint of a <see cref="TableServiceClient"/> built from the string, the same way the tests
+    /// build theirs, not on its text: <c>UseDevelopmentStorage=true</c> with a remote
+    /// <c>DevelopmentStorageProxyUri</c>, or the <c>devstoreaccount1</c> account with a remote
+    /// <c>TableEndpoint</c>, would otherwise pass a text check and send the tests' writes elsewhere.
+    /// Building the client contacts nothing. A string the client cannot read is not local.
+    /// </summary>
+    public static string? WhyNotLocal(string? connection)
     {
-        if (string.IsNullOrWhiteSpace(connection)) return false;
-        var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var part in connection.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        if (string.IsNullOrWhiteSpace(connection)) return "it is blank";
+        Uri endpoint;
+        try
         {
-            var at = part.IndexOf('=');
-            if (at <= 0) return false;
-            settings[part[..at].Trim()] = part[(at + 1)..].Trim();
+            endpoint = new TableServiceClient(connection).Uri;
         }
-
-        if (settings.TryGetValue("UseDevelopmentStorage", out var development))
-            return development.Equals("true", StringComparison.OrdinalIgnoreCase);
-
-        var endpoints = settings.Where(s => s.Key.EndsWith("Endpoint", StringComparison.OrdinalIgnoreCase)).Select(s => s.Value).ToList();
-        if (endpoints.Count == 0) return false;
-        var hosts = new List<string>();
-        foreach (var endpoint in endpoints)
+        catch (Exception e) when (e is FormatException or ArgumentException or InvalidOperationException)
         {
-            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) return false;
-            hosts.Add(uri.Host);
+            return $"it cannot be read as a connection string ({e.GetType().Name})";
         }
-        if (hosts.All(IsLoopback)) return true;
-        return settings.TryGetValue("AccountName", out var account) && account == "devstoreaccount1";
+        return IsLoopback(endpoint.Host) ? null : $"its Tables client would talk to {endpoint.Host}, which is not a loopback host";
     }
 
     private static bool IsLoopback(string host) =>

@@ -51,7 +51,8 @@ public class ActivityNoteConversionStartupTests : ActivityNoteConversionTestBase
     [TestMethod]
     public async Task AStoreThatFailsWhileTheHostBuildsItIsLoggedAndNeverStopsTheHost()
     {
-        // Registered as Program.cs registers them; creating the Comment table fails (storage or auth down).
+        // Registered with AddTableStores, as Program.cs registers them; creating the Comment table fails
+        // (storage or auth down).
         var outage = new RequestFailedException(403, "This request is not authorized to perform this operation.");
         var commentTable = new Mock<TableClient>();
         commentTable.Setup(t => t.CreateIfNotExists(It.IsAny<CancellationToken>())).Throws(outage);
@@ -61,8 +62,7 @@ public class ActivityNoteConversionStartupTests : ActivityNoteConversionTestBase
         var log = new ListLogger<ActivityNoteConversionStartup>();
         var services = new ServiceCollection();
         services.AddSingleton(service.Object);
-        services.AddSingleton(sp => new TableStore<ActivityEntity>(sp.GetRequiredService<TableServiceClient>(), TableNames.Activities, TableNames.ActivityPartition));
-        services.AddSingleton(sp => new TableStore<CommentEntity>(sp.GetRequiredService<TableServiceClient>(), TableNames.Comments, TableNames.CommentPartition));
+        services.AddTableStores();
         services.AddSingleton<ILogger<ActivityNoteConversion>>(new ListLogger<ActivityNoteConversion>());
         services.AddSingleton<ILogger<ActivityNoteConversionStartup>>(log);
         services.AddSingleton<ActivityNoteConversion>();
