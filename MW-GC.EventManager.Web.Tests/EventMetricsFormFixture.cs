@@ -11,7 +11,7 @@ using static MW_GC.EventManager.Web.Tests.PageActions;
 namespace MW_GC.EventManager.Web.Tests;
 
 // The Events page with one past Event, rendered with bUnit against a stub API, for the tests of its Event metrics
-// form (#135): EventMetricsFormTests, EventMetricsValidationTests and EventMetricsConflictTests. Fields are found
+// form (#135): EventMetricsFormTests, EventMetricsValidationTests and EventMetricsGuardTests. Fields are found
 // by their visible label, as a user finds them.
 public abstract class EventMetricsFormFixture : IDisposable
 {

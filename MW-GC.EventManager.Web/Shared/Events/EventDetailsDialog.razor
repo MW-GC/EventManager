@@ -129,7 +129,7 @@
                                 <FluentDivider />
                                 <CommentsPanel @key="selection.Activity.Id" @ref="_commentsPanel" ActivityId="selection.Activity.Id"
                                                EventId="_detailEvent.Id"
-                                               SavingChanged="@((bool running) => _commentRequestRunning = running)"
+                                               RequestRunningChanged="@((bool running) => _commentRequestRunning = running)"
                                                Ask="@((ConfirmRequest question) => _confirm = question)" />
                             }
                         </FluentStack>

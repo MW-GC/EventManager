@@ -44,12 +44,6 @@ public sealed class PlayStats(TimeProvider time)
     /// <summary>Shown for an Activity whose Game is neither in the library nor in any snapshot.</summary>
     public const string UnknownGame = "—";
 
-    /// <summary>
-    /// Shown for a number that has none (an Activity never offered, no attendees recorded) on the Stats page, in the
-    /// Activity details, and for an Activity's Game name on the Activities page while the Games have not loaded.
-    /// </summary>
-    public const string NoValue = "—";
-
     public PlayStatsReport Compute(IEnumerable<EventEntity> events, IEnumerable<GameEntity> games, IEnumerable<ActivityEntity> activities,
         IEnumerable<EventMetricsWithLikes> metrics)
     {
@@ -89,10 +83,11 @@ public sealed class PlayStats(TimeProvider time)
             TallyFor(activityTallies, winner.Activity.Id).Wins++;
         }
 
+        // Like the events and metrics, the library lists are never null (#198.9): the callers wait until each loaded.
         var libraryGames = new Dictionary<Guid, GameEntity>();
-        foreach (var g in games ?? []) libraryGames.TryAdd(g.Id, g);
+        foreach (var g in games) libraryGames.TryAdd(g.Id, g);
         var libraryActivities = new Dictionary<Guid, ActivityEntity>();
-        foreach (var a in activities ?? []) libraryActivities.TryAdd(a.Id, a);
+        foreach (var a in activities) libraryActivities.TryAdd(a.Id, a);
 
         string GameName(Guid gameId) =>
             libraryGames.TryGetValue(gameId, out var g) ? g.Name
@@ -111,12 +106,16 @@ public sealed class PlayStats(TimeProvider time)
             .Select(id =>
             {
                 var tally = activityTallies.GetValueOrDefault(id) ?? new Tally();
-                if (libraryActivities.TryGetValue(id, out var current))
-                    return new ActivityPlayStats(id, current.Name, GameName(current.GameId), tally.Offered, tally.Wins, tally.Last, false,
-                        tally.Performance);
-                var snapshot = activitySnapshots[id].Activity;
-                return new ActivityPlayStats(id, snapshot.Name, GameName(snapshot.GameId), tally.Offered, tally.Wins, tally.Last, true,
-                    tally.Performance);
+                // The library's Activity, or for one no longer there the newest snapshot of it.
+                string name;
+                Guid gameId;
+                if (libraryActivities.TryGetValue(id, out var current)) (name, gameId) = (current.Name, current.GameId);
+                else
+                {
+                    var snapshot = activitySnapshots[id].Activity;
+                    (name, gameId) = (snapshot.Name, snapshot.GameId);
+                }
+                return new ActivityPlayStats(id, name, GameName(gameId), tally.Offered, tally.Wins, tally.Last, current is null, tally.Performance);
             });
 
         return new PlayStatsReport(

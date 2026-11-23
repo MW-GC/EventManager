@@ -40,7 +40,7 @@
                                              aria-invalid="@(field.Error is null ? null : "true")" />
                             @if (field.Error is { } error)
                             {
-                                <div id="@field.MessageId" role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@error</div>
+                                <div role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@error</div>
                             }
                         </div>
                     </FluentGridItem>

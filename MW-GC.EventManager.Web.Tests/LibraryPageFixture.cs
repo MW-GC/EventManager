@@ -136,12 +136,6 @@ public abstract class LibraryPageFixture : IDisposable
     protected static IElement Search<T>(IRenderedComponent<T> page) where T : IComponent =>
         page.FindAll("fluent-search").Single(s => s.Closest("fluent-dialog") is null);
 
-    protected static IElement RowButton<T>(IRenderedComponent<T> page, string item, string title) where T : IComponent =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
-
     protected static IElement CardButton<T>(IRenderedComponent<T> page, string item, string title) where T : IComponent =>
         page.FindAll("fluent-card fluent-card").Single(c => c.TextContent.Contains(item)).QuerySelector($"fluent-button[title={title}]")!;
 

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -179,12 +180,6 @@ public sealed class LibraryPageRequestTests : IDisposable
         page.WaitForRows(route == "games" ? 2 : 1);
         return page;
     }
-
-    private static IElement RowButton(IRenderedComponent<IComponent> page, string item, string title) =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
 
     private static JsonElement Json(string? body)
     {
