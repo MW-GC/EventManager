@@ -5,10 +5,12 @@
 @* The shared Library page does the loading, search, dialogs, busy guard, delete confirmation and the card; this
    page adds what is Themes-only: its subtitle, its card icon, and the Edit dialog's "Save". *@
 <LibraryPage TItem="ThemeEntity" Title="Themes" Subtitle="Manage activity themes for event filtering" Singular="Theme"
-             Client="@ThemeClient" Name="@(t => t.Name)" SetName="@((t, name) => t.Name = name)" NewItem="NewTheme" CopyItem="CopyTheme"
+             Client="@ThemeClient" Name="ThemeName" NewItem="NewTheme" CopyItem="CopyTheme"
              SaveText="Save" CardIcon="@(new Size24.Color())" />
 
 @code {
+    private static readonly LibraryName<ThemeEntity> ThemeName = new(t => t.Name, (t, name) => t.Name = name);
+
     private static ThemeEntity NewTheme() => new() { Name = string.Empty };
 
     private static ThemeEntity CopyTheme(ThemeEntity t) => new() { Id = t.Id, Name = t.Name };

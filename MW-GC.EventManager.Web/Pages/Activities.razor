@@ -13,7 +13,7 @@
    page adds what is Activities-only: the Game (required; chosen on Add, or on Edit when an old Activity has none)
    and the Game filter, the tags, Details and Duplicate, and the details dialog with its Comments panel (#131). *@
 <LibraryPage TItem="ActivityEntity" Title="Activities" Subtitle="Manage game activities, rules, and descriptions" Singular="Activity"
-             Client="@ActivityClient" Name="@(a => a.Name)" SetName="@((a, name) => a.Name = name)" NewItem="NewActivity" CopyItem="CopyActivity"
+             Client="@ActivityClient" Name="ActivityName" NewItem="NewActivity" CopyItem="CopyActivity"
              DirtyFields="FormFields" Lookups="_lookups" Filter="ByGame" Rules="Rules" HasSelect="true"
              NameLabel="Activity Name" DialogWidth="@(_ => "680px")"
              GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 152px">
@@ -50,7 +50,7 @@
     </Columns>
     @* Details and Duplicate around the shared page's own Edit and Delete: Details, Edit, Duplicate, Delete. *@
     <ActionsBeforeEdit Context="row">
-        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" aria-label="@($"Details {row.Name}")" data-focus-key="@($"details-{row.Item.Id}")"
+        <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Details" aria-label="@($"Details {row.Name}")" data-focus-key="@DetailsKey(row.Item.Id)"
                       OnClick="@(() => ShowDetails(row.Item))">
             <FluentIcon Value="@(new Size16.Eye())" />
         </FluentButton>
@@ -71,12 +71,12 @@
                           OptionText="@(g => g.Name)"
                           SelectedOption="@(_games?.FirstOrDefault(g => g.Id == edit.Item.GameId))"
                           SelectedOptionChanged="@(g => { if (g is not null) edit.Item.GameId = g.Id; })"
-                          Field="@(new FieldIdentifier(edit.Item, nameof(ActivityEntity.GameId)))"
-                          @attributes="@edit.FieldAttributes(nameof(ActivityEntity.GameId))"
+                          Field="@(GameField.On(edit.Item))"
+                          @attributes="@edit.FieldAttributes(GameField)"
                           Label="Game"
                           Disabled="@(edit.Stored is { } stored && stored.GameId != Guid.Empty)"
                           Style="width: 100%;" />
-            <LibraryFieldMessage Field="@nameof(ActivityEntity.GameId)" />
+            <LibraryFieldMessage Field="GameField" />
         </div>
     </EditorLead>
     <EditorFields Context="edit">
@@ -247,6 +247,13 @@
         new(loads => loads.LoadAsync("Holidays", HolidayClient.GetAllAsync, v => _holidays = v ?? []))
     ];
 
+    private static readonly LibraryName<ActivityEntity> ActivityName = new(a => a.Name, (a, name) => a.Name = name);
+    // The Game picker: its rule, its message and its attributes share this one key.
+    private static readonly LibraryField GameField = new(nameof(ActivityEntity.GameId));
+
+    // The Details button's focus key, which the details dialog returns focus to when it closes.
+    private static string DetailsKey(Guid id) => $"details-{id}";
+
     private static ActivityEntity NewActivity() => new() { Name = string.Empty };
 
     private static ActivityEntity CopyActivity(ActivityEntity a) => new()
@@ -263,7 +270,7 @@
 
     // An Activity needs a Game; the API refuses one without it too.
     private static IEnumerable<LibraryFieldError> Rules(ActivityEntity a) =>
-        LibraryRules.GameMessage(a.GameId) is { } message ? [new LibraryFieldError(nameof(ActivityEntity.GameId), message)] : [];
+        LibraryRules.GameMessage(a.GameId) is { } message ? [new LibraryFieldError(GameField, message)] : [];
 
     private bool ByGame(ActivityEntity a) => _filterGame is null || a.GameId == _filterGame.Id;
 
@@ -292,7 +299,7 @@
         _detailActivity = a;
         _detailEvents = null;
         _details.Open();
-        _ = Focus.RememberAsync($"details-{a.Id}");
+        _ = Focus.RememberAsync(DetailsKey(a.Id));
     }
 
     // The Close buttons close at once without asking, but never while a Comment request runs.

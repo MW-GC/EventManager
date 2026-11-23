@@ -5,6 +5,7 @@
    their rules, extra row actions, the delete question, and other lists to load. *@
 @typeparam TItem where TItem : EntityBase
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
+@implements IDisposable
 @inject FocusReturn Focus
 
 <PageHeader Title="@Title" Subtitle="@Subtitle" />
@@ -76,15 +77,15 @@
                     }
                     else
                     {
-                        <PropertyColumn Property="@(i => Name(i))" Title="Name" Sortable="true" IsDefaultSortColumn="true" />
+                        <PropertyColumn Property="@(i => Name.Of(i))" Title="Name" Sortable="true" IsDefaultSortColumn="true" />
                     }
                     <TemplateColumn Title="Actions">
                         @{ var row = ItemFor(context); }
                         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
                             @(ActionsBeforeEdit?.Invoke(row))
-                            @EditButton(row)
+                            <LibraryItemButton T="TItem" Item="row" Action="LibraryItemAction.Edit" />
                             @(ActionsBeforeDelete?.Invoke(row))
-                            @DeleteButton(row)
+                            <LibraryItemButton T="TItem" Item="row" Action="LibraryItemAction.Delete" />
                         </FluentStack>
                     </TemplateColumn>
                 </FluentDataGrid>
@@ -107,8 +108,8 @@
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
                     @(EditorLead?.Invoke(edit))
                     <div style="width: 100%;">
-                        <FluentTextField Value="@Name(edit.Item)" ValueChanged="@((string? v) => SetName(edit.Item, v ?? string.Empty))"
-                                         Field="@(new FieldIdentifier(edit.Item, NameField))" @attributes="@edit.FieldAttributes(NameField)"
+                        <FluentTextField Value="@Name.Of(edit.Item)" ValueChanged="@((string? v) => Name.Set(edit.Item, v ?? string.Empty))"
+                                         Field="@(NameField.On(edit.Item))" @attributes="@edit.FieldAttributes(NameField)"
                                          Immediate="true" Label="@NameLabel" Required Style="width: 100%;" Placeholder="@Placeholder" />
                         <LibraryFieldMessage Field="@NameField" />
                     </div>
@@ -144,10 +145,8 @@
     /// <summary>One item, capitalised: "Add Game", "Edit Game"; lower case in messages ("Delete game").</summary>
     [Parameter, EditorRequired] public string Singular { get; set; } = string.Empty;
     [Parameter, EditorRequired] public LibraryClient<TItem> Client { get; set; } = default!;
-    /// <summary>Reads the item's name: shown, searched, sorted, edited and checked by the name rule.</summary>
-    [Parameter, EditorRequired] public Func<TItem, string> Name { get; set; } = default!;
-    /// <summary>Writes the name typed in the editor onto the editor's copy of the item.</summary>
-    [Parameter, EditorRequired] public Action<TItem, string> SetName { get; set; } = default!;
+    /// <summary>Reads and writes the item's name: shown, searched, sorted, edited and checked by the name rule.</summary>
+    [Parameter, EditorRequired] public LibraryName<TItem> Name { get; set; } = default!;
     /// <summary>A blank item for the Add dialog.</summary>
     [Parameter, EditorRequired] public Func<TItem> NewItem { get; set; } = default!;
     /// <summary>A copy of an item for the Edit dialog, so Cancel leaves the list as it was.</summary>
@@ -205,8 +204,8 @@
     /// </summary>
     [Parameter] public bool HasSelect { get; set; }
 
-    // The field name the name rule and its message use (the editor's FieldIdentifier for the name).
-    private const string NameField = "Name";
+    // The field the name rule, its message and the name field's attributes share.
+    private static LibraryField NameField => LibraryField.ItemName;
 
     private List<TItem>? _items;
     // The open Add or Edit dialog, null when none is open.
@@ -238,7 +237,7 @@
     // The name rule, then the page's own Rules.
     private IEnumerable<LibraryFieldError> FieldErrors(TItem item)
     {
-        if (LibraryRules.NameMessage(Name(item)) is { } message) yield return new LibraryFieldError(NameField, message);
+        if (LibraryRules.NameMessage(Name.Of(item)) is { } message) yield return new LibraryFieldError(NameField, message);
         foreach (var error in Rules?.Invoke(item) ?? []) yield return error;
     }
 
@@ -251,41 +250,26 @@
             IEnumerable<TItem> items = _items!;
             if (Filter is not null) items = items.Where(Filter);
             if (!string.IsNullOrWhiteSpace(_search))
-                items = items.Where(i => Name(i).Contains(_search, StringComparison.OrdinalIgnoreCase));
+                items = items.Where(i => Name.Of(i).Contains(_search, StringComparison.OrdinalIgnoreCase));
             return items.AsQueryable();
         }
     }
 
-    // The table row's own Edit and Delete, icon-only and named with the item.
-    private RenderFragment<LibraryItem<TItem>> EditButton => row =>
-        @<FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {row.Name}")" data-focus-key="@row.EditKey"
-                       Disabled="@row.Busy" OnClick="@row.Edit">
-            <FluentIcon Value="@(new Size16.Edit())" />
-        </FluentButton>;
-
-    private RenderFragment<LibraryItem<TItem>> DeleteButton => row =>
-        @<FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {row.Name}")" data-focus-key="@row.DeleteKey"
-                       Disabled="@row.AnyBusy" OnClick="@row.Delete">
-            <FluentIcon Value="@(new Size16.Delete())" />
-        </FluentButton>;
-
-    // The card a page gets from CardIcon: the icon, the name, and icon-only Edit and Delete named with the item.
+    // The card a page gets from CardIcon: the icon, the name, and the item's icon-only Edit and Delete.
     private RenderFragment<LibraryItem<TItem>> IconCard => card =>
         @<FluentGridItem xs="6" sm="4" md="3" lg="2">
             <FluentCard Style="text-align: center; padding: 16px;" AreaRestricted="false">
                 <FluentIcon Value="@CardIcon" Color="Color.Accent" Style="margin-bottom: 8px;" />
                 <FluentLabel Weight="FontWeight.Bold">@card.Name</FluentLabel>
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.Center" HorizontalGap="4" Style="margin-top: 8px;">
-                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Edit" aria-label="@($"Edit {card.Name}")" data-focus-key="@card.EditKey"
-                                  Disabled="@card.Busy" OnClick="@card.Edit" IconStart="@(new Size16.Edit())" />
-                    <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {card.Name}")" data-focus-key="@card.DeleteKey"
-                                  Disabled="@card.AnyBusy" OnClick="@card.Delete" IconStart="@(new Size16.Delete())" />
+                    <LibraryItemButton T="TItem" Item="card" Action="LibraryItemAction.Edit" />
+                    <LibraryItemButton T="TItem" Item="card" Action="LibraryItemAction.Delete" />
                 </FluentStack>
             </FluentCard>
         </FluentGridItem>;
 
     private LibraryItem<TItem> ItemFor(TItem item) => new(
-        item, Name(item), _rows.IsBusy(item.Id), _rows.Running,
+        item, Name.Of(item), _rows.IsBusy(item.Id), _rows.AnyBusy,
         EventCallback.Factory.Create<MouseEventArgs>(this, () => ShowEdit(item)),
         EventCallback.Factory.Create<MouseEventArgs>(this, () => AskDelete(item)),
         (write, failed) => RunRowAction(item.Id, write, failed));
@@ -306,16 +290,27 @@
     private void Open(LibraryEdit<TItem> edit, string opener)
     {
         _dialogError = null;
-        _edit = edit;
-        // A message coming or going changes the fields' aria-invalid, which this page renders.
-        edit.Form.OnValidationStateChanged += (_, _) => StateHasChanged();
-        _form.Open(() => DirtyFields?.Invoke(edit.Item) ?? new { Name = Name(edit.Item) });
+        Watch(edit);
+        _form.Open(() => DirtyFields?.Invoke(edit.Item) ?? new { Name = Name.Of(edit.Item) });
         _ = Focus.RememberAsync(opener);
     }
 
+    // The open editor's form: a message coming or going changes the fields' aria-invalid, which this page renders.
+    // Only that form is watched; a closed editor's form is let go (#196.13).
+    private void Watch(LibraryEdit<TItem>? edit)
+    {
+        if (_edit is not null) _edit.Form.OnValidationStateChanged -= ValidationChanged;
+        _edit = edit;
+        if (_edit is not null) _edit.Form.OnValidationStateChanged += ValidationChanged;
+    }
+
+    private void ValidationChanged(object? sender, ValidationStateChangedEventArgs e) => StateHasChanged();
+
+    public void Dispose() => Watch(null);
+
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelForm() { if (!_saving) CloseForm(); }
-    private void CloseForm() { _edit = null; _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
+    private void CloseForm() { Watch(null); _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
 
     // Overlay click or Escape.
     private Task DismissForm()
@@ -349,9 +344,9 @@
 
     private void AskDelete(TItem item)
     {
-        if (_rows.Running) return;
+        if (_rows.AnyBusy) return;
         _ = Focus.RememberAsync(LibraryItem<TItem>.DeleteKeyOf(item.Id));
-        var message = DeleteMessage?.Invoke(item) ?? $"Delete {Name(item)}? This cannot be undone.";
+        var message = DeleteMessage?.Invoke(item) ?? $"Delete {Name.Of(item)}? This cannot be undone.";
         _confirm = ConfirmRequest.Delete($"Delete {LowercaseSingular()}", message,
             () => RunRowAction(item.Id, () => Client.DeleteAsync(item.Id), $"The {LowercaseSingular()} was not deleted."));
     }

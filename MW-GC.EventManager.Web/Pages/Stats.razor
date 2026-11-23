@@ -2,7 +2,7 @@
 @using static MW_GC.EventManager.Web.Services.PerformanceFormat
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @inject EventService EventSvc
-@inject GameService GameSvc
+@inject LibraryClient<GameEntity> GameClient
 @inject LibraryClient<ActivityEntity> ActivityClient
 @inject EventMetricsClient MetricsClient
 
@@ -133,7 +133,7 @@
     {
         await Task.WhenAll(
             _loads.LoadAsync("Events", EventSvc.GetAllAsync, v => _events = v ?? []),
-            _loads.LoadAsync("Games", GameSvc.GetAllAsync, v => _games = v ?? []),
+            _loads.LoadAsync("Games", GameClient.GetAllAsync, v => _games = v ?? []),
             _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []),
             _loads.LoadResultAsync("Event metrics", async () => (await MetricsClient.LoadAllAsync()).ItemsOrError(), v => _metrics = v ?? []));
         if (_events is not null && _games is not null && _activities is not null && _metrics is not null)

@@ -2,7 +2,6 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using Microsoft.Azure.Functions.Worker;
-using Microsoft.Extensions.DependencyInjection;
 using MW_GC.EventManager.API.Functions;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Services;
@@ -34,9 +33,7 @@ public sealed class ServiceRouteContractTests
     // and {commentId:guid}.
     private static readonly Row[] Table =
     [
-        // The Games list for the readers not yet on LibraryClient<GameEntity> (Events, Stats, the performance panel);
-        // the same request as that client's GetAllAsync row below, until those readers move and the service goes.
-        new(typeof(GameService), nameof(GameService.GetAllAsync), "GET", "api/games", h => new GameService(h).GetAllAsync()),
+        // Every Games read goes through LibraryClient<GameEntity> below (#196.1).
 
         // Activities read, create, update and delete through the shared client (#126); the service keeps the one
         // route only Activities have.
@@ -71,19 +68,17 @@ public sealed class ServiceRouteContractTests
 
     private static Row[] LibraryRows<T>(string list, string one) where T : EntityBase, new() =>
     [
-        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.GetAllAsync), "GET", list, h => Registered<T>(h).GetAllAsync()),
-        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.CreateAsync), "POST", list, h => Registered<T>(h).CreateAsync(new T { Id = Id })),
-        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.UpdateAsync), "PUT", one, h => Registered<T>(h).UpdateAsync(new T { Id = Id })),
-        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.DeleteAsync), "DELETE", one, h => Registered<T>(h).DeleteAsync(Id)),
+        // Each call resolves the client from the app's registration over the row's HttpClient, in a provider of its
+        // own that is disposed once the call is done (LibraryServices, shared with LibraryClientTests).
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.GetAllAsync), "GET", list, h => LibraryServices.CallAsync<T, List<T>?>(h, c => c.GetAllAsync())),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.CreateAsync), "POST", list, h => LibraryServices.CallAsync<T, string?>(h, c => c.CreateAsync(new T { Id = Id }))),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.UpdateAsync), "PUT", one, h => LibraryServices.CallAsync<T, string?>(h, c => c.UpdateAsync(new T { Id = Id }))),
+        new(typeof(LibraryClient<T>), nameof(LibraryClient<T>.DeleteAsync), "DELETE", one, h => LibraryServices.CallAsync<T, string?>(h, c => c.DeleteAsync(Id))),
     ];
-
-    // The LibraryClient<T> the app's registration builds over the given HttpClient.
-    private static LibraryClient<T> Registered<T>(HttpClient http) where T : EntityBase =>
-        new ServiceCollection().AddSingleton(http).AddLibraryClients().BuildServiceProvider().GetRequiredService<LibraryClient<T>>();
 
     private static readonly Type[] Services =
     [
-        typeof(GameService), typeof(ActivityService), typeof(EventService), typeof(EventMetricsClient), typeof(CommentClient),
+        typeof(ActivityService), typeof(EventService), typeof(EventMetricsClient), typeof(CommentClient),
         typeof(LibraryClient<GameEntity>), typeof(LibraryClient<ThemeEntity>), typeof(LibraryClient<HolidayEntity>),
         typeof(LibraryClient<ActivityEntity>)
     ];

@@ -3,13 +3,21 @@ namespace MW_GC.EventManager.Web.Shared;
 /// <summary>
 /// The row action (Delete, Duplicate) a page is running. One runs at a time: meanwhile every
 /// row's Delete and Duplicate are disabled and the busy row's other buttons too, and a click that
-/// lands before the re-render sends nothing.
+/// lands before the re-render sends nothing. "Busy" is the one word for it: <see cref="IsBusy"/> for
+/// one row, <see cref="AnyBusy"/> for any.
 /// </summary>
 public sealed class RowAction
 {
     public Guid? BusyId { get; private set; }
 
-    public bool Running => BusyId is not null;
+    /// <summary>Some row's action is running.</summary>
+    public bool AnyBusy => BusyId is not null;
+
+    /// <summary>
+    /// The old name of <see cref="AnyBusy"/>, kept only for the Events list (Shared/Events/EventList.razor), which
+    /// another card owns; it moves to <see cref="AnyBusy"/> there and this goes.
+    /// </summary>
+    public bool Running => AnyBusy;
 
     public bool IsBusy(Guid id) => BusyId == id;
 

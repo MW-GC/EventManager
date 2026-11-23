@@ -50,6 +50,9 @@ public sealed class LibraryItem<T>(
     internal static string DeleteKeyOf(Guid id) => $"delete-{id}";
 }
 
+/// <summary>Which of an item's own buttons a <c>LibraryItemButton</c> is.</summary>
+public enum LibraryItemAction { Edit, Delete }
+
 /// <summary>
 /// The item in the open editor (a copy, so Cancel leaves the list as it was), and the item as listed when this
 /// is an edit (null for an add). The editor's form lives here too, so a field can say whether it has a message
@@ -69,13 +72,13 @@ public sealed class LibraryEdit<T>(T item, T? stored) where T : EntityBase
 
     /// <summary>
     /// The attributes that tie a field to its <see cref="LibraryFieldMessage"/>: <c>aria-describedby</c> names the
-    /// message, and <c>aria-invalid</c> is set while the field has one. <paramref name="field"/> is the name the
-    /// field's rule and message use, such as nameof(GameEntity.Website).
+    /// message, and <c>aria-invalid</c> is set while the field has one. <paramref name="field"/> is the same key the
+    /// field's rule and message use.
     /// </summary>
-    public IReadOnlyDictionary<string, object> FieldAttributes(string field)
+    public IReadOnlyDictionary<string, object> FieldAttributes(LibraryField field)
     {
-        var attributes = new Dictionary<string, object> { ["aria-describedby"] = LibraryFieldMessage.IdFor(field) };
-        if (Form.GetValidationMessages(new FieldIdentifier(Item, field)).Any()) attributes["aria-invalid"] = "true";
+        var attributes = new Dictionary<string, object> { ["aria-describedby"] = field.MessageId };
+        if (Form.GetValidationMessages(field.On(Item)).Any()) attributes["aria-invalid"] = "true";
         return attributes;
     }
 }

@@ -150,7 +150,7 @@ public sealed class ActivitiesPageTests : IDisposable
     }
 
     // The form's Game rule refuses exactly what the API refuses (no Game), in its own words for the field the user
-    // sees ("Game is required.", not the API's "GameId is required.").
+    // sees: the editor's "Game is required.", whatever the API says about its GameId (#196.6).
     [TestMethod]
     public void GameRule_RefusesWhatTheApiRefuses_InTheFormsOwnWords()
     {
@@ -160,8 +160,30 @@ public sealed class ActivitiesPageTests : IDisposable
             var form = LibraryRules.GameMessage(gameId);
             Assert.AreEqual(api is null, form is null, $"GameId {gameId}");
         }
-        Assert.AreEqual("GameId is required.", ActivityValidator.Validate(new ActivityEntity { Name = "Ghost lap" }));
-        Assert.AreEqual("Game is required.", LibraryRules.GameMessage(Guid.Empty));
+        Assert.AreEqual(GameRequired, LibraryRules.GameMessage(Guid.Empty));
+    }
+
+    // #196.2: the Game picker's host is the combobox itself (no inner input), so its own aria-describedby reaches
+    // assistive technology (checked in a real browser, PR evidence). It names the element under it that holds its
+    // message, and says it is invalid only while that message shows.
+    [TestMethod]
+    public async Task GamePicker_SaysItIsInvalid_AndNamesItsMessage()
+    {
+        var page = Open();
+        await page.Button("Add Activity").ClickAsync(new());
+        Assert.IsFalse(GameSelect(page).HasAttribute("aria-invalid"));
+        await NameField(page).ChangeAsync(new ChangeEventArgs { Value = "Ghost lap" });
+
+        await Submit(page);
+
+        Assert.AreEqual("true", GameSelect(page).GetAttribute("aria-invalid"));
+        var holder = page.Find($"[id='{GameSelect(page).GetAttribute("aria-describedby")}']");
+        Assert.AreEqual(GameRequired, Assert.ContainsSingle(holder.Alerts()));
+        Assert.AreSame(GameSelect(page).ParentElement, holder.ParentElement);
+
+        await GameOption(page, kart).ClickAsync(new());
+        Assert.IsFalse(GameSelect(page).HasAttribute("aria-invalid"));
+        Assert.IsEmpty(holder.Alerts());
     }
 
     // The details dialog and its Comments panel are covered in CommentsPanelTests (#131) and ActivityDetailsDialogTests.
@@ -183,8 +205,8 @@ public sealed class ActivitiesPageTests : IDisposable
         AssertNoWrites();
     }
 
-    // The page has a table only, as the old page did: LibraryPageTests.CardView_IsOfferedOnlyToAPageThatGivesACardTemplate
-    // renders this page and checks it gets no view toggle.
+    // The page has a table only, as the old page did: LibraryPageTests.ViewToggle_IsOfferedOnlyToAPageWithACardTemplateOrIcon
+    // renders this page with rows and checks it gets no view toggle.
 
     // ---- Helpers -------------------------------------------------------------------------------
 

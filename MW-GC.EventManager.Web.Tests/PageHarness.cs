@@ -18,8 +18,7 @@ internal sealed class PageHarness : IDisposable
         _context.JSInterop.Mode = JSRuntimeMode.Loose;
         _context.Services.AddFluentUIComponents();
         var http = api.Client();
-        _context.Services.AddSingleton(new GameService(http));
-        // The four Library clients as the app registers them (Program.cs), over the stub's HttpClient.
+        // The four Library clients as the app registers them (AppServices), over the stub's HttpClient.
         _context.Services.AddSingleton(http);
         _context.Services.AddLibraryClients();
         _context.Services.AddSingleton(new ActivityService(http));
