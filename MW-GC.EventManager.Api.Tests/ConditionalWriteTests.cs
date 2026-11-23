@@ -5,10 +5,8 @@ using Azure.Data.Tables;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
-using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
-using MW_GC.EventManager.Shared.Models;
 
 namespace MW_GC.EventManager.Api.Tests;
 

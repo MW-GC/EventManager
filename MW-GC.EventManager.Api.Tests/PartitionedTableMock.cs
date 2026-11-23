@@ -30,7 +30,7 @@ internal static partial class TableMocks
     {
         var table = new Mock<TableClient>();
         table.Setup(t => t.UpsertEntityAsync(It.IsAny<T>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
-            .Returns((T row, TableUpdateMode _, CancellationToken _) => Task.FromResult(StoreKeyed(rows, row)));
+            .Returns((T row, TableUpdateMode _, CancellationToken _) => Task.FromResult(Store(rows, Key(row.PartitionKey, row.RowKey), (ITableEntity)row)));
         table.Setup(t => t.AddEntityAsync(It.IsAny<T>(), It.IsAny<CancellationToken>()))
             .Returns((T row, CancellationToken _) => Task.FromResult(AddRow(rows, row)));
         table.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
@@ -38,13 +38,13 @@ internal static partial class TableMocks
         table.Setup(t => t.UpdateEntityAsync(It.IsAny<T>(), It.IsAny<ETag>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
             .Returns((T row, ETag ifMatch, TableUpdateMode _, CancellationToken _) =>
             {
-                CheckKeyed(rows, Key(row.PartitionKey, row.RowKey), ifMatch);
-                return Task.FromResult(StoreKeyed(rows, row));
+                Check(rows, Key(row.PartitionKey, row.RowKey), ifMatch);
+                return Task.FromResult(Store(rows, Key(row.PartitionKey, row.RowKey), (ITableEntity)row));
             });
         table.Setup(t => t.DeleteEntityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ETag>(), It.IsAny<CancellationToken>()))
             .Returns((string partition, string id, ETag ifMatch, CancellationToken ct) =>
             {
-                CheckKeyed(rows, Key(partition, id), ifMatch);
+                Check(rows, Key(partition, id), ifMatch);
                 rows.TryRemove(Key(partition, id), out _);
                 return Task.FromResult<Response>(new StorageResponse());
             });
@@ -104,20 +104,5 @@ internal static partial class TableMocks
             matches.Add(read);
         }
         return matches;
-    }
-
-    private static Response StoreKeyed(ConcurrentDictionary<string, ITableEntity> rows, ITableEntity row)
-    {
-        row.ETag = NextETag();
-        rows[Key(row.PartitionKey, row.RowKey)] = row;
-        return new StorageResponse(row.ETag);
-    }
-
-    private static void CheckKeyed(ConcurrentDictionary<string, ITableEntity> rows, string key, ETag ifMatch)
-    {
-        if (!rows.TryGetValue(key, out var current))
-            throw new RequestFailedException(404, "The specified resource does not exist.", "ResourceNotFound", null);
-        if (ifMatch != ETag.All && ifMatch != current.ETag)
-            throw new RequestFailedException(412, "The update condition specified in the request was not satisfied.", "UpdateConditionNotSatisfied", null);
     }
 }

@@ -165,7 +165,7 @@ public class PropertyLimitTests
         var game = h.SeedGame();
         var id = Guid.NewGuid();
         var theme = Guid.NewGuid();
-        h.Activities[id.ToString("D")] = new TableEntity("Activity", id.ToString("D"))
+        h.Activities[id.ToString("D")] = new TableEntity(TableNames.ActivityPartition, id.ToString("D"))
         {
             ["GameId"] = game.Id, ["Name"] = "Act", ["Description"] = "Café",
             ["ThemeIds"] = JsonSerializer.Serialize(new List<Guid> { theme }, OldJson), ["HolidayIds"] = "[]",

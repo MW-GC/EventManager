@@ -5,7 +5,6 @@ using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MW_GC.EventManager.API.Services;
-using MW_GC.EventManager.Shared.Entities;
 
 var builder = FunctionsApplication.CreateBuilder(args);
 
@@ -13,21 +12,8 @@ builder.ConfigureFunctionsWebApplication();
 
 builder.Services.AddSingleton(CreateTableServiceClient());
 
-builder.Services.AddSingleton(sp =>
-    new TableStore<GameEntity>(sp.GetRequiredService<TableServiceClient>(), "Games", "Game"));
-builder.Services.AddSingleton(sp =>
-    new TableStore<ActivityEntity>(sp.GetRequiredService<TableServiceClient>(), TableNames.Activities, TableNames.ActivityPartition));
-builder.Services.AddSingleton(sp =>
-    new TableStore<EventEntity>(sp.GetRequiredService<TableServiceClient>(), "Events", "Event"));
-builder.Services.AddSingleton(sp =>
-    new TableStore<ThemeEntity>(sp.GetRequiredService<TableServiceClient>(), "Themes", "Theme"));
-builder.Services.AddSingleton(sp =>
-    new TableStore<HolidayEntity>(sp.GetRequiredService<TableServiceClient>(), "Holidays", "Holiday"));
-// Event metrics (#134, ADR 0001): one row per Event, keyed by the Event id.
-builder.Services.AddSingleton(sp =>
-    new TableStore<EventMetricsEntity>(sp.GetRequiredService<TableServiceClient>(), "EventMetrics", "Metrics"));
-builder.Services.AddSingleton(sp =>
-    new TableStore<CommentEntity>(sp.GetRequiredService<TableServiceClient>(), TableNames.Comments, TableNames.CommentPartition));
+// One store per table (TableNames), over the client above.
+builder.Services.AddTableStores();
 // Each old Activity text becomes that Activity's first Comment (#130), once: in the background at host
 // start, and before any Activity PUT until the pass has finished (#133).
 builder.Services.AddSingleton<ActivityNoteConversion>();
