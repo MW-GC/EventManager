@@ -5,6 +5,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -185,16 +186,4 @@ public sealed class DiscardPromptFocusTests : IDisposable
         return page;
     }
 
-    // Overlay click or Escape on the page's form or details dialog.
-    private static Task Dismiss(IRenderedComponent<IComponent> page)
-    {
-        var dialog = page.FormDialog();
-        return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
-    }
-
-    private static IElement RowButton(IRenderedComponent<IComponent> page, string item, string title) =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
 }

@@ -28,18 +28,19 @@
             <FluentGrid Spacing="2">
                 @foreach (var field in _fields)
                 {
-                    var f = field;
                     <FluentGridItem xs="12" sm="6">
                         <div>
-                            @* The message under a field is tied to it, so a screen reader reads it with the field. *@
-                            <FluentTextField Id="@f.Id" Label="@f.Label" Value="@f.Text" Immediate="true"
-                                             ValueChanged="@((string? v) => SetText(f, v))" Disabled="@_saving" Style="width: 100%;"
-                                             Placeholder="@f.Placeholder"
-                                             aria-invalid="@(f.Error is null ? null : "true")"
-                                             aria-describedby="@(f.Error is null ? null : f.MessageId)" />
-                            @if (f.Error is { } error)
+                            @* A screen reader reads the message with the field: it is the field's accessible name while it
+                               shows (each message starts with the field's label). An id reference such as aria-describedby
+                               cannot reach the input inside the text field's shadow root; aria-label is copied onto it. *@
+                            <FluentTextField Id="@field.Id" Label="@field.Label" Value="@field.Text" Immediate="true"
+                                             ValueChanged="@((string? v) => SetText(field, v))" Disabled="@_saving" Style="width: 100%;"
+                                             Placeholder="@field.Placeholder"
+                                             aria-label="@(field.Error ?? field.Label)"
+                                             aria-invalid="@(field.Error is null ? null : "true")" />
+                            @if (field.Error is { } error)
                             {
-                                <div id="@f.MessageId" role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@error</div>
+                                <div id="@field.MessageId" role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@error</div>
                             }
                         </div>
                     </FluentGridItem>

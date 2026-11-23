@@ -4,82 +4,20 @@ using System.Reflection;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Web;
 using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
-using MW_GC.EventManager.Shared.Models;
-using MW_GC.EventManager.Web.Pages;
 using MW_GC.EventManager.Web.Shared;
 using MW_GC.EventManager.Web.Shared.Events;
 using MW_GC.EventManager.Web.Shared.Library;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
-// Issue #52 on all five pages, rendered with bUnit against a stub API: every Delete asks first,
-// row actions and Select Winner run once, a late save never closes a newer dialog, and overlay
-// click or Escape asks before discarding typed changes.
-//
-// Overlay click and Escape reach a page as the "ondialogdismiss" event that Fluent UI raises on
-// <fluent-dialog> (the browser "dismiss" event), so Dismiss() triggers exactly that event.
+// Issue #52 on all five pages: every Delete asks first, row actions and Select Winner run once, and a late save
+// never closes a newer dialog. Overlay click and Escape are in DismissSafetyTests.
 [TestClass]
-public sealed class DialogSafetyTests : IDisposable
+public sealed class DialogSafetyTests : DialogSafetyFixture
 {
-    private readonly StubApiHandler api = new();
-    private readonly PageHarness harness;
-    private readonly GameEntity kart = new() { Name = "Kart" };
-    private readonly GameEntity brawl = new() { Name = "Brawl" };
-    private readonly GameEntity puzzle = new() { Name = "Puzzle" };
-    private readonly ActivityEntity grandPrix;
-    private readonly ActivityEntity timeTrial;
-    private readonly ActivityEntity stock;
-    // Used by the "Party" Event but no longer in the library (Party's Winner is Grand Prix, which is).
-    private readonly Activity retired;
-    private readonly ThemeEntity spooky = new() { Name = "Spooky" };
-    private readonly HolidayEntity halloween = new() { Name = "Halloween" };
-    private readonly EventEntity night;
-    private readonly EventEntity party;
-
-    public DialogSafetyTests()
-    {
-        grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id };
-        timeTrial = new ActivityEntity { Name = "Time Trial", GameId = kart.Id };
-        stock = new ActivityEntity { Name = "Stock", GameId = brawl.Id };
-        retired = new Activity { Id = Guid.NewGuid(), GameId = brawl.Id, Name = "Retired" };
-        night = new EventEntity
-        {
-            Name = "Game night",
-            Date = new DateTimeOffset(2026, 10, 9, 19, 0, 0, TimeSpan.Zero),
-            UniqueGamesOnly = false,
-            Selections = [Pick(kart, grandPrix), Pick(brawl, stock), Pick(kart, timeTrial)]
-        };
-        // One Selection no longer in the library, and a Winner that is (its details show the Comments panel).
-        party = new EventEntity
-        {
-            Name = "Party",
-            Date = new DateTimeOffset(2026, 10, 31, 20, 0, 0, TimeSpan.Zero),
-            Selections = [new Selection { Game = new Game { Id = brawl.Id, Name = brawl.Name }, Activity = retired }, Pick(kart, grandPrix)],
-            WinnerActivityId = grandPrix.Id
-        };
-        api.Json(HttpMethod.Get, "/api/games", new[] { kart, brawl, puzzle })
-           .Json(HttpMethod.Get, "/api/activities", new[] { grandPrix, timeTrial, stock })
-           .Json(HttpMethod.Get, "/api/themes", new[] { spooky })
-           .Json(HttpMethod.Get, "/api/holidays", new[] { halloween })
-           .Json(HttpMethod.Get, "/api/events", new[] { night, party })
-           // Grand Prix's Comments, in its Activity details (#131) and as the Party Event's Winner in Event details
-           // (#132): none yet, so the first text box is New Comment. The retired Activity's are not routed, so they
-           // answer 404, as the real API does for an Activity no longer in the library.
-           .Json(HttpMethod.Get, $"/api/activities/{grandPrix.Id}/comments", Array.Empty<CommentEntity>());
-        harness = new PageHarness(api);
-    }
-
-    public void Dispose() => harness.Dispose();
-
-    private static Selection Pick(GameEntity game, ActivityEntity act) => new()
-    {
-        Game = new Game { Id = game.Id, Name = game.Name },
-        Activity = new Activity { Id = act.Id, GameId = act.GameId, Name = act.Name }
-    };
-
     // ---- Delete asks first -------------------------------------------------------------------
 
     [TestMethod]
@@ -182,7 +120,7 @@ public sealed class DialogSafetyTests : IDisposable
         // A click that lands before the re-render reaches the handler itself, which sends nothing: run the
         // button's own handler again, past its disabled state. Not awaited before the release: without the
         // guard it would wait on the held request too. The guard lives in the shared Library page (#126).
-        var second = page.InvokeAsync(() => duplicate.InvokeAsync(new MouseEventArgs()));
+        var second = page.InvokeAsync(() => duplicate.InvokeAsync(new()));
 
         gate.SetResult();
         await first;
@@ -201,6 +139,9 @@ public sealed class DialogSafetyTests : IDisposable
         var path = $"/api/events/{night.Id}";
         var gate = api.Hold(HttpMethod.Put, path, () => new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(night) });
         Assert.HasCount(3, WinnerButtons(page));
+        // The Select Winner handlers as the dialog wired them (Grand Prix, Stock, Time Trial), taken while enabled.
+        var handlers = ClickHandlers(page, "Select Winner");
+        Assert.HasCount(3, handlers);
 
         var first = WinnerButtons(page)[0].ClickAsync(new());
 
@@ -214,10 +155,9 @@ public sealed class DialogSafetyTests : IDisposable
         });
         var during = WinnerButtons(page);
         await during[0].ClickAsync(new());
-        // A click that lands before the re-render reaches the handler itself, which sends nothing.
+        // A click on Stock's button that lands before the re-render reaches the handler itself, which sends nothing.
         // Not awaited before the release: without the guard it would wait on the held request too.
-        // SelectWinner moved with the details dialog into EventDetailsDialog (#93).
-        var second = page.InvokeAsync(() => (Task)Call(page.FindComponent<EventDetailsDialog>().Instance, "SelectWinner", stock.Id)!);
+        var second = page.InvokeAsync(() => handlers[1].InvokeAsync(new()));
 
         gate.SetResult();
         await first;
@@ -230,23 +170,27 @@ public sealed class DialogSafetyTests : IDisposable
     }
 
     // ---- A late save leaves a newer dialog alone ------------------------------------------------
-    // While a save runs the page itself never lets its dialog close (Cancel is disabled and
-    // guarded, overlay click and Escape do nothing). These tests close it through the page's own
-    // close method anyway, to prove the save's dialog token on its own.
+    // While a save runs the page itself never lets its dialog close (Cancel is disabled and guarded, overlay
+    // click and Escape do nothing), so no page event can close it then. These two tests close it through the
+    // page's own close method anyway, to prove the save's dialog token on its own (#196 item 7: kept, since no
+    // page event reaches it). What the newer dialog holds is read through the page: its fields, and where its
+    // own save goes.
 
     [TestMethod]
     public async Task SaveFinishingAfterCancelAndReopen_DoesNotCloseOrResetTheNewerDialog()
     {
         var page = Open("games");
         var pathA = $"/api/games/{kart.Id}";
+        var pathB = $"/api/games/{brawl.Id}";
         var gate = api.Hold(HttpMethod.Put, pathA, () => new HttpResponseMessage(HttpStatusCode.NoContent));
+        api.Status(HttpMethod.Put, pathB, HttpStatusCode.NoContent);
         await RowButton(page, "Kart", "Edit").ClickAsync(new());
         await TextField(page).ChangeAsync(new ChangeEventArgs { Value = "Kart renamed" });
         var save = page.FormDialog().QuerySelector("form")!.SubmitAsync();
         // The submit may still be queued behind other renderer work, so wait for the save's render.
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
-        await CloseThrough(page, GamesLibrary(page), "CloseForm");
+        await CloseThrough(page, page.FindComponent<LibraryPage<GameEntity>>().Instance, "CloseForm");
         Assert.IsFalse(page.HasFormDialog());
         await RowButton(page, "Brawl", "Edit").ClickAsync(new());
         await TextField(page).ChangeAsync(new ChangeEventArgs { Value = "Brawl typed" });
@@ -256,14 +200,16 @@ public sealed class DialogSafetyTests : IDisposable
 
         Assert.AreEqual("Edit Game", page.DialogTitle());
         Assert.AreEqual("Brawl typed", TextField(page).GetAttribute("value"));
-        Assert.AreEqual(brawl.Id, ((LibraryEdit<GameEntity>)Field(GamesLibrary(page), "_edit")!).Item.Id);
         Assert.Contains("Stock", page.FormDialog().TextContent);
         Assert.IsEmpty(page.FormDialog().Alerts());
         Assert.AreEqual(1, api.Count(HttpMethod.Put, pathA));
         Assert.Contains("Kart renamed", api.Bodies(HttpMethod.Put, pathA)[0]!);
-        Assert.AreEqual(0, api.Count(HttpMethod.Put, $"/api/games/{brawl.Id}"));
-        // Only the finishing save cleared the busy flag: B's Save is usable again.
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, pathB));
+        // Only the finishing save cleared the busy flag: B's Save is usable again, and it saves Brawl.
         Assert.IsFalse(page.FormDialog().Button("Save Changes").IsBusy());
+        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
+        Assert.Contains("Brawl typed", Assert.ContainsSingle(api.Bodies(HttpMethod.Put, pathB))!);
+        Assert.AreEqual(1, api.Count(HttpMethod.Put, pathA));
     }
 
     [TestMethod]
@@ -271,16 +217,16 @@ public sealed class DialogSafetyTests : IDisposable
     {
         var page = Open("events");
         var pathA = $"/api/events/{night.Id}";
+        var pathB = $"/api/events/{party.Id}";
         var gate = api.Hold(HttpMethod.Put, pathA, () => new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(night) });
+        api.Json(HttpMethod.Put, pathB, party);
         await RowButton(page, "Game night", "Edit").ClickAsync(new());
         await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Night renamed" });
         var save = page.FormDialog().Button("Update Event").ClickAsync(new());
         // The click may still be queued behind other renderer work, so wait for the save's render.
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
-        // CloseCustomize and _editingEvent moved with the dialog into EventEditDialog (#93).
-        var dialog = page.FindComponent<EventEditDialog>();
-        await CloseThrough(dialog, "CloseCustomize");
+        await CloseThrough(page, page.FindComponent<EventEditDialog>().Instance, "CloseCustomize");
         Assert.IsFalse(page.HasFormDialog());
         await RowButton(page, "Party", "Edit").ClickAsync(new());
         await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Party typed" });
@@ -290,12 +236,16 @@ public sealed class DialogSafetyTests : IDisposable
 
         Assert.AreEqual("Edit Event", page.DialogTitle());
         Assert.AreEqual("Party typed", EventName(page).GetAttribute("value"));
-        Assert.AreEqual(party.Id, ((EventEntity)Field(dialog.Instance, "_editingEvent")!).Id);
         Assert.IsEmpty(page.FormDialog().Alerts());
         Assert.AreEqual(1, api.Count(HttpMethod.Put, pathA));
         Assert.Contains("Night renamed", api.Bodies(HttpMethod.Put, pathA)[0]!);
-        Assert.AreEqual(0, api.Count(HttpMethod.Put, $"/api/events/{party.Id}"));
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, pathB));
+        // B's Update Event is usable again, and it saves Party.
         Assert.IsFalse(page.FormDialog().Button("Update Event").IsBusy());
+        await page.FormDialog().Button("Update Event").ClickAsync(new());
+        page.WaitForAssertion(() => Assert.AreEqual(1, api.Count(HttpMethod.Put, pathB)));
+        Assert.Contains("Party typed", api.Bodies(HttpMethod.Put, pathB)[0]!);
+        Assert.AreEqual(1, api.Count(HttpMethod.Put, pathA));
     }
 
     [TestMethod]
@@ -306,14 +256,15 @@ public sealed class DialogSafetyTests : IDisposable
         var gate = api.Hold(HttpMethod.Put, path, () => new HttpResponseMessage(HttpStatusCode.NoContent));
         await RowButton(page, "Kart", "Edit").ClickAsync(new());
         await TextField(page).ChangeAsync(new ChangeEventArgs { Value = "Kart renamed" });
+        // Cancel's handler as the page wired it, taken while the button is enabled.
+        var cancelHandler = ClickHandler(page, "Cancel");
         var save = page.FormDialog().QuerySelector("form")!.SubmitAsync();
 
         // The submit may still be queued behind other renderer work, so wait for the save's render.
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
-        var cancel = page.FormDialog().Button("Cancel");
-        await cancel.ClickAsync(new());
-        // A click that lands before the re-render reaches the handler itself, which ignores it.
-        await CloseThrough(page, GamesLibrary(page), "CancelForm");
+        await page.FormDialog().Button("Cancel").ClickAsync(new());
+        // A click that lands before the re-render reaches Cancel's handler itself, which ignores it.
+        await page.InvokeAsync(() => cancelHandler.InvokeAsync(new()));
 
         Assert.IsTrue(page.HasFormDialog());
         Assert.AreEqual("Kart renamed", TextField(page).GetAttribute("value"));
@@ -327,210 +278,7 @@ public sealed class DialogSafetyTests : IDisposable
         Assert.AreEqual(1, api.Count(HttpMethod.Put, path));
     }
 
-    // ---- Overlay click and Escape -------------------------------------------------------------
-
-    public static IEnumerable<object[]> ChangedForms =>
-    [
-        ["games-create"], ["games-edit"], ["themes-create"], ["themes-edit"], ["holidays-create"], ["holidays-edit"],
-        ["activities-create"], ["activities-edit"], ["activities-details"],
-        ["events-create"], ["events-edit"], ["events-edit-slots"], ["events-details"]
-    ];
-
-    public static IEnumerable<object[]> UntouchedForms =>
-    [
-        ["games-create"], ["games-edit"], ["themes-create"], ["themes-edit"], ["holidays-create"], ["holidays-edit"],
-        ["activities-create"], ["activities-edit"], ["activities-details"],
-        ["events-create"], ["events-edit"], ["events-edit-deleted-activity"], ["events-details"]
-    ];
-
-    [TestMethod]
-    [DynamicData(nameof(ChangedForms))]
-    public async Task Dismiss_WithUnsavedChanges_AsksToDiscard_KeepEditingKeepsDialog_DiscardCloses(string form)
-    {
-        var (page, value) = await OpenForm(form, change: true);
-        var typed = value();
-
-        await Dismiss(page);
-
-        Assert.IsTrue(page.HasFormDialog());
-        var confirmation = page.Confirmation();
-        Assert.AreEqual("Discard changes?", Heading(confirmation));
-        // The form dialog lets go of focus so the question can take it.
-        Assert.AreEqual("false", page.FormDialog().GetAttribute("trap-focus"));
-        await confirmation.Button("Keep editing").ClickAsync(new());
-        Assert.IsFalse(page.HasConfirmation());
-        Assert.IsTrue(page.HasFormDialog());
-        Assert.AreEqual("true", page.FormDialog().GetAttribute("trap-focus"));
-        Assert.AreEqual(typed, value());
-
-        // Escape while the question is open reaches the form dialog first; it answers Keep editing.
-        await Dismiss(page);
-        Assert.IsTrue(page.HasConfirmation());
-        await Dismiss(page);
-        Assert.IsFalse(page.HasConfirmation());
-        Assert.IsTrue(page.HasFormDialog());
-        Assert.AreEqual(typed, value());
-
-        await Dismiss(page);
-        await page.ConfirmAsync("Discard");
-
-        Assert.IsFalse(page.HasFormDialog());
-        Assert.IsFalse(page.HasConfirmation());
-        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
-    }
-
-    // Escape pressed while the cursor is still in a field: the browser has raised "input" for every
-    // keystroke but no "change" yet (that only comes when the field loses focus). So these tests type
-    // with InputAsync, never ChangeAsync, and the typed text must already count as a change.
-    [TestMethod]
-    [DataRow("games-create")]
-    [DataRow("games-edit")]
-    [DataRow("themes-create")]
-    [DataRow("themes-edit")]
-    [DataRow("holidays-create")]
-    [DataRow("holidays-edit")]
-    [DataRow("activities-create")]
-    [DataRow("activities-edit")]
-    [DataRow("activities-details")]
-    [DataRow("events-create")]
-    [DataRow("events-edit")]
-    [DataRow("events-details")]
-    public async Task Dismiss_RightAfterTyping_BeforeFieldLosesFocus_AsksToDiscard(string form)
-    {
-        var (page, _) = await OpenForm(form, change: false);
-        const string typed = "Typed, cursor still in the field";
-
-        await TextInputs(page)[0].InputAsync(new ChangeEventArgs { Value = typed });
-        await Dismiss(page);
-
-        Assert.IsTrue(page.HasFormDialog(), $"{form}: Escape right after typing closed the dialog and lost the text");
-        Assert.IsTrue(page.HasConfirmation(), $"{form}: Escape right after typing did not ask");
-        Assert.AreEqual("Discard changes?", Heading(page.Confirmation()));
-        await page.Confirmation().Button("Keep editing").ClickAsync(new());
-        Assert.IsTrue(page.HasFormDialog());
-        Assert.AreEqual(typed, TextInputs(page)[0].GetAttribute("value"));
-
-        await Dismiss(page);
-        await page.ConfirmAsync("Discard");
-        Assert.IsFalse(page.HasFormDialog());
-        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
-    }
-
-    // Every text field of the dialogs with more than one counts while it is being typed in.
-    [TestMethod]
-    [DataRow("games-create", 2)]
-    [DataRow("games-edit", 2)]
-    [DataRow("activities-create", 4)]
-    [DataRow("activities-edit", 4)]
-    public async Task Dismiss_RightAfterTypingInAnyTextField_AsksToDiscard(string form, int fields)
-    {
-        for (var i = 0; i < fields; i++)
-        {
-            var (page, _) = await OpenForm(form, change: false);
-            Assert.HasCount(fields, TextInputs(page));
-
-            await TextInputs(page)[i].InputAsync(new ChangeEventArgs { Value = $"Typed in field {i}" });
-            await Dismiss(page);
-
-            Assert.IsTrue(page.HasConfirmation(), $"{form}: typing in text field {i} did not count as a change");
-            await page.ConfirmAsync("Discard");
-            Assert.IsFalse(page.HasFormDialog());
-        }
-        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
-    }
-
-    // The Event Time picker is typed into too; its input event must count before it loses focus.
-    [TestMethod]
-    [DataRow("events-create")]
-    [DataRow("events-edit")]
-    public async Task Dismiss_RightAfterTypingEventTime_AsksToDiscard(string form)
-    {
-        var (page, _) = await OpenForm(form, change: false);
-        var time = page.FormDialog().QuerySelector("fluent-text-field.fluent-timepicker")!;
-        var typed = time.GetAttribute("current-value") == "06:15" ? "06:45" : "06:15";
-
-        await time.InputAsync(new ChangeEventArgs { Value = typed });
-        await Dismiss(page);
-
-        Assert.IsTrue(page.HasConfirmation(), $"{form}: Escape right after typing a time did not ask");
-        await page.ConfirmAsync("Discard");
-        Assert.IsFalse(page.HasFormDialog());
-        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
-    }
-
-    [TestMethod]
-    [DynamicData(nameof(UntouchedForms))]
-    public async Task Dismiss_WithNoChanges_ClosesImmediately(string form)
-    {
-        var (page, _) = await OpenForm(form, change: false);
-
-        await Dismiss(page);
-
-        Assert.IsFalse(page.HasFormDialog());
-        Assert.IsFalse(page.HasConfirmation());
-        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
-    }
-
-    [TestMethod]
-    [DataRow("games")]
-    [DataRow("events")]
-    public async Task Dismiss_DuringSave_DoesNothing(string route)
-    {
-        var (page, _) = await OpenForm(route == "games" ? "games-edit" : "events-edit", change: true);
-        TaskCompletionSource gate;
-        Task save;
-        if (route == "games")
-        {
-            gate = api.Hold(HttpMethod.Put, $"/api/games/{kart.Id}", () => new HttpResponseMessage(HttpStatusCode.NoContent));
-            save = page.FormDialog().QuerySelector("form")!.SubmitAsync();
-        }
-        else
-        {
-            gate = api.Hold(HttpMethod.Put, $"/api/events/{night.Id}", () => new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(night) });
-            save = page.FormDialog().Button("Update Event").ClickAsync(new());
-        }
-        // The save may still be queued behind other renderer work, so wait for its render.
-        page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
-
-        await Dismiss(page);
-
-        Assert.IsTrue(page.HasFormDialog());
-        Assert.IsFalse(page.HasConfirmation());
-
-        gate.SetResult();
-        await save;
-        Assert.IsFalse(page.HasFormDialog());
-        Assert.IsFalse(page.HasConfirmation());
-    }
-
-    // #186 item 3: an Event whose Winner is no longer in the library. The API answers 404 for that Activity's
-    // Comments, so the details dialog shows the load error and no text box, and has nothing to discard.
-    [TestMethod]
-    public async Task EventDetails_ARetiredWinner_ShowsTheCommentsLoadError()
-    {
-        var old = new EventEntity
-        {
-            Name = "Old party",
-            Date = new DateTimeOffset(2025, 10, 31, 20, 0, 0, TimeSpan.Zero),
-            Selections = [new Selection { Game = new Game { Id = brawl.Id, Name = brawl.Name }, Activity = retired }],
-            WinnerActivityId = retired.Id
-        };
-        api.Json(HttpMethod.Get, "/api/events", new[] { night, old });
-        var page = Open("events");
-
-        await RowButton(page, "Old party", "Details").ClickAsync(new());
-
-        var panel = () => page.FormDialog().QuerySelector(".comments")!;
-        page.WaitForAssertion(() => Assert.Contains("Comments could not be loaded. Not found. It may have been deleted.", panel().TextContent));
-        Assert.AreEqual(1, api.Count(HttpMethod.Get, $"/api/activities/{retired.Id}/comments"));
-        Assert.IsEmpty(page.FormDialog().QuerySelectorAll("fluent-text-area").ToList());
-        Assert.IsNotNull(panel().Button("Retry"));
-
-        await Dismiss(page);
-        Assert.IsFalse(page.HasFormDialog());
-        Assert.IsFalse(page.HasConfirmation());
-        Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
-    }
+    // ---- The question itself ------------------------------------------------------------------
 
     [TestMethod]
     public async Task ConfirmDialog_NamesQuestionAndButtons_DismissAnswersCancelOnce()
@@ -551,6 +299,7 @@ public sealed class DialogSafetyTests : IDisposable
         Assert.AreEqual("Delete game", Heading(dialog));
         Assert.AreEqual("Delete Kart? This cannot be undone.", Message(dialog));
         Assert.IsNotNull(dialog.Button("Delete"));
+        Assert.IsFalse(dialog.Button("Delete").IsBusy(), "a question's confirm button is usable unless it says otherwise");
 
         // Overlay click or Escape answers Cancel; a later click on Delete is ignored.
         await dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
@@ -560,148 +309,46 @@ public sealed class DialogSafetyTests : IDisposable
         Assert.AreEqual(0, confirmed);
     }
 
+    // #195 item 5: a question whose confirm must wait (ConfirmDisabled) shows it disabled and ignores it, even a
+    // click that reaches the button's handler, without using up the answer: once enabled, it confirms once.
+    [TestMethod]
+    public async Task ConfirmDialog_AConfirmThatMustWait_IsDisabledAndIgnored_ThenAnswersOnce()
+    {
+        var confirmed = 0;
+        var cancelled = 0;
+        var cut = harness.Render<ConfirmDialog>(p => p
+            .Add(c => c.Title, "Discard changes?")
+            .Add(c => c.ConfirmText, "Discard")
+            .Add(c => c.CancelText, "Keep editing")
+            .Add(c => c.ConfirmDisabled, true)
+            .Add(c => c.OnConfirm, () => confirmed++)
+            .Add(c => c.OnCancel, () => cancelled++));
+        var discard = cut.FindComponents<FluentButton>().Single(b => b.Find("fluent-button").TextContent.Trim() == "Discard").Instance.OnClick;
+
+        Assert.IsTrue(cut.Find("fluent-dialog").Button("Discard").IsBusy());
+        Assert.AreEqual("Discard", cut.Find("fluent-dialog").Button("Discard").TextContent.Trim());
+        await cut.InvokeAsync(() => discard.InvokeAsync(new()));
+        Assert.AreEqual(0, confirmed);
+
+        cut.Render(p => p.Add(c => c.ConfirmDisabled, false));
+        Assert.IsFalse(cut.Find("fluent-dialog").Button("Discard").IsBusy());
+        await cut.Find("fluent-dialog").Button("Discard").ClickAsync(new());
+        await cut.Find("fluent-dialog").Button("Discard").ClickAsync(new());
+
+        Assert.AreEqual(1, confirmed);
+        Assert.AreEqual(0, cancelled);
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
-
-    private IRenderedComponent<IComponent> Open(string route)
-    {
-        IRenderedComponent<IComponent> page = route switch
-        {
-            "games" => harness.Render<Games>(),
-            "activities" => harness.Render<Activities>(),
-            "themes" => harness.Render<Themes>(),
-            "holidays" => harness.Render<Holidays>(),
-            _ => harness.Render<Events>()
-        };
-        page.WaitForRows(route switch { "games" or "activities" => 3, "events" => 2, _ => 1 });
-        return page;
-    }
-
-    // Opens one form dialog, optionally changes one bound value, and returns how to read that value back.
-    private async Task<(IRenderedComponent<IComponent> Page, Func<string?> Value)> OpenForm(string form, bool change)
-    {
-        var route = form[..form.IndexOf('-')];
-        var page = Open(route);
-        Func<string?> value = () => TextField(page).GetAttribute("value");
-        IElement? field = null;
-        switch (form)
-        {
-            case "games-create":
-                await page.Button("Add Game").ClickAsync(new());
-                break;
-            case "games-edit":
-                await RowButton(page, "Kart", "Edit").ClickAsync(new());
-                break;
-            case "themes-create":
-                await page.Button("Add Theme").ClickAsync(new());
-                break;
-            case "holidays-create":
-                await page.Button("Add Holiday").ClickAsync(new());
-                break;
-            case "themes-edit":
-            case "holidays-edit":
-                await page.Find("fluent-button[title=Edit]").ClickAsync(new());
-                break;
-            case "activities-create":
-                await page.Button("Add Activity").ClickAsync(new());
-                break;
-            case "activities-edit":
-                await RowButton(page, "Grand Prix", "Edit").ClickAsync(new());
-                break;
-            case "activities-details":
-                await RowButton(page, "Grand Prix", "Details").ClickAsync(new());
-                value = () => page.FormDialog().QuerySelector("fluent-text-area")!.GetAttribute("value");
-                if (change) field = page.FormDialog().QuerySelector("fluent-text-area");
-                break;
-            case "events-create":
-                await page.Button("Create Event").ClickAsync(new());
-                value = () => EventName(page).GetAttribute("value");
-                if (change) field = EventName(page);
-                break;
-            case "events-edit":
-            case "events-edit-slots":
-                await RowButton(page, "Game night", "Edit").ClickAsync(new());
-                value = () => EventName(page).GetAttribute("value");
-                if (change) field = EventName(page);
-                break;
-            case "events-edit-deleted-activity":
-                await RowButton(page, "Party", "Edit").ClickAsync(new());
-                Assert.Contains("(deleted) Retired", page.FormDialog().TextContent);
-                break;
-            case "events-details":
-                await RowButton(page, "Party", "Details").ClickAsync(new());
-                value = () => page.FormDialog().QuerySelector("fluent-text-area")!.GetAttribute("value");
-                if (change) field = page.FormDialog().QuerySelector("fluent-text-area");
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(form), form);
-        }
-        Assert.IsTrue(page.HasFormDialog());
-        if (!change) return (page, value);
-
-        if (form == "events-edit-slots")
-        {
-            value = () => page.FormDialog().QuerySelectorAll("fluent-button[aria-label^='Re-roll slot']").Length.ToString();
-            await page.FormDialog().QuerySelectorAll("fluent-button[title='Remove slot']")[0].ClickAsync(new());
-            Assert.AreEqual("2", value());
-        }
-        else
-        {
-            await (field ?? TextField(page)).ChangeAsync(new ChangeEventArgs { Value = "Typed but not saved" });
-            Assert.AreEqual("Typed but not saved", value());
-        }
-        return (page, value);
-    }
-
-    // Overlay click or Escape on the page's form or details dialog.
-    private static Task Dismiss(IRenderedComponent<IComponent> page)
-    {
-        var dialog = page.FormDialog();
-        return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
-    }
-
-    // Runs one of the page's (or one of its dialogs') close methods, then renders, as an event handler would.
-    private static Task CloseThrough<T>(IRenderedComponent<T> page, string method) where T : IComponent => CloseThrough(page, page.Instance, method);
-
-    // The same on a component inside the page, such as the shared Library page that holds the Games dialogs.
-    private static Task CloseThrough<T>(IRenderedComponent<T> page, IComponent component, string method) where T : IComponent => page.InvokeAsync(() =>
-    {
-        Call(component, method);
-        Call(component, "StateHasChanged");
-    });
-
-    // The Games page's dialogs, busy flag and close methods live in the shared Library page it renders (#124).
-    private static IComponent GamesLibrary(IRenderedComponent<IComponent> page) =>
-        page.FindComponent<LibraryPage<GameEntity>>().Instance;
-
-    private static IElement RowButton(IRenderedComponent<IComponent> page, string item, string title) =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
 
     private static List<IElement> WinnerButtons(IRenderedComponent<IComponent> page) =>
         page.FormDialog().QuerySelectorAll("fluent-button").Where(b => b.TextContent.Trim() == "Select Winner").ToList();
 
-    private static IElement TextField(IRenderedComponent<IComponent> page) =>
-        page.FormDialog().QuerySelector("fluent-text-field")!;
-
-    // The dialog's free-text fields in page order. The date and time pickers also render as
-    // fluent-text-field, but they are not typed into as free text, so they are left out.
-    private static List<IElement> TextInputs(IRenderedComponent<IComponent> page) =>
-        page.FormDialog().QuerySelectorAll("fluent-text-field:not(.fluent-datepicker):not(.fluent-timepicker), fluent-text-area").ToList();
-
-    private static IElement EventName(IRenderedComponent<IComponent> page) =>
-        page.FormDialog().QuerySelector("fluent-text-field[placeholder='Enter event name...']")!;
-
-    private static string Heading(IElement dialog) => dialog.QuerySelector("h4")!.TextContent.Trim();
-
-    private static string Message(IElement dialog) => dialog.QuerySelector(".confirm-message")!.TextContent.Trim();
-
-    private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
-
-    private static object? Call(object page, string name, params object[] args) =>
-        page.GetType().GetMethod(name, Private)!.Invoke(page, args);
-
-    private static object? Field(object page, string name) =>
-        page.GetType().GetField(name, Private)!.GetValue(page);
+    // Runs a close method of a component inside the page (the shared Library page that holds the Games dialogs,
+    // or the Event edit dialog), then renders, as an event handler would. No page event can reach it during a save.
+    private static Task CloseThrough(IRenderedComponent<IComponent> page, IComponent component, string method) => page.InvokeAsync(() =>
+    {
+        component.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, []);
+        component.GetType().GetMethod("StateHasChanged", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, []);
+    });
 }

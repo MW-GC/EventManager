@@ -7,6 +7,7 @@ using Microsoft.JSInterop;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -52,12 +53,6 @@ public sealed class EscapeOnSelectTests : IDisposable
     }
 
     public void Dispose() => harness.Dispose();
-
-    private static Selection Pick(GameEntity game, ActivityEntity act) => new()
-    {
-        Game = new Game { Id = game.Id, Name = game.Name },
-        Activity = new Activity { Id = act.Id, GameId = act.GameId, Name = act.Name }
-    };
 
     [TestMethod]
     [DataRow("activities-create")]
@@ -136,12 +131,6 @@ public sealed class EscapeOnSelectTests : IDisposable
         var error = harness.UnhandledException;
         Assert.IsFalse(error.IsCompleted, $"{what}: {(error.IsCompleted ? error.Result.ToString() : "")}");
     }
-
-    private static IElement RowButton(IRenderedComponent<IComponent> page, string item, string title) =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
 
     // ---- JS modules that mind being disposed ----------------------------------------------------
 

@@ -150,8 +150,10 @@
 
 @if (_confirm is { } confirm)
 {
+    @* Select Winner's Discard waits while a request runs (its text stays): it would save a Winner Busy refuses. *@
     <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
                    CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
+                   ConfirmDisabled="@(confirm == _winnerQuestion && Busy)"
                    OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
 }
 
@@ -173,6 +175,9 @@
     private bool _selectingWinner;
     // The open question (Discard changes?, or the Comments panel's Delete Comment), if any.
     private ConfirmRequest? _confirm;
+    // The last Discard changes? that Select Winner asked (its Discard saves the new Winner); it matters only while
+    // it is the open question.
+    private ConfirmRequest? _winnerQuestion;
     // A failed Select Winner, shown in the details dialog; the previous winner stays.
     private string? _winnerError;
     // The open Event's metrics form (#135), and whether its save is running.
@@ -264,8 +269,9 @@
     private void DismissDetails() =>
         _confirm = ConfirmRequest.ForDismiss(_confirm, Busy, _commentsPanel?.IsDirty == true || _metrics?.IsDirty == true, CloseDetails);
 
-    // A Discard closes this dialog, which returns focus to its opener itself; a Delete Comment leaves it open,
-    // and the question gives focus back to it as it closes.
+    // Every question here is asked over this dialog, so an answer never sends focus back to the page: a Discard
+    // on close closes this dialog, which returns focus to its opener itself; a Discard on Select Winner and a
+    // Delete Comment leave it open, and the question gives focus back to it as it closes.
     private async Task Confirmed(ConfirmRequest confirm)
     {
         if (_confirm != confirm) return;
@@ -282,14 +288,15 @@
 
     // A Select Winner button. It goes through Close's busy guard: while Select Winner, a metrics save or a Comment
     // request runs, nothing happens. The new Winner gets a new Comments panel, so unsaved Comment text (in the add
-    // box or an open edit) asks first, as closing does. Unsaved metrics do not ask: the form is keyed by the Event
-    // and keeps them.
+    // box or an open edit) asks first, as closing does; that question's Discard waits while a request runs (a
+    // Comment add or a metrics save started under it), and only then saves the Winner. Unsaved metrics do not ask:
+    // the form is keyed by the Event and keeps them.
     private Task SelectWinner(Guid activityId)
     {
         if (_detailEvent is null || Busy || _confirm is not null) return Task.CompletedTask;
         if (_commentsPanel?.IsDirty == true)
         {
-            _confirm = ConfirmRequest.Discard(() => SaveWinner(activityId));
+            _confirm = _winnerQuestion = ConfirmRequest.Discard(() => SaveWinner(activityId));
             return Task.CompletedTask;
         }
         return SaveWinner(activityId);

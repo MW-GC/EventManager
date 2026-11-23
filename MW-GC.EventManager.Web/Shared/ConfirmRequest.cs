@@ -15,13 +15,9 @@ public sealed class ConfirmRequest(string title, string message, string confirmT
     public Func<Task> OnConfirm { get; } = onConfirm;
 
     /// <summary>
-    /// A Discard changes? question, always asked over an open form dialog. The page that shows a question
-    /// sends focus back to the element it remembered (a row's Delete button) only when this is false.
-    /// A Discard leaves focus to the form dialog instead: Keep editing hands it back into that dialog
-    /// (ConfirmDialog, focus.js), and Discard closes the dialog, which returns focus to its own opener.
-    /// A dialog that asks its own questions, such as a details dialog asking Delete Comment for its
-    /// Comments panel, never sends focus back to its opener on an answer, whatever this says: the
-    /// question gives focus back to the dialog that stays open.
+    /// True for a question asked over an open form or details dialog (every Discard changes?). Whoever shows
+    /// the question sends focus back to the element it remembered (a row's Delete button) only when this is
+    /// false; when it is true, focus belongs to the dialog the question was asked over.
     /// </summary>
     public bool OverDialog { get; private init; }
 
@@ -29,16 +25,22 @@ public sealed class ConfirmRequest(string title, string message, string confirmT
     public static ConfirmRequest Delete(string title, string message, Func<Task> delete) =>
         new(title, message, "Delete", "Cancel", true, delete);
 
-    /// <summary>Asked when a dialog with unsaved changes is dismissed by overlay click or Escape.</summary>
+    /// <summary>
+    /// Asked when a dialog with unsaved changes is dismissed by overlay click or Escape; Discard runs
+    /// <paramref name="discard"/>, which closes the dialog.
+    /// </summary>
     public static ConfirmRequest Discard(Action discard) =>
-        new("Discard changes?", "Your changes in this dialog have not been saved.", "Discard", "Keep editing", true,
-            () => { discard(); return Task.CompletedTask; }) { OverDialog = true };
+        DiscardQuestion(() => { discard(); return Task.CompletedTask; });
 
     /// <summary>
     /// The same question before an action that would drop unsaved changes without closing the dialog, such as
-    /// Select Winner swapping the Comments panel; Discard runs <paramref name="discard"/> and waits for it.
+    /// Select Winner swapping the Comments panel; Discard runs <paramref name="discard"/> and waits for it, and
+    /// the dialog stays open.
     /// </summary>
-    public static ConfirmRequest Discard(Func<Task> discard) =>
+    public static ConfirmRequest Discard(Func<Task> discard) => DiscardQuestion(discard);
+
+    // The one wording of Discard changes?, whatever Discard then does.
+    private static ConfirmRequest DiscardQuestion(Func<Task> discard) =>
         new("Discard changes?", "Your changes in this dialog have not been saved.", "Discard", "Keep editing", true, discard) { OverDialog = true };
 
     /// <summary>

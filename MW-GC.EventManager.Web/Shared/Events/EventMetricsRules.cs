@@ -3,15 +3,15 @@ namespace MW_GC.EventManager.Web.Shared.Events;
 /// <summary>
 /// The rules the Event metrics form checks before it sends anything. Each is the API's own rule (FieldRules.Count
 /// and FieldRules.Money with EventMetricsValidator's limits, the same messages), so the form refuses what the API
-/// would refuse; a test compares them value for value and keeps the limits equal. They live here and not in the
-/// Shared project because FieldRules and EventMetricsValidator belong to the API.
+/// would refuse; a test compares the form with the API value for value, at the limits too. They live here and not
+/// in the Shared project because FieldRules and EventMetricsValidator belong to the API.
 /// </summary>
-public static class EventMetricsRules
+internal static class EventMetricsRules
 {
-    /// <summary>The API's EventMetricsValidator.MaxCount; a test keeps the two equal.</summary>
+    /// <summary>The API's EventMetricsValidator.MaxCount.</summary>
     public const int MaxCount = 1_000_000;
 
-    /// <summary>The API's EventMetricsValidator.MaxAmount; a test keeps the two equal.</summary>
+    /// <summary>The API's EventMetricsValidator.MaxAmount.</summary>
     public const decimal MaxAmount = 1_000_000_000m;
 
     /// <summary>The message for a count that is not a whole number from 0 to <see cref="MaxCount"/>.</summary>

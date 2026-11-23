@@ -12,7 +12,7 @@
         <FluentLabel Class="confirm-message">@Message</FluentLabel>
         <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 20px;">
             <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Answer(false))">@CancelText</FluentButton>
-            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => Answer(true))"
+            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => Answer(true))" Disabled="@ConfirmDisabled"
                           BackgroundColor="@(Destructive ? "var(--error)" : null)" Color="@(Destructive ? "#fff" : null)">@ConfirmText</FluentButton>
         </FluentStack>
     </FluentDialogBody>
@@ -25,6 +25,9 @@
     [Parameter] public string CancelText { get; set; } = "Cancel";
     // Paints the confirm button in the error colour, for answers that lose data.
     [Parameter] public bool Destructive { get; set; }
+    // The confirm answer must wait (for example while a request runs): its button is disabled and a click that
+    // still reaches it is ignored, without using up the answer. Cancel stays usable.
+    [Parameter] public bool ConfirmDisabled { get; set; }
     [Parameter] public EventCallback OnConfirm { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
@@ -33,7 +36,7 @@
 
     private Task Answer(bool confirmed)
     {
-        if (_answered) return Task.CompletedTask;
+        if (_answered || (confirmed && ConfirmDisabled)) return Task.CompletedTask;
         _answered = true;
         return confirmed ? OnConfirm.InvokeAsync() : OnCancel.InvokeAsync();
     }

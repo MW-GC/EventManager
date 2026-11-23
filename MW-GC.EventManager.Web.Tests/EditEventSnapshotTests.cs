@@ -277,7 +277,7 @@ public sealed class EditEventSnapshotTests : IDisposable
     // What a screen reader reads for each tag of one slot, in order.
     private static List<string> Tags(IRenderedComponent<Events> page, int slot) =>
         Slots(page)[slot].QuerySelectorAll("fluent-badge.tag-badge")
-            .Select(b => string.Join(" ", b.TextContent.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))).ToList();
+            .Select(b => PageActions.Normalize(b.TextContent)).ToList();
 
     private static List<string> OptionTexts(IRenderedComponent<Events> page, int slot, Picker picker) =>
         Select(page, slot, picker).QuerySelectorAll("fluent-option").Select(o => o.TextContent.Trim()).ToList();
