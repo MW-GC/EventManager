@@ -100,12 +100,14 @@ public sealed class DismissSafetyTests : DialogSafetyFixture
         Assert.IsEmpty(api.Requests.Where(r => r.Method != HttpMethod.Get).ToList());
     }
 
-    // Every text field of the dialogs with more than one counts while it is being typed in.
+    // Every text field of the dialogs with more than one counts while it is being typed in. The Activity dialog's
+    // seven: the name, description, rules, setup requirements, and minimum players, maximum players and duration
+    // in minutes (#98), whose text that is not a number counts too.
     [TestMethod]
     [DataRow("games-create", 2)]
     [DataRow("games-edit", 2)]
-    [DataRow("activities-create", 4)]
-    [DataRow("activities-edit", 4)]
+    [DataRow("activities-create", 7)]
+    [DataRow("activities-edit", 7)]
     public async Task Dismiss_RightAfterTypingInAnyTextField_AsksToDiscard(string form, int fields)
     {
         for (var i = 0; i < fields; i++)

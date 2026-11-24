@@ -10,7 +10,8 @@ namespace MW_GC.EventManager.Web.Services;
 public static class SelectionSnapshot
 {
     /// <summary>
-    /// The Selection: the Game, and the Activity's text as the Library has it today, without its tags. The Activity
+    /// The Selection: the Game, and the Activity's text, players and duration (#98) as the Library has them today,
+    /// without its tags. The Activity
     /// part is built here inline (#200.14): it had one caller and was not a Selection, so it is no longer a second
     /// <c>From</c>.
     /// </summary>
@@ -20,7 +21,8 @@ public static class SelectionSnapshot
         Activity = new Activity
         {
             Id = act.Id, GameId = act.GameId, Name = act.Name, Description = act.Description,
-            Rules = act.Rules, SetupRequirements = act.SetupRequirements
+            Rules = act.Rules, SetupRequirements = act.SetupRequirements,
+            MinPlayers = act.MinPlayers, MaxPlayers = act.MaxPlayers, DurationMinutes = act.DurationMinutes
         }
     };
 }

@@ -44,6 +44,14 @@ internal static class ActivityValidator
 {
     public const string GameNotFoundMessage = "Game not found.";
 
+    /// <summary>The most players a minimum or maximum may hold (#98).</summary>
+    public const int MaxPlayerCount = 99;
+
+    /// <summary>The longest duration in minutes (24 hours, #98).</summary>
+    public const int MaxDurationMinutes = 1440;
+
+    public const string MinAboveMaxMessage = "Minimum players cannot be more than maximum players.";
+
     /// <summary>
     /// Checks the fields that need no storage lookup. The caller still checks that
     /// <see cref="ActivityEntity.GameId"/> names an existing Game.
@@ -60,8 +68,22 @@ internal static class ActivityValidator
             ?? (activity.GameId == Guid.Empty ? $"{nameof(ActivityEntity.GameId)} is required." : null)
             ?? FieldRules.MaxLength(activity.Description, nameof(ActivityEntity.Description), FieldRules.TextMaxLength)
             ?? FieldRules.MaxLength(activity.Rules, nameof(ActivityEntity.Rules), FieldRules.TextMaxLength)
-            ?? FieldRules.MaxLength(activity.SetupRequirements, nameof(ActivityEntity.SetupRequirements), FieldRules.TextMaxLength);
+            ?? FieldRules.MaxLength(activity.SetupRequirements, nameof(ActivityEntity.SetupRequirements), FieldRules.TextMaxLength)
+            ?? PlayersAndDuration(activity);
     }
+
+    /// <summary>
+    /// Players and duration (#98): each optional, otherwise a whole number from 1 to its limit; then the minimum
+    /// at most the maximum when both are set. Messages name each field as the Activities form labels it.
+    /// </summary>
+    private static string? PlayersAndDuration(ActivityEntity activity) =>
+        WholeNumber(activity.MinPlayers, "Minimum players", MaxPlayerCount)
+        ?? WholeNumber(activity.MaxPlayers, "Maximum players", MaxPlayerCount)
+        ?? WholeNumber(activity.DurationMinutes, "Duration in minutes", MaxDurationMinutes)
+        ?? (activity.MinPlayers > activity.MaxPlayers ? MinAboveMaxMessage : null);
+
+    private static string? WholeNumber(int? value, string field, int max) =>
+        value is < 1 || value > max ? $"{field} must be a whole number from 1 to {max}." : null;
 }
 
 internal static class CommentValidator
