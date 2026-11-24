@@ -1,10 +1,11 @@
-using System.Text.RegularExpressions;
+using System.Net;
+using System.Net.Http.Json;
 using AngleSharp.Dom;
 using Bunit;
-using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -12,12 +13,15 @@ namespace MW_GC.EventManager.Web.Tests;
 // against a stub API. The panel loads the four lists the Stats page loads and shows its own Activity's row of
 // the same computation, so its numbers are the Stats page's numbers. Nothing is stored (ADR 0001).
 [TestClass]
-public sealed partial class ActivityPerformancePanelTests : IDisposable
+public sealed class ActivityPerformancePanelTests : IDisposable
 {
     private const string Sentence =
         "Performance cannot tell a weak Activity from a weak night: an Event has several Selections, so its numbers belong to all of them.";
     private const string NoPerformance = "No performance to show for this Activity.";
     private const string Unreachable = "Could not reach the server. Check the connection and try again.";
+    private const string MetricsPath = "/api/event-metrics";
+    // The five numbers' classes, in the order the Stats row (stats-…) and the panel (performance-…) show them.
+    private static readonly string[] Numbers = ["offered", "wins", "win-rate", "avg-likes", "avg-attendees"];
 
     private readonly StubApiHandler api = new();
     private readonly PageHarness harness;
@@ -108,18 +112,16 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
         var stats = harness.Render<Stats>();
         stats.WaitForAssertion(() => Assert.HasCount(3, StatsRows(stats)));
         var row = StatsRows(stats).Single(r => r.QuerySelector(".stats-name")!.TextContent.Trim() == name);
-        CollectionAssert.AreEqual(expected, new[] { "offered", "wins", "win-rate", "avg-likes", "avg-attendees" }
-            .Select(c => Text(row, ".stats-" + c)).ToArray(), "the Stats row");
+        CollectionAssert.AreEqual(expected, Numbers.Select(c => Text(row, ".stats-" + c)).ToArray(), "the Stats row");
 
         var page = Open();
         await OpenDetails(page, name);
 
-        CollectionAssert.AreEqual(expected, new[] { "offered", "wins", "win-rate", "avg-likes", "avg-attendees" }
-            .Select(c => Text(Panel(page), ".performance-" + c)).ToArray(), "the panel");
+        CollectionAssert.AreEqual(expected, Numbers.Select(c => Text(Panel(page), ".performance-" + c)).ToArray(), "the panel");
     }
 
     // #182.2: an Activity in neither the Library the panel read nor any past Selection (deleted after the page
-    // loaded, never offered) has no row to show: one line, not a made-up \"never offered\" row marked deleted.
+    // loaded, never offered) has no row to show: one line, not a made-up "never offered" row marked deleted.
     [TestMethod]
     public async Task AnActivityTheComputationDoesNotKnow_ShowsNoPerformanceRows_AndSaysSo()
     {
@@ -140,26 +142,40 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
 
     // #182.8: the dialog stays open and its Activity changes. The first Activity's metrics read is still held when
     // the second Activity's panel loads; when it ends, it must not land in the panel now shown. Without the key on
-    // the panel the same panel takes the new Activity, keeps the held read and shows Tiles from the old metrics.
+    // the panel the same panel takes the new Activity and keeps its held read: no second metrics read is sent and
+    // Tiles' numbers never show. #198.3: every wait is on something the test can see (the second metrics read, the
+    // numbers, the late answer read and let go by the client), never a fixed delay.
     [TestMethod]
     public async Task SwitchingTheActivityWhileTheDialogStaysOpen_IgnoresTheFirstActivitysLateLoad()
     {
-        var gate = api.Hold(HttpMethod.Get, "/api/event-metrics", () => Ok(metrics));
+        // Set when the metrics client has read Race's late answer and disposed it: the last step of its read, run on
+        // the renderer's dispatcher together with everything the panel does with the answer (not when the stub
+        // builds it).
+        var read = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = api.Hold(HttpMethod.Get, MetricsPath, () =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new SignalOnDispose(JsonContent.Create(metrics), read) });
         var page = Open();
         await DetailsButton(page, "Race").ClickAsync(new());
         page.WaitForAssertion(() => Assert.IsNotNull(Panel(page).QuerySelector("fluent-progress-ring")));
+        Assert.AreEqual(1, api.Count(HttpMethod.Get, MetricsPath));
 
         // Tiles' only Event now has 6 Likes and 30 attendees.
-        api.Json(HttpMethod.Get, "/api/event-metrics", new EventMetricsWithLikes[] { new(events[0].Id, 30, null, null, null, 6) });
+        api.Json(HttpMethod.Get, MetricsPath, new EventMetricsWithLikes[] { new(events[0].Id, 30, null, null, null, 6) });
         await DetailsButton(page, "Tiles").ClickAsync(new());
         Assert.IsTrue(page.HasFormDialog(), "the dialog stayed open");
+        // A new panel for Tiles sends its own metrics read while Race's is still held.
+        page.WaitForAssertion(() => Assert.AreEqual(2, api.Count(HttpMethod.Get, MetricsPath), "Tiles' own metrics read"));
         var tiles = new[] { "Offered in 1 Event", "Won 0", "Win rate 0%", "Avg Likes 6.0", "Avg attendees 30.0" };
         page.WaitForAssertion(() => CollectionAssert.AreEqual(tiles, Values(page)));
 
         gate.SetResult();
-        await Task.Delay(50);
+        await read.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        // The dispatcher runs one item at a time, so this runs after the item that let the late answer go, and with it
+        // after whatever the panel did with that answer and any render it caused.
+        await page.InvokeAsync(() => { });
 
         page.WaitForAssertion(() => CollectionAssert.AreEqual(tiles, Values(page)));
+        Assert.AreEqual(2, api.Count(HttpMethod.Get, MetricsPath), "no third read");
         Assert.AreEqual("Tiles", page.FormDialog().GetAttribute("aria-label"));
         Assert.HasCount(1, page.FindAll(".activity-performance"));
         Assert.IsFalse(harness.UnhandledException.IsCompleted);
@@ -268,12 +284,6 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
 
     // ---- Helpers -------------------------------------------------------------------------------
 
-    private static Selection Pick(GameEntity game, ActivityEntity activity) => new()
-    {
-        Game = new Game { Id = game.Id, Name = game.Name },
-        Activity = new Activity { Id = activity.Id, GameId = game.Id, Name = activity.Name }
-    };
-
     private static EventEntity Event(DateTimeOffset date, Guid? winner, params Selection[] selections) => new()
     {
         Name = "Night " + date.ToString("yyyy-MM-dd"),
@@ -284,7 +294,38 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
     };
 
     private static HttpResponseMessage Ok<T>(T body) =>
-        new(System.Net.HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(body) };
+        new(HttpStatusCode.OK) { Content = JsonContent.Create(body) };
+
+    // An answer's body that says when the client is done with it: the client disposes the answer once it has read it.
+    private sealed class SignalOnDispose : HttpContent
+    {
+        private readonly HttpContent inner;
+        private readonly TaskCompletionSource disposed;
+
+        public SignalOnDispose(HttpContent inner, TaskCompletionSource disposed)
+        {
+            (this.inner, this.disposed) = (inner, disposed);
+            foreach (var header in inner.Headers) Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => inner.CopyToAsync(stream);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+                disposed.TrySetResult();
+            }
+            base.Dispose(disposing);
+        }
+    }
 
     // Renders the Activities page and waits for its rows with their Game names.
     private IRenderedComponent<Activities> Open()
@@ -302,9 +343,7 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
         page.WaitForAssertion(() => Assert.HasCount(5, Values(page)));
     }
 
-    private static IElement DetailsButton(IRenderedComponent<Activities> page, string name) =>
-        page.FindAll("tbody tr.fluent-data-grid-row").Single(r => r.Closest("fluent-dialog") is null && r.TextContent.Contains(name))
-            .QuerySelector("fluent-button[title=Details]")!;
+    private static IElement DetailsButton(IRenderedComponent<Activities> page, string name) => RowButton(page, name, "Details");
 
     private static IElement Panel(IRenderedComponent<Activities> page) => page.FormDialog().QuerySelector(".activity-performance")!;
 
@@ -317,16 +356,4 @@ public sealed partial class ActivityPerformancePanelTests : IDisposable
         page.FindAll("table.stats-activities tbody tr.fluent-data-grid-row").Where(r => r.QuerySelector(".stats-name") is not null).ToList();
 
     private static string Text(IElement root, string selector) => Normalize(root.QuerySelector(selector)!.TextContent);
-
-    private static string Normalize(string text) => Spaces().Replace(text, " ").Trim();
-
-    [GeneratedRegex(@"\s+")]
-    private static partial Regex Spaces();
-
-    // Overlay click or Escape on the details dialog.
-    private static Task Dismiss(IRenderedComponent<Activities> page)
-    {
-        var dialog = page.FormDialog();
-        return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
-    }
 }

@@ -16,11 +16,11 @@
     {
         var performance = row.Performance;
         <dl style="display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0 0 8px 0;">
-            <div><dt style="display: inline;">Offered in</dt> <dd style="display: inline; margin: 0;"><span class="performance-offered">@row.Offered</span> @(row.Offered == 1 ? "Event" : "Events")</dd></div>
-            <div><dt style="display: inline;">Won</dt> <dd style="display: inline; margin: 0;" class="performance-wins">@row.Wins</dd></div>
-            <div><dt style="display: inline;">Win rate</dt> <dd style="display: inline; margin: 0;" class="performance-win-rate"><PerformanceValue Text="@Percent(performance.WinRate)" /></dd></div>
-            <div><dt style="display: inline;">Avg Likes</dt> <dd style="display: inline; margin: 0;" class="performance-avg-likes"><PerformanceValue Text="@OneDecimal(performance.AverageLikes)" /></dd></div>
-            <div><dt style="display: inline;">Avg attendees</dt> <dd style="display: inline; margin: 0;" class="performance-avg-attendees"><PerformanceValue Text="@OneDecimal(performance.AverageAttendees)" /></dd></div>
+            <PerformanceTerm Term="Offered in"><span class="performance-offered">@row.Offered</span> @(row.Offered == 1 ? "Event" : "Events")</PerformanceTerm>
+            <PerformanceTerm Term="Won" Class="performance-wins">@row.Wins</PerformanceTerm>
+            <PerformanceTerm Term="Win rate" Class="performance-win-rate"><PerformanceValue Text="@Percent(performance.WinRate)" /></PerformanceTerm>
+            <PerformanceTerm Term="Avg Likes" Class="performance-avg-likes"><PerformanceValue Text="@OneDecimal(performance.AverageLikes)" /></PerformanceTerm>
+            <PerformanceTerm Term="Avg attendees" Class="performance-avg-attendees"><PerformanceValue Text="@OneDecimal(performance.AverageAttendees)" /></PerformanceTerm>
         </dl>
         <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint);">@Caveat</FluentLabel>
     }
@@ -64,20 +64,21 @@
     // Retry reads only the lists that failed; the others keep what they loaded.
     private Task Retry() => Load(_loads.Failed);
 
-    // The Stats page's four lists, those that read(name) asks for.
-    private async Task Load(Func<string, bool> read)
+    // The Stats page's four lists, those that needed(name) asks for. Each list's name is written once (#198.7): it
+    // is both what needed is asked and the name LoadErrors records, so Retry can never skip a list by a typo.
+    private async Task Load(Func<string, bool> needed)
     {
         if (_loading) return;
         _loading = true;
+        Task IfNeeded(string list, Func<string, Task> load) => needed(list) ? load(list) : Task.CompletedTask;
         try
         {
             await Task.WhenAll(
-                read("Events") ? _loads.LoadAsync("Events", Events ?? EventSvc.GetAllAsync, v => _events = v ?? []) : Task.CompletedTask,
-                read("Games") ? _loads.LoadAsync("Games", GameClient.GetAllAsync, v => _games = v ?? []) : Task.CompletedTask,
-                read("Activities") ? _loads.LoadAsync("Activities", ActivityClient.GetAllAsync, v => _activities = v ?? []) : Task.CompletedTask,
-                read("Event metrics")
-                    ? _loads.LoadResultAsync("Event metrics", async () => (await MetricsClient.LoadAllAsync()).ItemsOrError(), v => _metrics = v ?? [])
-                    : Task.CompletedTask);
+                IfNeeded("Events", list => _loads.LoadAsync(list, Events ?? EventSvc.GetAllAsync, v => _events = v ?? [])),
+                IfNeeded("Games", list => _loads.LoadAsync(list, GameClient.GetAllAsync, v => _games = v ?? [])),
+                IfNeeded("Activities", list => _loads.LoadAsync(list, ActivityClient.GetAllAsync, v => _activities = v ?? [])),
+                IfNeeded("Event metrics", list =>
+                    _loads.LoadResultAsync(list, async () => (await MetricsClient.LoadAllAsync()).ItemsOrError(), v => _metrics = v ?? [])));
             // Every Activity in the library or in a past Selection has a row; one that is neither (deleted
             // meanwhile and never offered) has none, and the panel says so.
             if (_events is not null && _games is not null && _activities is not null && _metrics is not null)

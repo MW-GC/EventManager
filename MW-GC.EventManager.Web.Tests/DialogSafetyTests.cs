@@ -325,8 +325,8 @@ public sealed class DialogSafetyTests : DialogSafetyFixture
             .Add(c => c.OnCancel, () => cancelled++));
         var discard = cut.FindComponents<FluentButton>().Single(b => b.Find("fluent-button").TextContent.Trim() == "Discard").Instance.OnClick;
 
-        Assert.IsTrue(cut.Find("fluent-dialog").Button("Discard").IsBusy());
-        Assert.AreEqual("Discard", cut.Find("fluent-dialog").Button("Discard").TextContent.Trim());
+        // P5: disabled, not only showing a spinner; the button was found by its text, so its text is not checked again.
+        Assert.IsTrue(cut.Find("fluent-dialog").Button("Discard").HasAttribute("disabled"));
         await cut.InvokeAsync(() => discard.InvokeAsync(new()));
         Assert.AreEqual(0, confirmed);
 

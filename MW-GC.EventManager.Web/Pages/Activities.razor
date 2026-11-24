@@ -201,7 +201,7 @@
                 @* #131: the Activity's Comments, read and written through their own routes (ADR 0001). Keyed by
                    the Activity, so another Activity gets a new panel. *@
                 <CommentsPanel @key="_detailActivity.Id" @ref="_commentsPanel" ActivityId="_detailActivity.Id" Events="DetailEvents"
-                               SavingChanged="@((bool running) => _commentRequestRunning = running)"
+                               RequestRunningChanged="@((bool running) => _commentRequestRunning = running)"
                                Ask="@((ConfirmRequest question) => _confirm = question)" />
             </FluentStack>
 
@@ -274,8 +274,12 @@
 
     private bool ByGame(ActivityEntity a) => _filterGame is null || a.GameId == _filterGame.Id;
 
+    // An Activity's Game name, or a dash while the Games have not loaded (or no longer have its Game): a name, not an
+    // Activity performance number, so it has its own dash rather than PerformanceFormat.NoValue (#198.8).
+    private const string NoGameName = "—";
+
     private string GameName(Guid gameId) =>
-        _games?.FirstOrDefault(g => g.Id == gameId)?.Name ?? PlayStats.NoValue;
+        _games?.FirstOrDefault(g => g.Id == gameId)?.Name ?? NoGameName;
 
     private static void ToggleId(List<Guid> list, Guid id, bool add)
     {

@@ -4,11 +4,11 @@ using System.Net.Http.Json;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
-using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
 using static MW_GC.EventManager.Web.Tests.CommentsPanelView;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -37,6 +37,8 @@ public sealed class CommentsPanelTests : IDisposable
     private readonly GameEntity kart = new() { Name = "Kart" };
     private readonly ActivityEntity race;
     private readonly string listPath;
+    // Some tests pin the culture of the shown date; the next test gets the one it started with.
+    private readonly CultureInfo culture = CultureInfo.CurrentCulture;
     // Added at noon local time and sent in UTC, as the API sends it. The panel shows local time, so the date and
     // time that name each Comment's buttons are these literals in every time zone.
     private readonly Stored a = new(Guid.NewGuid(), "Ran long", AddedAtLocal(2025, 3, 14, 12, 0), TagA);
@@ -60,9 +62,6 @@ public sealed class CommentsPanelTests : IDisposable
         List(a, b);
         harness = new PageHarness(api);
     }
-
-    // Some tests pin the culture of the shown date; the next test gets the one it started with.
-    private readonly CultureInfo culture = CultureInfo.CurrentCulture;
 
     public void Dispose()
     {
@@ -449,7 +448,7 @@ public sealed class CommentsPanelTests : IDisposable
     }
 
     // The API answers an edit of a Comment deleted meanwhile with 404. (A delete of one is a 204, as for a
-    // Comment still there: ActivityDetailsDialogTests.DeletingACommentAlreadyDeletedElsewhere_RemovesItsRow.)
+    // Comment still there: ActivityDetailsDialogTests.ADeleteAnsweredWith204_RemovesOnlyThatRow_WithoutAMessageOrASecondListRead.)
     [TestMethod]
     public async Task ANotFoundOnEdit_SaysItMayHaveBeenDeleted_WithReload()
     {
@@ -640,8 +639,6 @@ public sealed class CommentsPanelTests : IDisposable
         return page;
     }
 
-    private static IElement DetailsButton(IRenderedComponent<Activities> page) =>
-        page.FindAll("tbody tr.fluent-data-grid-row").Single(r => r.Closest("fluent-dialog") is null)
-            .QuerySelector("fluent-button[title=Details]")!;
+    private IElement DetailsButton(IRenderedComponent<Activities> page) => RowButton(page, race.Name, "Details");
 
 }

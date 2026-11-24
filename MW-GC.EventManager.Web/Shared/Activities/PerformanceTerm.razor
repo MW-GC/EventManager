@@ -1,0 +1,9 @@
+@* One labelled number of the Activity details' performance panel: the term, then its value inline, in the panel's
+   definition list. The one copy of the inline dt/dd styles (#198.9); Class names the value for tests and styling. *@
+<div><dt style="display: inline;">@Term</dt> <dd style="display: inline; margin: 0;" class="@Class">@ChildContent</dd></div>
+
+@code {
+    [Parameter, EditorRequired] public string Term { get; set; } = string.Empty;
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

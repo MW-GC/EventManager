@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Shared.Library;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 

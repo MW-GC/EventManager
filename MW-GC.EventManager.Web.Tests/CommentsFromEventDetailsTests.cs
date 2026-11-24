@@ -4,6 +4,7 @@ using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using static MW_GC.EventManager.Web.Tests.CommentsPanelView;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 

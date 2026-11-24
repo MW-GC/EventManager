@@ -56,7 +56,7 @@
                     <FluentIcon Value="@(new Size16.Edit())" />
                 </FluentButton>
                 <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" Title="Delete" aria-label="@($"Delete {context.Name}")" data-focus-key="@($"delete-{context.Id}")"
-                              Disabled="@Rows.Running" OnClick="@(() => OnDelete.InvokeAsync(context))">
+                              Disabled="@Rows.AnyBusy" OnClick="@(() => OnDelete.InvokeAsync(context))">
                     <FluentIcon Value="@(new Size16.Delete())" />
                 </FluentButton>
             </FluentStack>
