@@ -103,8 +103,9 @@ public sealed class ActivityDetailsDialogTests : IDisposable
             var item = Assert.ContainsSingle(Items(page));
             Assert.AreEqual("11/21/2026", item.QuerySelector("time")!.TextContent.Trim());
             Assert.AreEqual("2026-11-20T20:30:00Z", item.QuerySelector("time")!.GetAttribute("datetime"));
-            Assert.IsNotNull(ButtonNamed(page, "Edit Comment from 2026-11-21 02:15"));
-            Assert.IsNotNull(ButtonNamed(page, "Delete Comment from 2026-11-21 02:15"));
+            // The buttons' names, read and compared with the local date and time, so a name still in UTC fails here.
+            var names = item.QuerySelectorAll("fluent-button").Select(b => b.GetAttribute("aria-label"));
+            Assert.AreEqual("Edit Comment from 2026-11-21 02:15 | Delete Comment from 2026-11-21 02:15", string.Join(" | ", names));
         }
         finally
         {

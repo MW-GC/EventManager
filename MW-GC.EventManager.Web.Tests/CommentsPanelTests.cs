@@ -37,6 +37,8 @@ public sealed class CommentsPanelTests : IDisposable
     private readonly GameEntity kart = new() { Name = "Kart" };
     private readonly ActivityEntity race;
     private readonly string listPath;
+    // Some tests pin the culture of the shown date; the next test gets the one it started with.
+    private readonly CultureInfo culture = CultureInfo.CurrentCulture;
     // Added at noon local time and sent in UTC, as the API sends it. The panel shows local time, so the date and
     // time that name each Comment's buttons are these literals in every time zone.
     private readonly Stored a = new(Guid.NewGuid(), "Ran long", AddedAtLocal(2025, 3, 14, 12, 0), TagA);
@@ -60,9 +62,6 @@ public sealed class CommentsPanelTests : IDisposable
         List(a, b);
         harness = new PageHarness(api);
     }
-
-    // Some tests pin the culture of the shown date; the next test gets the one it started with.
-    private readonly CultureInfo culture = CultureInfo.CurrentCulture;
 
     public void Dispose()
     {

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using AngleSharp.Dom;
 using Bunit;
 using MW_GC.EventManager.Shared.Entities;
@@ -143,17 +144,16 @@ public sealed class ActivityPerformancePanelTests : IDisposable
     // the second Activity's panel loads; when it ends, it must not land in the panel now shown. Without the key on
     // the panel the same panel takes the new Activity and keeps its held read: no second metrics read is sent and
     // Tiles' numbers never show. #198.3: every wait is on something the test can see (the second metrics read, the
-    // numbers, the held read answered), never a fixed delay.
+    // numbers, the late answer read and let go by the client), never a fixed delay.
     [TestMethod]
     public async Task SwitchingTheActivityWhileTheDialogStaysOpen_IgnoresTheFirstActivitysLateLoad()
     {
-        var answered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Set when the metrics client has read Race's late answer and disposed it: the last step of its read, run on
+        // the renderer's dispatcher together with everything the panel does with the answer (not when the stub
+        // builds it).
+        var read = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var gate = api.Hold(HttpMethod.Get, MetricsPath, () =>
-        {
-            var late = Ok(metrics);
-            answered.SetResult();
-            return late;
-        });
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new SignalOnDispose(JsonContent.Create(metrics), read) });
         var page = Open();
         await DetailsButton(page, "Race").ClickAsync(new());
         page.WaitForAssertion(() => Assert.IsNotNull(Panel(page).QuerySelector("fluent-progress-ring")));
@@ -169,7 +169,10 @@ public sealed class ActivityPerformancePanelTests : IDisposable
         page.WaitForAssertion(() => CollectionAssert.AreEqual(tiles, Values(page)));
 
         gate.SetResult();
-        await answered.Task;
+        await read.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        // The dispatcher runs one item at a time, so this runs after the item that let the late answer go, and with it
+        // after whatever the panel did with that answer and any render it caused.
+        await page.InvokeAsync(() => { });
 
         page.WaitForAssertion(() => CollectionAssert.AreEqual(tiles, Values(page)));
         Assert.AreEqual(2, api.Count(HttpMethod.Get, MetricsPath), "no third read");
@@ -291,7 +294,38 @@ public sealed class ActivityPerformancePanelTests : IDisposable
     };
 
     private static HttpResponseMessage Ok<T>(T body) =>
-        new(HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(body) };
+        new(HttpStatusCode.OK) { Content = JsonContent.Create(body) };
+
+    // An answer's body that says when the client is done with it: the client disposes the answer once it has read it.
+    private sealed class SignalOnDispose : HttpContent
+    {
+        private readonly HttpContent inner;
+        private readonly TaskCompletionSource disposed;
+
+        public SignalOnDispose(HttpContent inner, TaskCompletionSource disposed)
+        {
+            (this.inner, this.disposed) = (inner, disposed);
+            foreach (var header in inner.Headers) Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => inner.CopyToAsync(stream);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+                disposed.TrySetResult();
+            }
+            base.Dispose(disposing);
+        }
+    }
 
     // Renders the Activities page and waits for its rows with their Game names.
     private IRenderedComponent<Activities> Open()
