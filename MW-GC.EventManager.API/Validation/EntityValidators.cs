@@ -93,6 +93,39 @@ internal static class EventValidator
     }
 }
 
+internal static class SeriesValidator
+{
+    public const string StartRequiredMessage = "Start is required.";
+    public const string RuleRequiredMessage = "Repeat must be a known rule.";
+    public const string EndMessage = "End must be after the start.";
+    public const int MaxSlots = EventEntity.MaximumSelections;
+    public static readonly string SlotCountMessage = $"Slot count must be from 1 to {MaxSlots}.";
+
+    /// <summary>
+    /// A Series' name, start, rule, end and slot count, in that order; the first failure wins. The Filter
+    /// id lists are lenient, as an Activity's are: a missing list is stored empty and duplicates are removed.
+    /// The cancelled occurrence keys belong to the API and are not checked here.
+    /// </summary>
+    public static string? Validate(SeriesEntity series)
+    {
+        var error = FieldRules.Name(series.Name, out var name);
+        series.Name = name;
+        series.Filters ??= new SeriesFilters();
+        series.Filters.GameIds = series.Filters.GameIds?.Distinct().ToList() ?? [];
+        series.Filters.ThemeIds = series.Filters.ThemeIds?.Distinct().ToList() ?? [];
+        series.Filters.HolidayIds = series.Filters.HolidayIds?.Distinct().ToList() ?? [];
+        if (error is not null) return error;
+
+        var schedule = series.Schedule;
+        if (schedule is null || schedule.First == default) return StartRequiredMessage;
+        if (schedule.Rule is null) return RuleRequiredMessage;
+        if (schedule.Rule.Validate() is { } rule) return rule;
+        if (schedule.End is { } end && end <= schedule.First) return EndMessage;
+        if (series.SlotCount is < 1 or > MaxSlots) return SlotCountMessage;
+        return null;
+    }
+}
+
 internal static class EventMetricsValidator
 {
     public const int MaxCount = 1_000_000;

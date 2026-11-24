@@ -14,20 +14,27 @@ internal sealed class EventFunctions
     private readonly TableStore<GameEntity> _games;
     private readonly TableStore<ActivityEntity> _activities;
     private readonly TableStore<EventMetricsEntity> _metrics;
+    private readonly TableStore<SeriesEntity>? _series;
     private readonly ILogger<EventFunctions> _logger;
 
     /// <param name="metrics">The Event metrics table; deleting an Event deletes its row there too.</param>
+    /// <param name="series">
+    /// The Series table (#204): deleting an Occurrence records its key there as cancelled. The host always
+    /// passes it; without it an Occurrence delete is a plain Event delete.
+    /// </param>
     public EventFunctions(
         TableStore<EventEntity> store,
         TableStore<GameEntity> games,
         TableStore<ActivityEntity> activities,
         TableStore<EventMetricsEntity> metrics,
-        ILogger<EventFunctions> logger)
+        ILogger<EventFunctions> logger,
+        TableStore<SeriesEntity>? series = null)
     {
         _store = store;
         _games = games;
         _activities = activities;
         _metrics = metrics;
+        _series = series;
         _logger = logger;
     }
 
@@ -57,6 +64,11 @@ internal sealed class EventFunctions
         var body = await RequestBody.ReadAsync<EventEntity>(req, ct);
         if (!body.Ok) return body.Error;
         var entity = body.Value;
+        // A create is always a standalone Event: Occurrences are made by their Series, so the Occurrence
+        // fields in a body are ignored (and a body cannot claim one to send zero Selections).
+        entity.SeriesId = null;
+        entity.OccurrenceKey = null;
+        entity.Modified = false;
         if (EventValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
 
         var hasKey = req.Headers.TryGetValue("Idempotency-Key", out var keys);
@@ -95,6 +107,11 @@ internal sealed class EventFunctions
         var body = await RequestBody.ReadAsync<EventEntity>(req, ct);
         if (!body.Ok) return body.Error;
         var entity = body.Value;
+        // The Occurrence fields come from the stored row, never the body. Editing an Occurrence by hand
+        // (the "this occurrence" scope) marks it Modified, so no Series edit rewrites it afterwards.
+        entity.SeriesId = existing.SeriesId;
+        entity.OccurrenceKey = existing.OccurrenceKey;
+        entity.Modified = existing.SeriesId is not null;
         if (EventValidator.Validate(entity) is { } error) return new BadRequestObjectResult(error);
 
         entity.Id = id;
@@ -107,6 +124,15 @@ internal sealed class EventFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "events/{id:guid}")] HttpRequest req,
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteEvent", ct, async () =>
     {
+        // Cancelling one Occurrence: its key is recorded on its Series first, so the generator never makes
+        // it again, even after a rule edit that still produces it. A stale If-Match records nothing.
+        if (_series is not null && await _store.GetAsync(id, ct) is { SeriesId: { } seriesId, OccurrenceKey: { } key } occurrence)
+        {
+            var ifMatch = EntityResults.IfMatch(req);
+            if (ifMatch != default && ifMatch != Azure.ETag.All && ifMatch != occurrence.ETag) return EntityResults.Conflict();
+            await SeriesOccurrences.RecordSkippedAsync(_series, seriesId, [key], ct);
+        }
+
         var result = await EntityResults.DeleteAsync(_store, req, id, ct);
         // The Event's metrics row goes with it (ADR 0001). A 204 also covers an Event that was
         // already gone, so a retried delete removes a row an interrupted one left behind; a 409

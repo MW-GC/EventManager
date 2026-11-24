@@ -15,7 +15,7 @@ namespace MW_GC.EventManager.Api.Tests;
 public class TableStoreRegistrationTests
 {
     [TestMethod]
-    public async Task EachOfTheSevenTablesGetsOneStoreUnderItsStoredTableAndPartitionName()
+    public async Task EachOfTheEightTablesGetsOneStoreUnderItsStoredTableAndPartitionName()
     {
         // Every table client the stores ask for, by table name.
         var clients = new Dictionary<string, Mock<TableClient>>();
@@ -51,16 +51,17 @@ public class TableStoreRegistrationTests
             await Probe<HolidayEntity>(),
             await Probe<EventMetricsEntity>(),
             await Probe<CommentEntity>(),
+            await Probe<SeriesEntity>(),
         };
 
         CollectionAssert.AreEqual(StoredNames.Stores, registered);
     }
 
     [TestMethod]
-    public void TheExtensionRegistersTheSevenStoresEachOnceAndNothingElse()
+    public void TheExtensionRegistersTheEightStoresEachOnceAndNothingElse()
     {
         // The registrations themselves, not what resolving them asks for: a second registration of a
-        // store type, or a store for an eighth table, adds a descriptor here even though resolving one
+        // store type, or a store for a ninth table, adds a descriptor here even though resolving one
         // store per type (the test above) never sees it.
         var services = new ServiceCollection().AddTableStores();
 
@@ -68,7 +69,7 @@ public class TableStoreRegistrationTests
         {
             typeof(TableStore<GameEntity>), typeof(TableStore<ActivityEntity>), typeof(TableStore<EventEntity>),
             typeof(TableStore<ThemeEntity>), typeof(TableStore<HolidayEntity>), typeof(TableStore<EventMetricsEntity>),
-            typeof(TableStore<CommentEntity>),
+            typeof(TableStore<CommentEntity>), typeof(TableStore<SeriesEntity>),
         }, services.Select(d => d.ServiceType).ToArray());
     }
 }
