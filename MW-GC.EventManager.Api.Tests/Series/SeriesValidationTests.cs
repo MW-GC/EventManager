@@ -74,6 +74,37 @@ public sealed class SeriesValidationTests
         Assert.AreEqual("Thursday night", (await h.SeriesAsync(id))!.Name);
     }
 
+    // An end in the first and the last allowed year, read at the offset it is written in: 2000 although it is
+    // 1999 in UTC, and the last second of 2100 although it is 2101 in UTC.
+    public static IEnumerable<object[]> EndsAtTheYearBounds =>
+    [
+        ["2000-01-06T19:00:00-05:00", "2000-06-01T00:00:00-05:00"],
+        ["2000-01-01T01:00:00+05:00", "2000-01-01T02:00:00+05:00"],
+        [SeriesHarness.First, "2100-12-31T23:59:59-05:00"],
+    ];
+
+    [TestMethod]
+    [DynamicData(nameof(EndsAtTheYearBounds))]
+    public async Task A_create_with_an_end_in_the_first_or_last_allowed_year_is_stored(string first, string end)
+    {
+        var result = await h.SeriesApi.Create(Request(Body(first: first, end: end), key: Guid.NewGuid()), default);
+
+        Assert.AreEqual(StatusCodes.Status201Created, ApiResults.Status(result));
+        Assert.AreEqual(SeriesTestSupport.At(end), (await h.SeriesAsync(ApiResults.Value<Shared.Requests.SeriesChange>(result).Series!.Id))!.Schedule.End);
+    }
+
+    [TestMethod]
+    [DynamicData(nameof(EndsAtTheYearBounds))]
+    public async Task An_edit_to_an_end_in_the_first_or_last_allowed_year_is_stored(string first, string end)
+    {
+        var (id, _, _) = await h.CreateAsync();
+
+        var result = await h.SeriesApi.Update(Request(Body(first: first, end: end), query: "?scope=all"), id, default);
+
+        Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(result));
+        Assert.AreEqual(SeriesTestSupport.At(end), (await h.SeriesAsync(id))!.Schedule.End);
+    }
+
     // Insert, upsert, update and delete calls that reached the Series or Events table.
     private int Writes() => new[] { h.SeriesTable, h.EventTable }.Sum(t => t.Invocations.Count(i => i.Method.Name is
         nameof(Azure.Data.Tables.TableClient.AddEntityAsync) or nameof(Azure.Data.Tables.TableClient.UpsertEntityAsync)
