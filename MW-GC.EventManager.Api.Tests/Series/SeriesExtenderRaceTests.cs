@@ -1,4 +1,5 @@
 using Azure.Data.Tables;
+using Microsoft.AspNetCore.Http;
 using MW_GC.EventManager.API.Services;
 using static MW_GC.EventManager.Api.Tests.Series.SeriesExtenderSupport;
 using static MW_GC.EventManager.Api.Tests.Series.SeriesHarness;
@@ -103,5 +104,27 @@ public sealed class SeriesExtenderRaceTests
         var dates = Dates(await h.OccurrencesAsync(id));
         Assert.HasCount(11, dates);
         Assert.HasCount(11, dates.Distinct().ToArray());
+    }
+
+    [TestMethod]
+    public async Task An_Occurrence_cancelled_while_the_run_reads_the_Series_is_not_made_again()
+    {
+        var (id, _, _) = await h.CreateAsync();
+        var third = (await h.OccurrencesAsync(id))[2];
+        h.Clock.Now = At("2027-03-05T12:00:00-05:00");
+        var cancelled = false;
+        // The admin cancels the third Occurrence while the run reads this Series: the cancel records the key on
+        // the Series, then deletes the row.
+        h.BeforeEventQuery = async () =>
+        {
+            cancelled = true;
+            Assert.AreEqual(StatusCodes.Status204NoContent, ApiResults.Status(await h.EventApi.Delete(Bare(), third.Id, default)));
+        };
+
+        await Extender(h).ExtendAllAsync(h.Clock, default);
+
+        Assert.IsTrue(cancelled);
+        CollectionAssert.Contains((await h.SeriesAsync(id))!.Skipped, third.OccurrenceKey!.Value);
+        CollectionAssert.DoesNotContain(Dates(await h.OccurrencesAsync(id)), Local(third.Date));
     }
 }

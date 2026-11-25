@@ -1,3 +1,5 @@
+using System.Linq.Expressions;
+using Azure;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -120,6 +122,26 @@ public sealed class SeriesExtenderFailureTests
 
         AssertReported(run, "not-an-id", created: 1);
         await AssertHealthyExtendedAsync(healthy);
+    }
+
+    [TestMethod]
+    public async Task A_row_in_another_partition_of_the_Series_table_is_not_a_Series()
+    {
+        await h.CreateAsync();
+        var foreign = new TableEntity("Marker", "not-a-series") { ["Name"] = "marker" };
+        // The Series table query answers as storage does: only the rows the filter matches.
+        h.SeriesTable.Setup(t => t.QueryAsync(It.IsAny<Expression<Func<TableEntity, bool>>>(), It.IsAny<int?>(),
+                It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Returns((Expression<Func<TableEntity, bool>> filter, int? _, IEnumerable<string> _, CancellationToken _) =>
+                AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(
+                    h.SeriesRows.Values.Append(foreign).Where(filter.Compile()).ToList(), null, Mock.Of<Response>())]));
+        h.Clock.Now = At("2027-03-12T12:00:00-05:00");
+
+        var run = await Extender(h, log).ExtendAllAsync(h.Clock, default);
+
+        Assert.AreEqual(1, run.Seen);
+        Assert.IsEmpty(run.Failed);
+        Assert.AreEqual(2, run.Created);
     }
 
     [TestMethod]

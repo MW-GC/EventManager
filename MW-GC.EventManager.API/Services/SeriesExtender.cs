@@ -69,9 +69,11 @@ internal sealed class SeriesExtender(
     private async Task<int> ExtendAsync(string key, DateTimeOffset now, CancellationToken ct)
     {
         if (!Guid.TryParseExact(key, "D", out var id)) throw new FormatException($"The Series row key '{key}' is not an id.");
-        if (await store.GetAsync(id, ct) is not { } series) return 0;
+        // Occurrences are read before the Series: a cancel records the key on the Series and then deletes the row,
+        // so a cancel in flight is either in Skipped or still in kept, and is never made again.
         var kept = (await occurrences.OfSeriesAsync(id, ct))
             .Where(o => o.OccurrenceKey is not null).Select(o => o.OccurrenceKey!.Value).ToList();
+        if (await store.GetAsync(id, ct) is not { } series) return 0;
         return (await occurrences.ReconcileAsync(series, [], kept, now, ct)).Created;
     }
 
