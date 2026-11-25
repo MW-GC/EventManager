@@ -1,0 +1,78 @@
+@* The avoid-recent Filter of the Filters panel (#95): a switch and a box for N, drawn as the players tonight and
+   longest duration boxes are (PlayersDurationFilterBoxes): a labelled text field with its message right under it,
+   named in aria-describedby and linked into the field's shadow root. The state lives in Filter, which the dialog
+   owns; every change is handed back through Changed. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@{ var message = Filter.Message; }
+<FluentGrid Spacing="3">
+    <FluentGridItem xs="12" sm="6">
+        <FluentSwitch Value="@Filter.IsOn" ValueChanged="@((bool on) => Switch(on))" Label="@AvoidRecentFilter.SwitchLabel" />
+        <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.8rem; margin-top: 4px;">
+            Skip Activities offered in the last N Events before this one
+        </FluentLabel>
+    </FluentGridItem>
+    <FluentGridItem xs="12" sm="6">
+        <div style="width: 100%;">
+            <FluentTextField Id="@Box.Id" Label="@Box.Label" aria-label="@Box.Label"
+                             aria-describedby="@Box.MessageId" aria-invalid="@(message is null ? null : "true")"
+                             Value="@Filter.Text" ValueChanged="@((string? v) => Type(v))"
+                             Immediate="true" Placeholder="@Box.Placeholder" Style="width: 100%;" />
+            <div id="@Box.MessageId">
+                @if (message is not null)
+                {
+                    <div role="alert" class="validation-message" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@message</div>
+                }
+            </div>
+        </div>
+    </FluentGridItem>
+</FluentGrid>
+
+@code {
+    /// <summary>This component's collocated module, which hands on the Library fields' link (its own path, so its
+    /// calls are told apart from the players and duration boxes').</summary>
+    public const string Module = "./Shared/Events/AvoidRecentFilterBox.razor.js";
+
+    private static readonly PlayersDurationFilters.Field Box = AvoidRecentFilter.Box;
+
+    // The switch and the box, kept by the dialog so they reset with every opening.
+    [Parameter, EditorRequired] public AvoidRecentFilter Filter { get; set; } = null!;
+    // The switch or the box changed and Filter already holds it: the dialog works the recent Activities out again.
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private IJSObjectReference? _module;
+
+    private Task Switch(bool on)
+    {
+        Filter.Switch(on);
+        return Changed.InvokeAsync();
+    }
+
+    private Task Type(string? text)
+    {
+        Filter.Type(text);
+        return Changed.InvokeAsync();
+    }
+
+    // The link is a nicety for assistive technology: a missing JS runtime never fails the panel.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", Module);
+            await _module.InvokeVoidAsync("link", Box.MessageId);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null) return;
+        try { await _module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+    }
+}

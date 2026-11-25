@@ -22,15 +22,15 @@
                         <FluentTextField @bind-Value="_custName" Immediate="true" Label="Event Name" Style="width: 100%;" Placeholder="Enter event name..." />
                     </FluentGridItem>
                     <FluentGridItem xs="12" sm="3">
-                        <FluentDatePicker @bind-Value="_custDate" Label="Event Date" Style="width: 100%;" />
+                        <FluentDatePicker @bind-Value="_custDate" @bind-Value:after="SyncFilter" Label="Event Date" Style="width: 100%;" />
                     </FluentGridItem>
                     <FluentGridItem xs="12" sm="3">
-                        <FluentTimePicker @bind-Value="_custTime" Immediate="true" Label="Event Time" aria-label="Event Time" Style="width: 100%;" />
+                        <FluentTimePicker @bind-Value="_custTime" @bind-Value:after="SyncFilter" Immediate="true" Label="Event Time" aria-label="Event Time" Style="width: 100%;" />
                     </FluentGridItem>
                 </FluentGrid>
 
                 <SlotPanel Planner="_planner" Games="Games" Activities="Activities" Themes="Themes" Holidays="Holidays"
-                           PlayersDuration="_playersDuration" FilterChanged="ApplyFilter" ReplacesWinner="ReplacesWinner" />
+                           PlayersDuration="_playersDuration" AvoidRecent="_avoidRecent" FilterChanged="ApplyFilter" ReplacesWinner="ReplacesWinner" />
             </FluentStack>
 
             @if (_customizeError is not null)
@@ -56,6 +56,8 @@
 }
 
 @code {
+    // The Events as the page loaded them, for the avoid-recent Filter (#95).
+    [Parameter] public List<EventEntity>? Events { get; set; }
     // The library, as the page loaded it.
     [Parameter] public List<GameEntity>? Games { get; set; }
     [Parameter] public List<ActivityEntity>? Activities { get; set; }
@@ -89,18 +91,25 @@
     private bool _custUniqueGames = true;
     // The players tonight and longest duration boxes (#98): off with every opening, never saved with the Event.
     private PlayersDurationFilters _playersDuration = new();
+    // The avoid-recent switch and box (#95): off with every opening, never saved with the Event.
+    private AvoidRecentFilter _avoidRecent = new();
     // The slots and every rule that fills them; the dialog keeps only what its inputs bind.
     private readonly SlotPlanner _planner = new(Random.Shared);
 
-    // The planner always rolls from the library the page holds now.
-    protected override void OnParametersSet() => _planner.SetLibrary(Games, Activities);
+    // The planner always rolls from the library and the Events the page holds now.
+    protected override void OnParametersSet()
+    {
+        _planner.SetLibrary(Games, Activities);
+        SyncFilter();
+    }
 
     // The page's Create Event button and a row's Edit button.
     internal void OpenCreate() { ShowCustomize(); StateHasChanged(); }
     internal void OpenEdit(EventEntity e) { ShowEditEvent(e); StateHasChanged(); }
 
-    // A filter input in the SlotPanel changed. Keeps the five Filters the dialog binds itself; players tonight and
-    // longest duration are not read from filter: the boxes typed them into _playersDuration, which SyncFilter reads.
+    // A filter input in the SlotPanel changed. Keeps the five Filters the dialog binds itself; players tonight, longest
+    // duration and avoid recent are not read from filter: the boxes typed them into _playersDuration and _avoidRecent,
+    // which SyncFilter reads (the recent Activity ids are worked out there, never taken from filter).
     private void ApplyFilter(SlotFilter filter)
     {
         _custThemedOnly = filter.ThemedOnly;
@@ -112,8 +121,11 @@
     }
 
     // Hands the filter inputs to the planner, the two boxes' values from _playersDuration; called whenever one changes.
-    private void SyncFilter() => _planner.Filter = _playersDuration.ApplyTo(
-        new SlotFilter(_custThemedOnly, _custGameIds, _custThemeIds, _custHolidayIds, _custUniqueGames));
+    // The recent Activities are worked out again from the Events, the date and time picked now and the edited Event,
+    // so moving the date moves the recent Events with it.
+    private void SyncFilter() => _planner.Filter = _avoidRecent.ApplyTo(_playersDuration.ApplyTo(
+            new SlotFilter(_custThemedOnly, _custGameIds, _custThemeIds, _custHolidayIds, _custUniqueGames)),
+        Events ?? [], BuildEventDate(), _editingEvent?.Id);
 
     private void ShowCustomize()
     {
@@ -129,6 +141,7 @@
         _custHolidayIds = [];
         _custUniqueGames = true;
         _playersDuration = new();
+        _avoidRecent = new();
         SyncFilter();
         _planner.SetSlots([]);
         _planner.AddSlotError = null;
@@ -154,6 +167,7 @@
         _custThemeIds = [];
         _custHolidayIds = [];
         _playersDuration = new();
+        _avoidRecent = new();
         SyncFilter();
         _planner.SetSlots(e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id, Stored = s }));
         _planner.AddSlotError = null;
@@ -176,6 +190,7 @@
         _custGameIds, _custThemeIds, _custHolidayIds,
         // As the other Filters count; the typed text, so text that is not valid counts too.
         PlayersDuration = _playersDuration.Texts,
+        AvoidRecent = _avoidRecent.Text,
         Slots = _planner.Slots.Select(s => new { s.GameId, s.ActivityId })
     };
 

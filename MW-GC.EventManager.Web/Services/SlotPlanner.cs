@@ -17,10 +17,11 @@ public sealed record SlotSelection
 /// ThemedOnly keeps Activities with at least one Theme or Holiday. UniqueGames keeps every slot on
 /// a different Game. PlayersTonight and LongestDuration (#98), null when off, keep an Activity unless its
 /// minimum or maximum players excludes that number, or its duration is over that many minutes; a missing
-/// value never excludes.
+/// value never excludes. RecentActivityIds (#95), null when avoid recent is off, are the Activities of the
+/// recent Events (RecentActivities works them out): rolls skip them, a slot changed by hand does not.
 /// </summary>
 public sealed record SlotFilter(bool ThemedOnly, IReadOnlyList<Guid> GameIds, IReadOnlyList<Guid> ThemeIds, IReadOnlyList<Guid> HolidayIds, bool UniqueGames,
-    int? PlayersTonight = null, int? LongestDuration = null)
+    int? PlayersTonight = null, int? LongestDuration = null, IReadOnlySet<Guid>? RecentActivityIds = null)
 {
     /// <summary>What a new customize dialog starts with: no filters, Unique games only on.</summary>
     public static SlotFilter Default { get; } = new(false, [], [], [], true);
@@ -40,6 +41,14 @@ public sealed class SlotPlanner(Random random)
     public const string AddSlotFullReason = "An Event holds at most 5 activities.";
     public const string AddSlotUniqueGamesReason = "Every Game with an unused activity is already in a slot. Turn off Unique games only to repeat a Game.";
     public const string AddSlotNoMatchReason = "No unused activity matches the current filters. Adjust the filters or add activities to the library.";
+    public const string RerollNoMatchReason = "No alternative matches the current filters";
+    // The avoid-recent Filter (#95) never relaxes itself; when it is what leaves nothing to pick (the same pool
+    // without it would have a candidate), the message names it instead.
+    public const string AvoidRecentAdvice = "Lower the number of recent Events to avoid, or turn Avoid recent off.";
+    public const string AvoidRecentNoMatchError = "No activities match the current filters once the Activities of recent Events are avoided. " + AvoidRecentAdvice;
+    public const string AvoidRecentSelectionsKeptError = "Not enough distinct activities or games match the current filters once the Activities of recent Events are avoided. Existing selections were kept. " + AvoidRecentAdvice;
+    public const string AddSlotAvoidRecentReason = "Every unused activity that matches the current filters was offered in a recent Event. " + AvoidRecentAdvice;
+    public const string RerollAvoidRecentReason = "Every alternative that matches the current filters was offered in a recent Event. " + AvoidRecentAdvice;
 
     private IReadOnlyList<GameEntity>? _games;
     private IReadOnlyList<ActivityEntity>? _activities;
@@ -68,9 +77,29 @@ public sealed class SlotPlanner(Random random)
     public void SetSlots(IEnumerable<SlotSelection> slots) => _slots = slots.ToList();
 
     // A failed generation leaves the current selections untouched, so only claim they
-    // were kept when there are some to keep.
-    private void SetGenerationFailure() =>
-        GenerationError = _slots.Count > 0 ? SelectionsKeptError : NoMatchError;
+    // were kept when there are some to keep. The message names avoid recent when it is the cause.
+    private void SetGenerationFailure()
+    {
+        var avoidRecent = AvoidRecentIsCause(CanFill);
+        GenerationError = _slots.Count > 0
+            ? avoidRecent ? AvoidRecentSelectionsKeptError : SelectionsKeptError
+            : avoidRecent ? AvoidRecentNoMatchError : NoMatchError;
+    }
+
+    // Whether Randomize All can fill the slots from this pool: one slot at least for a fresh dialog, otherwise one
+    // distinct Activity per slot and, with Unique games only on, one Game per slot too.
+    private bool CanFill(List<ActivityEntity> available)
+    {
+        if (_slots.Count == 0) return available.Count > 0;
+        if (!Filter.UniqueGames) return available.Select(a => a.Id).Distinct().Count() >= _slots.Count;
+        var grouped = available.GroupBy(a => a.GameId).ToDictionary(g => g.Key, g => g.ToList());
+        // The matching tries every Game before it gives up, so whether it fills does not depend on the draws.
+        return MatchUniqueGames(grouped, _slots.Count, new Random(0)) is not null;
+    }
+
+    // True when avoid recent is on and the same pool without it passes the check: the Filter is what left nothing.
+    private bool AvoidRecentIsCause(Func<List<ActivityEntity>, bool> passes) =>
+        Filter.RecentActivityIds is { Count: > 0 } && passes(GetFilteredActivities(avoidRecent: false));
 
     public void RandomizeAll()
     {
@@ -215,6 +244,18 @@ public sealed class SlotPlanner(Random random)
         return SlotCandidates(GetFilteredActivities(), UsedBy(index), Filter.UniqueGames).Where(a => a.Id != current).ToList();
     }
 
+    /// <summary>Null when slot <paramref name="index"/> can be re-rolled; otherwise the reason it cannot.</summary>
+    public string? GetRerollBlockedReason(int index)
+    {
+        if (GetRerollCandidates(index).Count > 0) return null;
+        if (index < 0 || index >= _slots.Count) return RerollNoMatchReason;
+        var current = _slots[index].ActivityId;
+        var used = UsedBy(index);
+        return AvoidRecentIsCause(pool => SlotCandidates(pool, used, Filter.UniqueGames).Any(a => a.Id != current))
+            ? RerollAvoidRecentReason
+            : RerollNoMatchReason;
+    }
+
     /// <summary>What Add Activity Slot may pick: the re-roll pool with every slot kept.</summary>
     public List<ActivityEntity> GetAddSlotCandidates() =>
         SlotCandidates(GetFilteredActivities(), UsedBy(-1), Filter.UniqueGames);
@@ -230,6 +271,7 @@ public sealed class SlotPlanner(Random random)
         var used = UsedBy(-1);
         candidates = SlotCandidates(filtered, used, Filter.UniqueGames);
         if (candidates.Count > 0) return null;
+        if (AvoidRecentIsCause(pool => SlotCandidates(pool, used, Filter.UniqueGames).Count > 0)) return AddSlotAvoidRecentReason;
         return Filter.UniqueGames && SlotCandidates(filtered, used, uniqueGames: false).Count > 0
             ? AddSlotUniqueGamesReason
             : AddSlotNoMatchReason;
@@ -247,8 +289,10 @@ public sealed class SlotPlanner(Random random)
         GenerationError = null;
     }
 
-    // The one activity filter: Activities of a known Game that pass every selected filter.
-    private List<ActivityEntity> GetFilteredActivities()
+    // The one activity filter: Activities of a known Game that pass every selected filter. The rolls also skip the
+    // recent Activities. Two callers pass avoidRecent false: the pickers, because a slot changed by hand is not
+    // restricted (#203), and AvoidRecentIsCause, which asks whether the same pool without the Filter would pass.
+    private List<ActivityEntity> GetFilteredActivities(bool avoidRecent = true)
     {
         if (_activities is null || _games is null) return [];
         var filter = Filter;
@@ -267,6 +311,9 @@ public sealed class SlotPlanner(Random random)
             q = q.Where(a => (a.MinPlayers is null || a.MinPlayers <= players) && (a.MaxPlayers is null || players <= a.MaxPlayers));
         if (filter.LongestDuration is { } limit)
             q = q.Where(a => a.DurationMinutes is null || a.DurationMinutes <= limit);
+        // Activities only: another Activity of a recent Activity's Game is still offered.
+        if (avoidRecent && filter.RecentActivityIds is { } recent)
+            q = q.Where(a => !recent.Contains(a.Id));
         return q.ToList();
     }
 
@@ -275,7 +322,7 @@ public sealed class SlotPlanner(Random random)
     {
         if (_games is null || _activities is null) return [];
         var used = UsedBy(slotIndex);
-        var filtered = GetFilteredActivities().Where(a => !used.Activities.Contains(a.Id));
+        var filtered = GetFilteredActivities(avoidRecent: false).Where(a => !used.Activities.Contains(a.Id));
         var gameIds = filtered.Select(a => a.GameId).Distinct().ToHashSet();
         var available = _games.Where(g => gameIds.Contains(g.Id));
         if (Filter.UniqueGames)
@@ -286,7 +333,7 @@ public sealed class SlotPlanner(Random random)
     /// <summary>The Activities of <paramref name="gameId"/> slot <paramref name="slotIndex"/> may switch to.</summary>
     public List<ActivityEntity> GetAvailableActivities(Guid gameId, int slotIndex)
     {
-        var filtered = GetFilteredActivities().Where(a => a.GameId == gameId);
+        var filtered = GetFilteredActivities(avoidRecent: false).Where(a => a.GameId == gameId);
         var used = UsedBy(slotIndex);
         return filtered.Where(a => !used.Activities.Contains(a.Id)).ToList();
     }
