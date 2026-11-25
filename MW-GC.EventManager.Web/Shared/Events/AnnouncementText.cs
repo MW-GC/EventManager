@@ -19,8 +19,9 @@ namespace MW_GC.EventManager.Web.Shared.Events;
 /// dialog's wording (<see cref="PlayersDurationText"/>); the Winner's line ends with <see cref="WinnerMarker"/>.
 /// An Event with no Selections yet (an Occurrence not rolled) says <see cref="PicksToCome"/>. A line for a future
 /// link (#9) is reserved after the last line; it is empty in this release, so the text ends on its last line.
-/// Names are made safe: Discord markdown characters are backslash-escaped, every "@" is followed by a zero-width
-/// space so no mention pings, and a line break in a name becomes a space.
+/// Names are made safe: Discord markdown characters and the brackets of a masked link are backslash-escaped, as is
+/// a heading or list marker a name starts with; every "@" is followed by a zero-width space so no mention pings, and
+/// a line break in a name becomes a space.
 /// </summary>
 public static class AnnouncementText
 {
@@ -30,8 +31,12 @@ public static class AnnouncementText
     /// <summary>The one line of an Event with no Selections yet.</summary>
     public const string PicksToCome = "The picks are still to come.";
 
-    // The characters Discord reads as markdown (and the backslash that escapes them).
-    private const string Markdown = "\\*_~`|><";
+    // The characters Discord reads as markdown anywhere in a line, the brackets of a masked link [text](url), and
+    // the backslash that escapes them.
+    private const string Markdown = "\\*_~`|><[]()";
+
+    // The characters that open a heading (#, ##, ###), subtext (-#) or a nested list (-) when a name starts with them.
+    private const string LineStart = "#-";
 
     // Written after every "@": Discord then sees no @everyone, @here or <@id> mention.
     private const char ZeroWidthSpace = '\u200B';
@@ -62,14 +67,23 @@ public static class AnnouncementText
         return string.Join("\n", lines);
     }
 
-    // A name as one safe run of text: no line break, no markdown, no mention.
+    // A name as one safe run of text: no line break, no markdown, no mention. A Selection line starts "- {Game}", so
+    // the marker a name starts with (#, -, or the dot of "1.") is escaped too; inside a name those open nothing and
+    // stay as typed.
     private static string Escape(string? name)
     {
         var flat = (name ?? string.Empty).Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
+        var start = flat.Length - flat.TrimStart().Length;
+        var digits = start;
+        while (digits < flat.Length && char.IsAsciiDigit(flat[digits])) digits++;
+        var marker = start < flat.Length && LineStart.Contains(flat[start]) ? start
+            : digits > start && digits < flat.Length && flat[digits] == '.' ? digits
+            : -1;
         var text = new StringBuilder(flat.Length);
-        foreach (var c in flat)
+        for (var i = 0; i < flat.Length; i++)
         {
-            if (Markdown.Contains(c)) text.Append('\\');
+            var c = flat[i];
+            if (i == marker || Markdown.Contains(c)) text.Append('\\');
             text.Append(c);
             if (c == '@') text.Append(ZeroWidthSpace);
         }

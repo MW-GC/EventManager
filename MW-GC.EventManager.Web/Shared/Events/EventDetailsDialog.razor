@@ -283,15 +283,18 @@
 
     // #97: the Copy announcement button. It copies the text of the Event as this dialog holds it (no API call), so
     // it changes nothing and Busy does not disable it. A result that arrives after this dialog closed or another
-    // Event's details opened is dropped.
+    // Event's details opened is dropped. A second press while this dialog's copy runs is ignored.
     private string? _announcementStatus;
     private string? _announcementError;
+    // The dialog token of the copy that is running, so a copy left in a closed dialog never holds the next one.
+    private int? _copyingAnnouncement;
 
     private async Task CopyAnnouncement()
     {
-        if (_detailEvent is not { } detail) return;
-        _announcementStatus = _announcementError = null;
         var token = _details.Current;
+        if (_detailEvent is not { } detail || _copyingAnnouncement == token) return;
+        _copyingAnnouncement = token;
+        _announcementStatus = _announcementError = null;
         try
         {
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", AnnouncementText.For(detail));
@@ -300,6 +303,10 @@
         catch (Exception ex) when (ex is JSException or JSDisconnectedException)
         {
             if (_details.IsCurrent(token)) _announcementError = "The announcement could not be copied: the browser refused the clipboard.";
+        }
+        finally
+        {
+            if (_copyingAnnouncement == token) _copyingAnnouncement = null;
         }
     }
 

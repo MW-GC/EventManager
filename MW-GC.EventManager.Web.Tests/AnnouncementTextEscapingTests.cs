@@ -35,10 +35,48 @@ public sealed class AnnouncementTextEscapingTests
     [DataRow("> Quote", @"\> Quote")]
     [DataRow("Less<More", @"Less\<More")]
     [DataRow(@"Back\slash\", @"Back\\slash\\")]
+    // A masked link ([text](url)) stays plain text: all four of its brackets are escaped.
+    [DataRow("[x](https://example.com)", @"\[x\]\(https://example.com\)")]
+    [DataRow("Open[", @"Open\[")]
+    [DataRow("Close]", @"Close\]")]
+    [DataRow("Left(", @"Left\(")]
+    [DataRow("Right)", @"Right\)")]
     public void EachMarkdownCharacter_IsEscaped_InEveryName(string name, string escaped)
     {
         Assert.AreEqual(
             $"**{escaped}**\n<t:1796410800:F>\n- {escaped}: {escaped}",
+            For(name, name, name));
+    }
+
+    // A Selection line starts "- {Game}", so what a name starts with would open a heading (#), subtext (-#), a nested
+    // list (-) or a numbered list (1.) inside the bullet. That first marker is escaped, in every name alike.
+    [TestMethod]
+    [DataRow("# Big", @"\# Big")]
+    [DataRow("## H2", @"\## H2")]
+    [DataRow("-# small", @"\-# small")]
+    [DataRow("- item", @"\- item")]
+    [DataRow("1. item", @"1\. item")]
+    [DataRow("12. item", @"12\. item")]
+    [DataRow("\n# Big", @" \# Big")]
+    public void ALineStartMarker_IsEscaped_InEveryName(string name, string escaped)
+    {
+        Assert.AreEqual(
+            $"**{escaped}**\n<t:1796410800:F>\n- {escaped}: {escaped}",
+            For(name, name, name));
+    }
+
+    // Inside a name the same characters open nothing in Discord, so a name that needs no change keeps them as typed.
+    [TestMethod]
+    [DataRow("Game #2")]
+    [DataRow("Kart 8 - Deluxe")]
+    [DataRow("Version 2.0")]
+    [DataRow("1v1 night")]
+    [DataRow("3-2-1 Go")]
+    [DataRow("Day 1. Start")]
+    public void AHeadingOrListCharacter_InsideAName_StaysAsTyped(string name)
+    {
+        Assert.AreEqual(
+            $"**{name}**\n<t:1796410800:F>\n- {name}: {name}",
             For(name, name, name));
     }
 

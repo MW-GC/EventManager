@@ -130,7 +130,10 @@ order, with its Game and Activity names and the players and duration its
 snapshot carries, the Winner's line ending in "🏆 Winner". Names only, never
 an Activity's description, rules or setup. An Event with no Selections yet
 says "The picks are still to come." A name cannot break the layout or mention
-anyone. A line for a link to the Event is reserved and empty for now (#9).
+anyone: its markdown characters and the brackets of a link are escaped, as is
+a heading or list marker it starts with (#, - or 1.), every @ is made inert,
+and a line break becomes a space. A line for a link to the Event is reserved
+and empty for now (#9).
 
 **Series**:
 Planned for 0.6.0 (#204): a recurrence rule with a start, a slot template (slot

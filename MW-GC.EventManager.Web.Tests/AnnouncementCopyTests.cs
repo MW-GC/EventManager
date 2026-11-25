@@ -181,6 +181,58 @@ public sealed class AnnouncementCopyTests : IDisposable
         Assert.IsEmpty(Alerts(page));
     }
 
+    // A second press while the first copy is still running is ignored, so the two results can never show together.
+    [TestMethod]
+    public async Task ASecondPress_WhileTheFirstRuns_IsIgnored()
+    {
+        var page = await OpenDetails("Game night");
+        clipboard.Next = Answer.Held;
+        var first = CopyButton(page).ClickAsync(new());
+        page.WaitForAssertion(() => Assert.HasCount(1, clipboard.Written));
+
+        await CopyButton(page).ClickAsync(new());
+
+        Assert.HasCount(1, clipboard.Written, "the second press copies nothing");
+        Assert.IsEmpty(Statuses(page));
+        clipboard.Release(Answer.Refused);
+        await first;
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { Refused }, Alerts(page)));
+        Assert.IsEmpty(Statuses(page));
+
+        // Once the first copy is done, the button copies again.
+        await CopyButton(page).ClickAsync(new());
+        Assert.HasCount(2, clipboard.Written);
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { Copied }, Statuses(page)));
+        Assert.IsEmpty(Alerts(page));
+    }
+
+    // A copy still running in a closed dialog never holds the button of the Event opened next, and when it ends it
+    // does not free that dialog's own running copy for a second press.
+    [TestMethod]
+    public async Task APendingCopy_DoesNotHoldTheNextEventsButton()
+    {
+        var page = await OpenDetails("Game night");
+        clipboard.Next = Answer.Held;
+        var old = CopyButton(page).ClickAsync(new());
+        page.WaitForAssertion(() => Assert.HasCount(1, clipboard.Written));
+        await page.FormDialog().Button("Close").ClickAsync(new());
+        await RowButton(page, "Weekly night", "Details").ClickAsync(new());
+
+        clipboard.Next = Answer.Held;
+        var press = CopyButton(page).ClickAsync(new());
+        page.WaitForAssertion(() => Assert.HasCount(2, clipboard.Written));
+        Assert.AreEqual("**Weekly night**\n<t:1797021000:F>\nThe picks are still to come.", clipboard.Written[1]);
+        clipboard.Release(Answer.Refused);
+        await old;
+        await CopyButton(page).ClickAsync(new());
+
+        Assert.HasCount(2, clipboard.Written, "the Weekly night copy still runs, so this press copies nothing");
+        clipboard.Release();
+        await press;
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { Copied }, Statuses(page)));
+        Assert.IsEmpty(Alerts(page));
+    }
+
     // The text is the Event as the dialog holds it now: after Select Winner, the marker is on the new Winner.
     [TestMethod]
     public async Task TheText_FollowsTheDialogsEvent_AfterSelectWinner()
@@ -259,11 +311,11 @@ public sealed class AnnouncementCopyTests : IDisposable
     public enum Answer { Copied, Refused, Gone, Held }
 
     // navigator.clipboard.writeText as the browser answers it: records each text, then copies, refuses
-    // (JSException), is gone (JSDisconnectedException), or holds the call until Release.
+    // (JSException), is gone (JSDisconnectedException), or holds the call until Release (oldest held call first).
     private sealed class FakeClipboard() : JSRuntimeInvocationHandlerBase<IJSVoidResult>(
         i => i.Identifier == "navigator.clipboard.writeText", isCatchAllHandler: false)
     {
-        private TaskCompletionSource<IJSVoidResult>? _held;
+        private readonly Queue<TaskCompletionSource<IJSVoidResult>> _held = new();
 
         public List<string> Written { get; } = [];
 
@@ -273,8 +325,7 @@ public sealed class AnnouncementCopyTests : IDisposable
 
         public void Release(Answer answer = Answer.Copied)
         {
-            var held = _held!;
-            _held = null;
+            var held = _held.Dequeue();
             if (answer == Answer.Copied) held.SetResult(null!);
             else held.SetException(Failure(answer));
         }
@@ -287,8 +338,9 @@ public sealed class AnnouncementCopyTests : IDisposable
             switch (answer)
             {
                 case Answer.Held:
-                    _held = new TaskCompletionSource<IJSVoidResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    return _held.Task;
+                    var held = new TaskCompletionSource<IJSVoidResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _held.Enqueue(held);
+                    return held.Task;
                 case Answer.Copied:
                     return Task.FromResult<IJSVoidResult>(null!);
                 default:
