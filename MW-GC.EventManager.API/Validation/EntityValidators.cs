@@ -116,6 +116,48 @@ internal static class EventValidator
     }
 }
 
+internal static class SeriesValidator
+{
+    public const string StartRequiredMessage = "Start is required.";
+    public const string RuleRequiredMessage = "Repeat must be a known rule.";
+    public const string EndMessage = "End must be after the start.";
+    public const int MaxSlots = EventEntity.MaximumSelections;
+    public static readonly string SlotCountMessage = $"Slot count must be from 1 to {MaxSlots}.";
+
+    /// <summary>The first and last year a Series' start and end may fall in, read at the offset they are written in.</summary>
+    public const int FirstYear = 2000, LastYear = 2100;
+    public static readonly string StartRangeMessage = $"Start must be in the years {FirstYear} to {LastYear}.";
+    public static readonly string EndRangeMessage = $"End must be in the years {FirstYear} to {LastYear}.";
+
+    /// <summary>
+    /// A Series' name, start, rule, end and slot count, in that order; the first failure wins. The start and
+    /// the end must fall in the years <see cref="FirstYear"/> to <see cref="LastYear"/>, so the generator never
+    /// steps past the last date a <see cref="DateTimeOffset"/> holds. The Filter id lists are lenient, as an
+    /// Activity's are: a missing list is stored empty and duplicates are removed. The skipped occurrence keys
+    /// belong to the API and are not checked here.
+    /// </summary>
+    public static string? Validate(SeriesEntity series)
+    {
+        var error = FieldRules.Name(series.Name, out var name);
+        series.Name = name;
+        series.Filters ??= new SeriesFilters();
+        series.Filters.GameIds = series.Filters.GameIds?.Distinct().ToList() ?? [];
+        series.Filters.ThemeIds = series.Filters.ThemeIds?.Distinct().ToList() ?? [];
+        series.Filters.HolidayIds = series.Filters.HolidayIds?.Distinct().ToList() ?? [];
+        if (error is not null) return error;
+
+        var schedule = series.Schedule;
+        if (schedule is null || schedule.First == default) return StartRequiredMessage;
+        if (schedule.First.Year is < FirstYear or > LastYear) return StartRangeMessage;
+        if (schedule.Rule is null) return RuleRequiredMessage;
+        if (schedule.Rule.Validate() is { } rule) return rule;
+        if (schedule.End is { } end && end <= schedule.First) return EndMessage;
+        if (schedule.End is { Year: < FirstYear or > LastYear }) return EndRangeMessage;
+        if (series.SlotCount is < 1 or > MaxSlots) return SlotCountMessage;
+        return null;
+    }
+}
+
 internal static class EventMetricsValidator
 {
     public const int MaxCount = 1_000_000;

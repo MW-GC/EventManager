@@ -1,6 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace MW_GC.EventManager.Shared.Series;
 
+// The enums of a rule are written to JSON (a stored Series row, an API body) by name; see NamedEnumConverter.
+
 /// <summary>Which calendar rule a Series repeats on.</summary>
+[JsonConverter(typeof(NamedEnumConverter<RecurrenceKind>))]
 public enum RecurrenceKind
 {
     Weekly,
@@ -15,6 +20,7 @@ public enum RecurrenceKind
 /// Which of a month's weekdays a monthly nth-weekday rule picks: the first to the fourth, or the last.
 /// There is no fifth, because not every month has one.
 /// </summary>
+[JsonConverter(typeof(NamedEnumConverter<WeekOfMonth>))]
 public enum WeekOfMonth
 {
     Last = -1,
@@ -32,7 +38,10 @@ public enum WeekOfMonth
 /// with <see cref="Validate"/>.
 /// </summary>
 public sealed record RecurrenceRule(
-    RecurrenceKind Kind, WeekOfMonth? Week = null, DayOfWeek? Weekday = null, HolidayPreset? Preset = null)
+    RecurrenceKind Kind,
+    WeekOfMonth? Week = null,
+    [property: JsonConverter(typeof(NullableNamedEnumConverter<DayOfWeek>))] DayOfWeek? Weekday = null,
+    HolidayPreset? Preset = null)
 {
     public static RecurrenceRule Weekly() => new(RecurrenceKind.Weekly);
 

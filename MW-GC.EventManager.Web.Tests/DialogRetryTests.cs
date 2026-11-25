@@ -61,7 +61,7 @@ public class DialogRetryTests
         service.Setup(s => s.GetTableClient(It.IsAny<string>())).Returns(table.Object);
         // Its own metrics table; these tests never delete an Event, so it is never written.
         service.Setup(s => s.GetTableClient("metrics")).Returns(new Mock<TableClient>().Object);
-        api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(service.Object, "metrics", "metrics"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
+        api = new(new(service.Object, "events", "events"), new(service.Object, "games", "games"), new(service.Object, "activities", "activities"), new(service.Object, "metrics", "metrics"), new(service.Object, "series", "series"), Microsoft.Extensions.Logging.Abstractions.NullLogger<EventFunctions>.Instance);
     }
 
     [TestMethod]

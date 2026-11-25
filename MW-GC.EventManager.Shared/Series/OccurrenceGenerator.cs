@@ -15,8 +15,9 @@ public static class OccurrenceGenerator
     /// instant and <paramref name="now"/> up to and including <paramref name="now"/> plus <see cref="Horizon"/>,
     /// and the first rule date after <paramref name="now"/> even when it is further out. An instant in
     /// <paramref name="existing"/> is not returned again; one in <paramref name="skipped"/> (a cancelled
-    /// Occurrence) is never returned and does not count as the next one. Keys compare as instants, whatever
-    /// offset they are written in.
+    /// Occurrence) is never returned and does not count as the next one. Nothing after the Series'
+    /// <see cref="RecurrenceSeries.End"/> is returned, not even the next one; an instant exactly at the end is.
+    /// Keys compare as instants, whatever offset they are written in.
     /// </summary>
     /// <exception cref="ArgumentException">The Series' rule is invalid; the message is <see cref="RecurrenceRule.Validate"/>'s.</exception>
     public static IReadOnlyList<DateTimeOffset> Generate(
@@ -38,6 +39,7 @@ public static class OccurrenceGenerator
 
         foreach (var instant in RuleDates(series, from))
         {
+            if (series.End is { } last && instant > last) break;
             if (instant > end && hasNextAfterNow) break;
             if (skippedKeys.Contains(instant)) continue;
             if (instant > now) hasNextAfterNow = true;

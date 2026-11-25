@@ -10,7 +10,7 @@ namespace MW_GC.EventManager.Api.Tests;
 /// </summary>
 internal static class StoredNames
 {
-    /// <summary>The seven tables behind a <see cref="TableStore{TEntity}"/>, each with its one partition.</summary>
+    /// <summary>The eight tables behind a <see cref="TableStore{TEntity}"/>, each with its one partition.</summary>
     public static readonly (string Table, string Partition)[] Stores =
     [
         ("Games", "Game"),
@@ -20,12 +20,13 @@ internal static class StoredNames
         ("Holidays", "Holiday"),
         ("EventMetrics", "Metrics"),
         ("ActivityComments", "Comment"),
+        ("Series", "Series"),
     ];
 
-    /// <summary>Every table the API creates: the seven above and the two feedback tables.</summary>
+    /// <summary>Every table the API creates: the eight above and the two feedback tables.</summary>
     public static readonly string[] AllTables =
     [
-        "Activities", "ActivityComments", "EventMetrics", "Events", "FeedbackLikes", "FeedbackLinks", "Games", "Holidays", "Themes",
+        "Activities", "ActivityComments", "EventMetrics", "Events", "FeedbackLikes", "FeedbackLinks", "Games", "Holidays", "Series", "Themes",
     ];
 }
 
@@ -51,6 +52,8 @@ public class StoredNamesTests
             ("Event metrics partition", "Metrics", TableNames.EventMetricsPartition),
             ("Comments table", "ActivityComments", TableNames.Comments),
             ("Comment partition", "Comment", TableNames.CommentPartition),
+            ("Series table", "Series", TableNames.Series),
+            ("Series partition", "Series", TableNames.SeriesPartition),
             ("old-text conversion marker partition", "Migration", ActivityNoteConversion.MarkerPartitionKey),
             ("feedback links table", "FeedbackLinks", FeedbackStore.LinksTable),
             ("feedback link Event partition", "Event", FeedbackStore.EventPartition),
@@ -76,11 +79,12 @@ public class StoredNamesTests
             (TableNames.Holidays, TableNames.HolidayPartition),
             (TableNames.EventMetrics, TableNames.EventMetricsPartition),
             (TableNames.Comments, TableNames.CommentPartition),
+            (TableNames.Series, TableNames.SeriesPartition),
         }, "StoredNames.Stores");
         CollectionAssert.AreEquivalent(StoredNames.AllTables, new[]
         {
             TableNames.Games, TableNames.Activities, TableNames.Events, TableNames.Themes, TableNames.Holidays,
-            TableNames.EventMetrics, TableNames.Comments, FeedbackStore.LinksTable, FeedbackStore.LikesTable,
+            TableNames.EventMetrics, TableNames.Comments, TableNames.Series, FeedbackStore.LinksTable, FeedbackStore.LikesTable,
         }, "StoredNames.AllTables");
     }
 }

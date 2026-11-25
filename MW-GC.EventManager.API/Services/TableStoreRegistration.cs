@@ -4,7 +4,7 @@ using MW_GC.EventManager.Shared.Entities;
 
 namespace MW_GC.EventManager.API.Services;
 
-/// <summary>The registration of the seven <see cref="TableStore{TEntity}"/> tables, one singleton each.</summary>
+/// <summary>The registration of the eight <see cref="TableStore{TEntity}"/> tables, one singleton each.</summary>
 internal static class TableStoreRegistration
 {
     /// <summary>
@@ -30,6 +30,9 @@ internal static class TableStoreRegistration
         // Comments (#129, ADR 0001): one row per Comment.
         services.AddSingleton(sp =>
             new TableStore<CommentEntity>(sp.GetRequiredService<TableServiceClient>(), TableNames.Comments, TableNames.CommentPartition));
+        // Series (#204, ADR 0002): one row per Series; its Occurrences are rows in the Events table.
+        services.AddSingleton(sp =>
+            new TableStore<SeriesEntity>(sp.GetRequiredService<TableServiceClient>(), TableNames.Series, TableNames.SeriesPartition));
         return services;
     }
 }
