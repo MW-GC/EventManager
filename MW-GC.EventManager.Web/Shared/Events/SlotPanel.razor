@@ -66,6 +66,11 @@
     </FluentGridItem>
 </FluentGrid>
 
+@* Players tonight and longest duration (#98): empty is off, and a value that is not valid leaves its Filter off *@
+<FluentCard Style="padding: 12px;" AreaRestricted="false">
+    <PlayersDurationFilterBoxes Boxes="PlayersDuration" Typed="@(() => Change(PlayersDuration.ApplyTo(Filter)))" />
+</FluentCard>
+
 @* Selections header with controls *@
 <FluentStack Orientation="Orientation.Horizontal"
              HorizontalAlignment="HorizontalAlignment.SpaceBetween"
@@ -78,7 +83,8 @@
         {
             <FluentLabel role="status">Single activity: this activity will automatically win when you save.</FluentLabel>
         }
-        @if (Filter.ThemedOnly || Filter.GameIds.Count > 0 || Filter.ThemeIds.Count > 0 || Filter.HolidayIds.Count > 0)
+        @if (Filter.ThemedOnly || Filter.GameIds.Count > 0 || Filter.ThemeIds.Count > 0 || Filter.HolidayIds.Count > 0
+             || Filter.PlayersTonight is not null || Filter.LongestDuration is not null)
         {
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Filters apply when randomizing all selections or re-rolling a slot</FluentLabel>
         }
@@ -198,6 +204,8 @@
     [Parameter] public List<ActivityEntity>? Activities { get; set; }
     [Parameter] public List<ThemeEntity>? Themes { get; set; }
     [Parameter] public List<HolidayEntity>? Holidays { get; set; }
+    // The players tonight and longest duration boxes' typed text, which the dialog keeps for one opening.
+    [Parameter, EditorRequired] public PlayersDurationFilters PlayersDuration { get; set; } = null!;
     // A filter input changed: the new Filter, for the dialog to keep and hand to the planner.
     [Parameter] public EventCallback<SlotFilter> FilterChanged { get; set; }
     // The slot held the edited Event's Winner and its Activity has been changed.

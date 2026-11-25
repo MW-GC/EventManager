@@ -109,9 +109,14 @@ more, each off by default:
   turned on) dated before the Event being planned, not counting the Event being
   edited. It skips Activities, never Games, never relaxes itself, and applies to
   Randomize All, re-roll and Add Activity Slot, not to a slot changed by hand.
-- players tonight: keeps an Activity unless its minimum or maximum players
-  excludes that number; a missing bound is open.
-- longest duration: keeps an Activity with no duration or one within the limit.
+- players tonight (1 to 99): keeps an Activity unless its minimum or maximum
+  players excludes that number; a missing bound is open.
+- longest duration (1 to 1440 minutes): keeps an Activity with no duration or
+  one within the limit.
+Players tonight and longest duration are typed into the Filters; an empty box
+or one whose text is not a valid number leaves its Filter off. Like the Game,
+Theme and Holiday Filters they apply to Randomize All, re-roll, Add Activity
+Slot and the slot pickers, and they are not saved with the Event.
 
 **Announcement**:
 Planned for 0.6.0 (#203): ready-to-paste Discord text for an Event, copied from

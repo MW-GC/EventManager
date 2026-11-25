@@ -1,0 +1,63 @@
+@* The players tonight and longest duration boxes of the Filters panel (#98), drawn as the Activities editor draws
+   its players and duration fields: a labelled text field per value with its message right under it, named in
+   aria-describedby and linked into the field's shadow root by the same module (LibraryFieldMessage). The text lives
+   in Boxes, which the dialog owns; every keystroke is handed back through Typed. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<FluentGrid Spacing="3">
+    @foreach (var field in PlayersDurationFilters.All)
+    {
+        var message = Boxes.Message(field);
+        <FluentGridItem xs="12" sm="6">
+            <div style="width: 100%;">
+                <FluentTextField Id="@field.Id" Label="@field.Label" aria-label="@field.Label"
+                                 aria-describedby="@field.MessageId" aria-invalid="@(message is null ? null : "true")"
+                                 Value="@Boxes.Text(field)" ValueChanged="@((string? v) => Type(field, v))"
+                                 Immediate="true" Placeholder="@field.Placeholder" Style="width: 100%;" />
+                <div id="@field.MessageId">
+                    @if (message is not null)
+                    {
+                        <div role="alert" class="validation-message" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@message</div>
+                    }
+                </div>
+            </div>
+        </FluentGridItem>
+    }
+</FluentGrid>
+
+@code {
+    // The typed text of both boxes, kept by the dialog so it resets with every opening.
+    [Parameter, EditorRequired] public PlayersDurationFilters Boxes { get; set; } = null!;
+    // A box changed: the panel hands the Filters it now turns on to the dialog.
+    [Parameter] public EventCallback Typed { get; set; }
+
+    private IJSObjectReference? _module;
+
+    private Task Type(PlayersDurationFilters.Field field, string? text)
+    {
+        Boxes.Type(field, text);
+        return Typed.InvokeAsync();
+    }
+
+    // The link is a nicety for assistive technology: a missing JS runtime never fails the panel.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", LibraryFieldMessage.Module);
+            foreach (var field in PlayersDurationFilters.All) await _module.InvokeVoidAsync("link", field.MessageId);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null) return;
+        try { await _module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+    }
+}
