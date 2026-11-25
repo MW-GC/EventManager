@@ -1,6 +1,7 @@
 @page "/events"
 @page "/"
 @inject EventService EventSvc
+@inject SeriesService SeriesSvc
 @inject LibraryClient<GameEntity> GameClient
 @inject LibraryClient<ActivityEntity> ActivityClient
 @inject LibraryClient<ThemeEntity> ThemeSvc
@@ -51,6 +52,13 @@
                    OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
 }
 
+@if (_scope is { } scope)
+{
+    <ScopeDialog @key="scope" Title="@scope.Title" Message="@scope.Message" GroupLabel="@scope.GroupLabel" Options="@scope.Options"
+                 Destructive="@scope.Destructive"
+                 OnConfirm="@((ScopeOption option) => ScopeConfirmed(scope, option))" OnCancel="@(() => ScopeCancelled(scope))" />
+}
+
 @code {
     private List<EventEntity>? _events;
     private List<GameEntity>? _games;
@@ -65,6 +73,8 @@
     private readonly RowAction _rows = new();
     // The open delete question, if any. The dialogs ask their own "Discard changes?".
     private ConfirmRequest? _confirm;
+    // The open scope question before an Occurrence is deleted, if any (#204).
+    private ScopeRequest? _scope;
     private string? _pageError;
 
     // Each list loads on its own: a failed Theme or Holiday list never hides the Events, and
@@ -112,11 +122,36 @@
     private void SetPageError(string? message) => _pageError = message;
     private void SetActionError(string message) => _actionError = message;
 
+    // An Occurrence asks which scope to cancel (#204): this one, or its whole Series from now on. The Series id
+    // is the clicked row's own. A standalone Event asks the plain question.
     private void AskDelete(EventEntity e)
     {
         if (_rows.BusyId is not null) return;
         _ = Focus.RememberAsync($"delete-{e.Id}");
+        if (e.SeriesId is { } seriesId)
+        {
+            _scope = ScopeRequest.CancelOccurrence(e.Name, e.Date,
+                () => _rows.RunAsync(e.Id, () => Delete(e.Id)),
+                () => _rows.RunAsync(e.Id, () => CancelSeries(seriesId)));
+            return;
+        }
         _confirm = ConfirmRequest.Delete("Delete event", $"Delete {e.Name}? This cannot be undone.", () => _rows.RunAsync(e.Id, () => Delete(e.Id)));
+    }
+
+    private async Task ScopeConfirmed(ScopeRequest scope, ScopeOption option)
+    {
+        if (_scope != scope) return;
+        _scope = null;
+        await option.OnConfirm();
+        _ = Focus.RestoreAsync();
+    }
+
+    // A cancelled scope question returns focus to the Delete button.
+    private void ScopeCancelled(ScopeRequest scope)
+    {
+        if (_scope != scope) return;
+        _scope = null;
+        _ = Focus.RestoreAsync();
     }
 
     private async Task Confirmed(ConfirmRequest confirm)
@@ -141,6 +176,14 @@
     {
         var error = await ApiResult.SendAsync(() => EventSvc.DeleteAsync(id));
         _actionError = error is null ? null : $"The event was not deleted. {error}";
+        if (error is not null) return;
+        await RefreshEvents();
+    }
+
+    private async Task CancelSeries(Guid seriesId)
+    {
+        var error = await ApiResult.SendAsync(() => SeriesSvc.DeleteAsync(seriesId));
+        _actionError = error is null ? null : $"The series was not cancelled. {error}";
         if (error is not null) return;
         await RefreshEvents();
     }
