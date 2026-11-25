@@ -77,6 +77,15 @@
                                             <FluentIcon Value="@(new Size16.Flash())" Color="Color.Accent" />
                                             <FluentLabel Style="font-size: 0.85rem; color: var(--accent-foreground-rest);">@selection.Activity.Name</FluentLabel>
                                         </FluentStack>
+                                        @* #98: the players and duration the snapshot carries; nothing when none is set. *@
+                                        @if (PlayersDurationText.Players(selection.Activity.MinPlayers, selection.Activity.MaxPlayers) is { } players)
+                                        {
+                                            <span class="selection-players" style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">@players</span>
+                                        }
+                                        @if (PlayersDurationText.Duration(selection.Activity.DurationMinutes) is { } duration)
+                                        {
+                                            <span class="selection-duration" style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">@duration</span>
+                                        }
                                     </FluentStack>
                                 </FluentStack>
 

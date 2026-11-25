@@ -51,9 +51,11 @@ public sealed class LibraryClientTests
                 break;
             default:
                 await AssertRequests(services.GetRequiredService<LibraryClient<ActivityEntity>>(), recorder,
-                    new ActivityEntity { Id = Id, Name = "Race", GameId = GameIdOfRace, ThemeIds = [SpookyId] }, "/api/activities",
+                    new ActivityEntity { Id = Id, Name = "Race", GameId = GameIdOfRace, ThemeIds = [SpookyId], MinPlayers = 2, MaxPlayers = 6, DurationMinutes = 45 },
+                    "/api/activities",
                     "{\"gameId\":\"22222222-3333-4444-5555-666666666666\",\"name\":\"Race\",\"description\":\"\",\"rules\":\"\"," +
-                    "\"themeIds\":[\"33333333-4444-5555-6666-777777777777\"],\"holidayIds\":[],\"setupRequirements\":\"\"," + BaseFields);
+                    "\"themeIds\":[\"33333333-4444-5555-6666-777777777777\"],\"holidayIds\":[],\"setupRequirements\":\"\"," +
+                    "\"minPlayers\":2,\"maxPlayers\":6,\"durationMinutes\":45," + BaseFields);
                 break;
         }
     }
