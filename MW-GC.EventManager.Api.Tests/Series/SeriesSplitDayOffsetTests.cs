@@ -95,6 +95,24 @@ public sealed class SeriesSplitDayOffsetTests
     }
 
     [TestMethod]
+    public async Task An_all_edit_at_winter_time_still_cannot_reach_the_split_day_at_the_stored_summer_time_once_the_following_Series_is_cancelled()
+    {
+        var old = await SplitInAutumnAsync();
+        var following = (await h.EventsAsync()).Select(e => e.SeriesId!.Value).First(id => id != old);
+        Assert.AreEqual(StatusCodes.Status204NoContent, ApiResults.Status(await h.SeriesApi.Delete(Bare(query: All), following, default)));
+        Assert.IsNull(await h.SeriesAsync(following));
+        var end = await StoredEndAsync(old);
+
+        // With no following Series left, the split day is still read in the calendar the old Series was stored at:
+        // Wednesday 27 October 23:30 -05:00 reaches Thursday 18 November 00:30 -04:00, and 22:30 -05:00 does not.
+        await AssertRefusedAsync(old, Body(name: "Late Wednesday", first: "2027-10-27T23:30:00-05:00", end: end));
+        await h.EditAsync(old, Body(name: "Late Wednesday", first: "2027-10-27T22:30:00-05:00", end: end), All);
+
+        Assert.AreEqual("2027-11-17T23:30:00-04:00", Wall((await h.OccurrencesAsync(old))[^1].Date, Summer));
+        Assert.IsEmpty(await DoubledDays(Summer));
+    }
+
+    [TestMethod]
     public async Task An_all_edit_cannot_reach_the_split_day_at_the_summer_time_the_following_Series_is_written_at()
     {
         var old = await SplitInSpringAsync();
