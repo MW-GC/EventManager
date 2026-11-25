@@ -122,11 +122,15 @@ pickers; avoid recent applies to Randomize All, re-roll and Add Activity Slot,
 not to a slot changed by hand.
 
 **Announcement**:
-Planned for 0.6.0 (#203): ready-to-paste Discord text for an Event, copied from
-its details. A fixed template: the Event name as a bold title, the date as a
-Discord timestamp, then one line per Selection with its Game and Activity (and
-players and duration when set), the Winner's line marked. An Event with no
-Selections yet says the picks are still to come.
+Ready-to-paste Discord text for an Event, copied from its details with Copy
+announcement (#97). A fixed template, built from the Event as the details show
+it: the Event name as a bold title; the date as a Discord timestamp, so each
+reader sees their own time zone; then one line per Selection, in the Event's
+order, with its Game and Activity names and the players and duration its
+snapshot carries, the Winner's line ending in "🏆 Winner". Names only, never
+an Activity's description, rules or setup. An Event with no Selections yet
+says "The picks are still to come." A name cannot break the layout or mention
+anyone. A line for a link to the Event is reserved and empty for now (#9).
 
 **Series**:
 Planned for 0.6.0 (#204): a recurrence rule with a start, a slot template (slot

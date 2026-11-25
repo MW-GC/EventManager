@@ -35,6 +35,16 @@
                 {
                     <span role="alert" style="color: var(--error);">@_feedbackLinkError</span>
                 }
+                @* #97: the announcement text (AnnouncementText) of the Event as this dialog holds it. *@
+                <FluentButton Appearance="Appearance.Outline" Size="ButtonSize.Small" OnClick="CopyAnnouncement">Copy announcement</FluentButton>
+                @if (_announcementStatus is not null)
+                {
+                    <span role="status">@_announcementStatus</span>
+                }
+                @if (_announcementError is not null)
+                {
+                    <span role="alert" style="color: var(--error);">@_announcementError</span>
+                }
             </FluentStack>
             @if (_feedbackLink is not null)
             {
@@ -207,6 +217,7 @@
         _winnerError = null;
         _likesFor = null;
         _feedbackLink = _feedbackLinkStatus = _feedbackLinkError = null;
+        _announcementStatus = _announcementError = null;
         _details.Open();
         _ = Focus.RememberAsync($"details-{e.Id}");
     }
@@ -267,6 +278,28 @@
         finally
         {
             _copyingLink = false;
+        }
+    }
+
+    // #97: the Copy announcement button. It copies the text of the Event as this dialog holds it (no API call), so
+    // it changes nothing and Busy does not disable it. A result that arrives after this dialog closed or another
+    // Event's details opened is dropped.
+    private string? _announcementStatus;
+    private string? _announcementError;
+
+    private async Task CopyAnnouncement()
+    {
+        if (_detailEvent is not { } detail) return;
+        _announcementStatus = _announcementError = null;
+        var token = _details.Current;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", AnnouncementText.For(detail));
+            if (_details.IsCurrent(token)) _announcementStatus = "Announcement copied.";
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        {
+            if (_details.IsCurrent(token)) _announcementError = "The announcement could not be copied: the browser refused the clipboard.";
         }
     }
 
