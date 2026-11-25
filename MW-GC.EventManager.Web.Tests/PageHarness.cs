@@ -23,6 +23,7 @@ internal sealed class PageHarness : IDisposable
         _context.Services.AddLibraryClients();
         _context.Services.AddSingleton(new ActivityService(http));
         _context.Services.AddSingleton(new EventService(http));
+        _context.Services.AddSingleton(new SeriesService(http));
         _context.Services.AddSingleton(new EventMetricsClient(http));
         _context.Services.AddSingleton(new CommentClient(http));
         _context.Services.AddScoped<FocusReturn>();

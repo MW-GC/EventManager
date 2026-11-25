@@ -16,7 +16,16 @@
     </FluentStack>
 
     <FluentDataGrid Items="@Filtered" TGridItem="EventEntity" Virtualize="true" ItemSize="44" GridTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 120px">
-        <PropertyColumn Property="@(e => e.Name)" Title="Name" Sortable="true" />
+        @* #100, #204: an Occurrence of a Series carries the repeat marker beside its name; a standalone Event none. *@
+        <TemplateColumn Title="Name" Sortable="true" SortBy="@_nameSort">
+            @if (context.SeriesId is not null)
+            {
+                <span class="repeat-marker" role="img" aria-label="Repeats" title="Repeats" style="margin-right: 4px;">
+                    <FluentIcon Value="@(new Size16.ArrowRepeatAll())" Color="Color.Accent" aria-hidden="true" Style="vertical-align: -0.125em;" />
+                </span>
+            }
+            @context.Name
+        </TemplateColumn>
         <TemplateColumn Title="Date" Sortable="true" SortBy="@_dateSort" IsDefaultSortColumn="true" InitialSortDirection="SortDirection.Descending">
             @context.Date.ToLocalTime().ToString("g")
         </TemplateColumn>
@@ -78,6 +87,8 @@
 
     // Sorts the grid by the underlying instant while the column renders local time.
     private static readonly GridSort<EventEntity> _dateSort = GridSort<EventEntity>.ByAscending(e => e.Date);
+    // The Name column sorts by the name alone, as it did as a property column.
+    private static readonly GridSort<EventEntity> _nameSort = GridSort<EventEntity>.ByAscending(e => e.Name);
 
     private IQueryable<EventEntity> Filtered => string.IsNullOrWhiteSpace(_search)
         ? Events.AsQueryable()

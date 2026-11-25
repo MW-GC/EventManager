@@ -27,6 +27,7 @@ public static class AppServices
         services.AddLibraryClients();
         services.AddScoped<ActivityService>();
         services.AddScoped<EventService>();
+        services.AddScoped<SeriesService>();
         services.AddScoped<EventMetricsClient>();
         services.AddScoped<CommentClient>();
         services.AddScoped<FocusReturn>();

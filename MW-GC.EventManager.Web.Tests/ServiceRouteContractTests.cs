@@ -47,6 +47,9 @@ public sealed class ServiceRouteContractTests
         new(typeof(EventService), nameof(EventService.GetFeedbackLinkAsync), "GET", "api/events/{id}/feedback-link", h => new EventService(h).GetFeedbackLinkAsync(Id)),
         new(typeof(EventService), nameof(EventService.GetLikesAsync), "GET", "api/events/{id}/likes", h => new EventService(h).GetLikesAsync(Id)),
 
+        // A Series and its Occurrences (#204): only the create so far.
+        new(typeof(SeriesService), nameof(SeriesService.CreateAsync), "POST", "api/series", h => new SeriesService(h).CreateAsync(new SeriesEntity { Id = Id }, Guid.NewGuid())),
+
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.LoadAllAsync), "GET", "api/event-metrics", h => new EventMetricsClient(h).LoadAllAsync()),
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.GetAsync), "GET", "api/events/{id}/metrics", h => new EventMetricsClient(h).GetAsync(Id)),
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.SaveAsync), "PUT", "api/events/{id}/metrics", h => new EventMetricsClient(h).SaveAsync(Id, new EventMetricsEntity(), null)),
@@ -78,7 +81,7 @@ public sealed class ServiceRouteContractTests
 
     private static readonly Type[] Services =
     [
-        typeof(ActivityService), typeof(EventService), typeof(EventMetricsClient), typeof(CommentClient),
+        typeof(ActivityService), typeof(EventService), typeof(SeriesService), typeof(EventMetricsClient), typeof(CommentClient),
         typeof(LibraryClient<GameEntity>), typeof(LibraryClient<ThemeEntity>), typeof(LibraryClient<HolidayEntity>),
         typeof(LibraryClient<ActivityEntity>)
     ];
@@ -131,6 +134,21 @@ public sealed class ServiceRouteContractTests
         var request = Assert.ContainsSingle(recorder.Sent);
         Assert.AreEqual(HttpMethod.Post, request.Method);
         Assert.AreEqual("api/events", request.Path);
+        Assert.AreEqual(key.ToString("D"), Assert.ContainsSingle(request.IdempotencyKey));
+    }
+
+    // #204: a Series create sends its key exactly as an Event create does.
+    [TestMethod]
+    public async Task SeriesCreateSendsTheIdempotencyKeyHeader()
+    {
+        var key = Guid.NewGuid();
+        var (client, recorder) = Client(Table.Single(r => r.Service == typeof(SeriesService)));
+
+        await new SeriesService(client).CreateAsync(new SeriesEntity { Id = Id }, key);
+
+        var request = Assert.ContainsSingle(recorder.Sent);
+        Assert.AreEqual(HttpMethod.Post, request.Method);
+        Assert.AreEqual("api/series", request.Path);
         Assert.AreEqual(key.ToString("D"), Assert.ContainsSingle(request.IdempotencyKey));
     }
 

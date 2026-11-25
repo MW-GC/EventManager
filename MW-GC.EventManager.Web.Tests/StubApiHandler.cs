@@ -50,12 +50,19 @@ internal sealed class StubApiHandler : HttpMessageHandler
     public List<string?> IfMatches(HttpMethod method, string path) =>
         _ifMatches.Where(r => r.Method == method && r.Path == path).Select(r => r.IfMatch).ToList();
 
+    // The Idempotency-Key headers sent to one route, oldest first (null for a request without one).
+    public List<string?> IdempotencyKeys(HttpMethod method, string path) =>
+        _keys.Where(r => r.Method == method && r.Path == path).Select(r => r.Key).ToList();
+
+    private readonly List<(HttpMethod Method, string Path, string? Key)> _keys = [];
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var path = request.RequestUri!.AbsolutePath;
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         Requests.Add((request.Method, path, body));
         _ifMatches.Add((request.Method, path, request.Headers.TryGetValues("If-Match", out var tags) ? string.Join(", ", tags) : null));
+        _keys.Add((request.Method, path, request.Headers.TryGetValues("Idempotency-Key", out var keys) ? string.Join(", ", keys) : null));
         foreach (var route in _routes)
             if (route.Method == request.Method && route.Path == path)
                 return await route.Respond();

@@ -3,6 +3,7 @@
    the save's busy guard. The page opens it (OpenCreate, OpenEdit) and hears back when an Event was
    saved, so it can reload its list, and when a message belongs on the page instead of here. *@
 @inject EventService EventSvc
+@inject SeriesService SeriesSvc
 @inject FocusReturn Focus
 
 @if (_showCustomize)
@@ -29,6 +30,13 @@
                     </FluentGridItem>
                 </FluentGrid>
 
+                @* #100, #204: a new Event can repeat; an edited one never shows this. *@
+                @if (_editingEvent is null)
+                {
+                    @* Changed re-renders this dialog, so Create follows the end date's check. *@
+                    <RepeatSection Choice="_repeat" Start="BuildEventDate()" Changed="StateHasChanged" />
+                }
+
                 <SlotPanel Planner="_planner" Games="Games" Activities="Activities" Themes="Themes" Holidays="Holidays"
                            PlayersDuration="_playersDuration" AvoidRecent="_avoidRecent" FilterChanged="ApplyFilter" ReplacesWinner="ReplacesWinner" />
             </FluentStack>
@@ -40,7 +48,7 @@
             <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 16px;">
                 <FluentButton Appearance="Appearance.Neutral" Disabled="@_generating" OnClick="CancelCustomize">Cancel</FluentButton>
                 <FluentButton Appearance="Appearance.Accent" Loading="@_generating" OnClick="SaveCustomizedEvent"
-                              Disabled="@(string.IsNullOrWhiteSpace(_custName))">
+                              Disabled="@(string.IsNullOrWhiteSpace(_custName) || Repeating && _repeat.EndProblem(BuildEventDate()) is not null)">
                     @(_editingEvent is not null ? "Update Event" : "Create Event")
                 </FluentButton>
             </FluentStack>
@@ -95,6 +103,10 @@
     private AvoidRecentFilter _avoidRecent = new();
     // The slots and every rule that fills them; the dialog keeps only what its inputs bind.
     private readonly SlotPlanner _planner = new(Random.Shared);
+    // The Repeat section (#100, #204): off with every opening, shown in a create only.
+    private RepeatChoice _repeat = new();
+    // A create with Repeat on saves a Series instead of the Event.
+    private bool Repeating => _editingEvent is null && _repeat.IsOn;
 
     // The planner always rolls from the library and the Events the page holds now.
     protected override void OnParametersSet()
@@ -142,6 +154,7 @@
         _custUniqueGames = true;
         _playersDuration = new();
         _avoidRecent = new();
+        _repeat = new();
         SyncFilter();
         _planner.SetSlots([]);
         _planner.AddSlotError = null;
@@ -191,6 +204,7 @@
         // As the other Filters count; the typed text, so text that is not valid counts too.
         PlayersDuration = _playersDuration.Texts,
         AvoidRecent = _avoidRecent.Text,
+        Repeat = _repeat.Snapshot(),
         Slots = _planner.Slots.Select(s => new { s.GameId, s.ActivityId })
     };
 
@@ -259,6 +273,13 @@
             _customizeError = "Select 1–5 activities before saving. Adjust the filters or add an activity slot.";
             return;
         }
+        // Repeat on: one Series, no Event. Its Occurrences start with no Selections, so the roll is not saved.
+        if (Repeating)
+        {
+            var series = BuildSeries();
+            await SendAsync(() => SeriesSvc.CreateAsync(series, _createKey));
+            return;
+        }
         // Unchanged slots save their stored snapshot; a changed slot must be a library choice.
         var built = slots.Select(BuildSelection).ToList();
         if (slots.Any(s => s.GameId == Guid.Empty || s.ActivityId == Guid.Empty) || built.Any(s => s is null))
@@ -281,17 +302,34 @@
             _customizeError = "Activities must be distinct, and games must be distinct when Unique games only is enabled.";
             return;
         }
+        entity.NormalizeWinner();
+        await SendAsync(() => _editingEvent is not null ? EventSvc.UpdateAsync(entity) : EventSvc.SaveAsync(entity, _createKey));
+    }
+
+    // The Series a create with Repeat on sends (#204): the start exactly as the Event's, its offset kept (the Series'
+    // calendar arithmetic runs at it), the slot count and the Filters the dialog holds. Avoid recent, players tonight
+    // and longest duration are not in a Series' Filters and are not sent.
+    private SeriesEntity BuildSeries() => new()
+    {
+        Id = _createKey,
+        Name = _custName,
+        Schedule = _repeat.ScheduleFor(BuildEventDate()),
+        SlotCount = _planner.Slots.Count,
+        UniqueGamesOnly = _custUniqueGames,
+        Filters = new SeriesFilters { ThemedOnly = _custThemedOnly, GameIds = _custGameIds.ToList(), ThemeIds = _custThemeIds.ToList(), HolidayIds = _custHolidayIds.ToList() }
+    };
+
+    // Runs one save: its busy guard, the page's message cleared first, the API's message in this dialog (or the page's
+    // error bar once it closed), and the close and list reload on success. _createKey is kept on any failure.
+    private async Task SendAsync(Func<Task<HttpResponseMessage>> send)
+    {
         _generating = true;
         // The dialog this save belongs to; a dismissed or replaced dialog is left alone.
         var token = _customize.Current;
         try
         {
             await PageError.InvokeAsync(null);
-            entity.NormalizeWinner();
-
-            using var response = _editingEvent is not null
-                ? await EventSvc.UpdateAsync(entity)
-                : await EventSvc.SaveAsync(entity, _createKey);
+            using var response = await send();
             if (await ApiResult.ErrorAsync(response) is { } error)
             {
                 if (_customize.IsCurrent(token)) _customizeError = $"The event was not saved. {error}";
