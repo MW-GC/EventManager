@@ -77,12 +77,13 @@ internal static class ActivityValidator
     /// at most the maximum when both are set. Messages name each field as the Activities form labels it.
     /// </summary>
     private static string? PlayersAndDuration(ActivityEntity activity) =>
-        WholeNumber(activity.MinPlayers, "Minimum players", MaxPlayerCount)
-        ?? WholeNumber(activity.MaxPlayers, "Maximum players", MaxPlayerCount)
-        ?? WholeNumber(activity.DurationMinutes, "Duration in minutes", MaxDurationMinutes)
+        InRangeFromOne(activity.MinPlayers, "Minimum players", MaxPlayerCount)
+        ?? InRangeFromOne(activity.MaxPlayers, "Maximum players", MaxPlayerCount)
+        ?? InRangeFromOne(activity.DurationMinutes, "Duration in minutes", MaxDurationMinutes)
         ?? (activity.MinPlayers > activity.MaxPlayers ? MinAboveMaxMessage : null);
 
-    private static string? WholeNumber(int? value, string field, int max) =>
+    // A range check: null, or 1 to max. An int? is always whole; a fractional JSON number is the malformed body.
+    private static string? InRangeFromOne(int? value, string field, int max) =>
         value is < 1 || value > max ? $"{field} must be a whole number from 1 to {max}." : null;
 }
 

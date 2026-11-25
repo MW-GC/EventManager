@@ -29,7 +29,8 @@ public sealed class EventPlayersDurationTests : IDisposable
     {
         grandPrix = new ActivityEntity { Name = "Grand Prix", GameId = kart.Id, MinPlayers = 2, MaxPlayers = 6, DurationMinutes = 45 };
         stock = new ActivityEntity { Name = "Stock Battle", GameId = brawl.Id };
-        teams = new ActivityEntity { Name = "Team Battle", GameId = brawl.Id, MaxPlayers = 4, DurationMinutes = 20 };
+        // Three distinct values, none null, so dropping any one copy or swapping the two counts fails the snapshot test.
+        teams = new ActivityEntity { Name = "Team Battle", GameId = brawl.Id, MinPlayers = 3, MaxPlayers = 5, DurationMinutes = 20 };
         night = new EventEntity
         {
             Name = "Game night",
@@ -108,8 +109,8 @@ public sealed class EventPlayersDurationTests : IDisposable
 
         var activity = saved.Selections[1].Activity;
         Assert.AreEqual(teams.Id, activity.Id);
-        Assert.IsNull(activity.MinPlayers);
-        Assert.AreEqual(4, activity.MaxPlayers);
+        Assert.AreEqual(3, activity.MinPlayers);
+        Assert.AreEqual(5, activity.MaxPlayers);
         Assert.AreEqual(20, activity.DurationMinutes);
         // The untouched slot keeps its stored snapshot, values and all.
         Assert.AreEqual(2, saved.Selections[0].Activity.MinPlayers);

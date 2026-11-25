@@ -159,6 +159,8 @@ public class ActivityPlayersDurationTests
         [null, null, 1441, "Duration in minutes must be a whole number from 1 to 1440."],
         [7, 6, null, "Minimum players cannot be more than maximum players."],
         [99, 1, 45, "Minimum players cannot be more than maximum players."],
+        // Two bad fields: the minimum is checked before the duration, so its message wins (as the Web parity grid expects).
+        [0, null, 1441, "Minimum players must be a whole number from 1 to 99."],
     ];
 
     [TestMethod]
@@ -182,6 +184,7 @@ public class ActivityPlayersDurationTests
 
         var result = await h.ActivityApi.Update(Request(Body(minPlayers: min, maxPlayers: max, durationMinutes: duration)), created.Id, default);
 
+        Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(result));
         Assert.AreEqual(message, ApiResults.Message(result));
         Assert.AreEqual(writes, h.Writes());
         AssertStored(created.Id, 2, 6, 45);
@@ -202,10 +205,25 @@ public class ActivityPlayersDurationTests
         AssertValues(await Read(created.Id), min, max, duration);
     }
 
-    // A fractional or non-numeric value cannot be read into the whole-number field: the malformed-body 400.
+    // A number sent as a JSON string is read as that number (the API reads bodies with the Web JSON defaults, which
+    // allow numbers in strings), so it is stored, not refused. The Web client always sends plain numbers.
+    [TestMethod]
+    public async Task AQuotedWholeNumber_IsReadAsThatNumber()
+    {
+        var result = await h.ActivityApi.Create(TestRequests.Raw($"{{\"gameId\":\"{game.Id}\",\"name\":\"Act\",\"maxPlayers\":\"6\"}}"), default);
+
+        Assert.AreEqual(StatusCodes.Status201Created, ApiResults.Status(result), ApiResultsText(result));
+        var created = ApiResults.Value<ActivityEntity>(result);
+        AssertValues(created, null, 6, null);
+        AssertStored(created.Id, null, 6, null);
+    }
+
+    // A fractional value, or a string that is not a whole number ("six"), cannot be read into the whole-number
+    // field: the malformed-body 400.
     [TestMethod]
     [DataRow("2.5")]
     [DataRow("\"six\"")]
+    [DataRow("\"2.5\"")]
     public async Task ANonWholeNumber_IsTheMalformedBody400(string raw)
     {
         var result = await h.ActivityApi.Create(TestRequests.Raw($"{{\"gameId\":\"{game.Id}\",\"name\":\"Act\",\"maxPlayers\":{raw}}}"), default);
