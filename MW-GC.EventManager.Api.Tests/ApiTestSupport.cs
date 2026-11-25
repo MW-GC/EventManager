@@ -253,7 +253,9 @@ internal sealed class LibraryHarness
         HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, TableNames.Holidays, TableNames.HolidayPartition), activities, HolidayLog);
         OldTextConversion = new ActivityNoteConversion(activities, comments, service.Object, OldTextConversionLog);
         ActivityApi = new ActivityFunctions(activities, games, comments, OldTextConversion, ActivityLog);
-        EventApi = new EventFunctions(events, games, activities, metrics, EventLog);
+        service.Setup(s => s.GetTableClient(TableNames.Series)).Returns(TableMocks.Table(new ConcurrentDictionary<string, TableEntity>()).Object);
+        EventApi = new EventFunctions(events, games, activities, metrics,
+            new TableStore<SeriesEntity>(service.Object, TableNames.Series, TableNames.SeriesPartition), EventLog);
         EventMetricsApi = new EventMetricsFunctions(metrics, events, new FeedbackStore(service.Object), EventMetricsLog);
         CommentApi = new CommentFunctions(comments, activities, events, CommentLog);
     }

@@ -14,21 +14,21 @@ internal sealed class EventFunctions
     private readonly TableStore<GameEntity> _games;
     private readonly TableStore<ActivityEntity> _activities;
     private readonly TableStore<EventMetricsEntity> _metrics;
-    private readonly TableStore<SeriesEntity>? _series;
+    private readonly TableStore<SeriesEntity> _series;
     private readonly ILogger<EventFunctions> _logger;
 
     /// <param name="metrics">The Event metrics table; deleting an Event deletes its row there too.</param>
     /// <param name="series">
-    /// The Series table (#204): deleting an Occurrence records its key there as cancelled. The host always
-    /// passes it; without it an Occurrence delete is a plain Event delete.
+    /// The Series table (#204): deleting an Occurrence records its key there as cancelled, so the generator
+    /// never makes it again. Required, so a host without it fails to start instead of losing cancels.
     /// </param>
     public EventFunctions(
         TableStore<EventEntity> store,
         TableStore<GameEntity> games,
         TableStore<ActivityEntity> activities,
         TableStore<EventMetricsEntity> metrics,
-        ILogger<EventFunctions> logger,
-        TableStore<SeriesEntity>? series = null)
+        TableStore<SeriesEntity> series,
+        ILogger<EventFunctions> logger)
     {
         _store = store;
         _games = games;
@@ -126,7 +126,7 @@ internal sealed class EventFunctions
     {
         // Cancelling one Occurrence: its key is recorded on its Series first, so the generator never makes
         // it again, even after a rule edit that still produces it. A stale If-Match records nothing.
-        if (_series is not null && await _store.GetAsync(id, ct) is { SeriesId: { } seriesId, OccurrenceKey: { } key } occurrence)
+        if (await _store.GetAsync(id, ct) is { SeriesId: { } seriesId, OccurrenceKey: { } key } occurrence)
         {
             var ifMatch = EntityResults.IfMatch(req);
             if (ifMatch != default && ifMatch != Azure.ETag.All && ifMatch != occurrence.ETag) return EntityResults.Conflict();

@@ -15,10 +15,12 @@ Holiday presets (Easter, Thanksgiving, Halloween and the others) come from an in
 Edits and cancels name a scope, as in Outlook:
 
 - **This Occurrence**: edits that one Event and marks it Modified. A Modified Occurrence is never overwritten by a later Series edit.
-- **This and following**: ends the current Series before that Occurrence and starts a new Series with the change, moving the unmodified, unplayed future Occurrences to it.
+- **This and following**: ends the current Series before that Occurrence and starts a new Series with the change, moving the unmodified, unplayed future Occurrences to it. The old Series records where it was split, so no later edit moves its end past that point, and repeating the same edit finishes one that stopped part-way.
 - **All**: touches only Occurrences that are in the future, not Modified, and not played (no Winner, Comments or Event metrics).
 - **Cancel an Occurrence**: deletes its Event row and records its key as skipped on the Series, so the generator never makes it again.
 - **Cancel the Series**: ends it and deletes only its future, unplayed Occurrences; played ones stay as history.
+
+The skipped keys are one list with one meaning, "never make this instant again". It holds the cancelled Occurrences' keys, and also the instants an edit would make on a date an Occurrence that stays (Modified, played or past) already holds, so the edit never puts a second Occurrence beside it. Anything that needs the cancelled dates alone, a view of them or an un-cancel, cannot read them from this list.
 
 The 0.7.0 bot renaming an Occurrence to its winning Activity does not count as a manual edit and leaves Modified alone, so Series edits still reach it.
 
@@ -32,6 +34,6 @@ The 0.7.0 bot renaming an Occurrence to its winning Activity does not count as a
 ## Consequences
 
 - Everything that reads Selections (the Events list, the details dialog, the Winner flow, Stats, Activity performance, the announcement text, the idempotent create) must cope with an Event that has none.
-- A Series edit and the edits of its Occurrences are separate writes on separate rows; a failure can leave some Occurrences updated and others not, and the next edit or the daily run sees the rows as they are.
-- Cancelled occurrence keys live on the Series row and grow by one per cancelled Occurrence.
+- A Series edit and the edits of its Occurrences are separate writes on separate rows; a failure can leave some Occurrences updated and others not. Repeating the same edit finishes it; the daily run only adds missing Occurrences and does not repair it.
+- Skipped occurrence keys live on the Series row and grow by one per cancelled Occurrence, and by the held dates an edit records.
 - The API gains a timer trigger package for the daily run.

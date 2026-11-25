@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Linq.Expressions;
 using Azure;
 using Azure.Data.Tables;
 using Microsoft.AspNetCore.Http;
@@ -55,11 +56,50 @@ internal sealed class SeriesHarness
     /// <summary>Runs once, with the row key, right before the next Event delete reaches the table.</summary>
     public Func<string, Task>? BeforeEventDelete { get; set; }
 
+    /// <summary>Runs once, with the row key, right before the next Event update reaches the table.</summary>
+    public Func<string, Task>? BeforeEventUpdate { get; set; }
+
+    /// <summary>Runs once right before the next read of the whole Event table.</summary>
+    public Func<Task>? BeforeEventQuery { get; set; }
+
+    /// <summary>
+    /// Asked before every Event insert, update and delete (<c>add</c>, <c>update</c> or <c>delete</c>, and the row
+    /// key): true fails that write with a 503 and writes nothing, as a process that died there leaves the tables.
+    /// </summary>
+    public Func<string, string, bool>? FailEventWrite { get; set; }
+
+    /// <summary>
+    /// Lists the Event rows oldest first instead of in the dictionary's order (storage lists them by row key, an
+    /// order that has nothing to do with their dates), so a test can say which Occurrence an edit reaches first.
+    /// </summary>
+    public bool ListEventsByDate { get; set; }
+
     public SeriesHarness()
     {
         EventTable = TableMocks.Table(Events);
-        // Event deletes behave as storage does (404 when gone, 412 when If-Match is stale), with one hook that
-        // runs first, so a test can land a concurrent write between a route's read and its delete.
+        // Event writes behave as storage does (409 when an insert finds the row, 404 when gone, 412 when If-Match
+        // is stale), with hooks that run first, so a test can land a concurrent write between a route's read and
+        // its write, or stop the route at one write.
+        EventTable.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
+            .Returns((TableEntity row, CancellationToken _) =>
+            {
+                Fail("add", row.RowKey);
+                return Events.TryAdd(row.RowKey, row)
+                    ? Task.FromResult(Stamp(Events, row))
+                    : throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
+            });
+        EventTable.Setup(t => t.UpdateEntityAsync(It.IsAny<TableEntity>(), It.IsAny<ETag>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
+            .Returns(async (TableEntity row, ETag ifMatch, TableUpdateMode _, CancellationToken _) =>
+            {
+                if (BeforeEventUpdate is { } hook)
+                {
+                    BeforeEventUpdate = null; // once
+                    await hook(row.RowKey);
+                }
+                Fail("update", row.RowKey);
+                Check(Events, row.RowKey, ifMatch);
+                return Stamp(Events, row);
+            });
         EventTable.Setup(t => t.DeleteEntityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ETag>(), It.IsAny<CancellationToken>()))
             .Returns(async (string _, string id, ETag ifMatch, CancellationToken _) =>
             {
@@ -68,12 +108,22 @@ internal sealed class SeriesHarness
                     BeforeEventDelete = null; // once
                     await hook(id);
                 }
-                if (!Events.TryGetValue(id, out var current))
-                    throw new RequestFailedException(404, "The specified resource does not exist.", "ResourceNotFound", null);
-                if (ifMatch != ETag.All && ifMatch != current.ETag)
-                    throw new RequestFailedException(412, "The update condition specified in the request was not satisfied.", "UpdateConditionNotSatisfied", null);
+                Fail("delete", id);
+                Check(Events, id, ifMatch);
                 Events.TryRemove(id, out _);
                 return new StorageResponse();
+            });
+        EventTable.Setup(t => t.QueryAsync(It.IsAny<Expression<Func<TableEntity, bool>>>(), It.IsAny<int?>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (BeforeEventQuery is { } hook)
+                {
+                    BeforeEventQuery = null; // once
+                    hook().GetAwaiter().GetResult();
+                }
+                var rows = Events.Values.ToList();
+                if (ListEventsByDate) rows = rows.OrderBy(r => r.GetDateTimeOffset("Date")).ToList();
+                return AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(rows, null, Mock.Of<Response>())]);
             });
         SeriesTable = TableMocks.Table(SeriesRows);
         var service = new Mock<TableServiceClient>();
@@ -94,7 +144,29 @@ internal sealed class SeriesHarness
         EventApi = new EventFunctions(events,
             new TableStore<GameEntity>(service.Object, TableNames.Games, TableNames.GamePartition),
             new TableStore<ActivityEntity>(service.Object, TableNames.Activities, TableNames.ActivityPartition),
-            metrics, new ListLogger<EventFunctions>(), series);
+            metrics, series, new ListLogger<EventFunctions>());
+    }
+
+    private void Fail(string write, string rowKey)
+    {
+        if (FailEventWrite?.Invoke(write, rowKey) == true)
+            throw new RequestFailedException(503, "The server is busy.", "ServerBusy", null);
+    }
+
+    // A conditional write to the row under that key: 404 when there is none, 412 when If-Match is stale.
+    private static void Check(ConcurrentDictionary<string, TableEntity> rows, string key, ETag ifMatch)
+    {
+        if (!rows.TryGetValue(key, out var current))
+            throw new RequestFailedException(404, "The specified resource does not exist.", "ResourceNotFound", null);
+        if (ifMatch != ETag.All && ifMatch != current.ETag)
+            throw new RequestFailedException(412, "The update condition specified in the request was not satisfied.", "UpdateConditionNotSatisfied", null);
+    }
+
+    private static Response Stamp(ConcurrentDictionary<string, TableEntity> rows, TableEntity row)
+    {
+        row.ETag = TableMocks.NextETag();
+        rows[row.RowKey] = row;
+        return new StorageResponse(row.ETag);
     }
 
     // ---- requests

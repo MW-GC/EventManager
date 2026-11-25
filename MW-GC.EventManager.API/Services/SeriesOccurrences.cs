@@ -71,10 +71,11 @@ internal sealed class SeriesOccurrences(
     /// not Modified, not played): one of this Series whose key the rule still makes is rewritten in place
     /// (name, date, Unique games only); every other candidate is deleted. Then every key the rule makes that
     /// no candidate kept is created. <paramref name="kept"/> are the keys of the Occurrences that stay as they
-    /// are, so none is made twice. Each rewrite and delete is conditional on the row's eTag as it was read,
-    /// so a row changed meanwhile is left alone, and a row gone meanwhile (an Occurrence cancelled while this
-    /// ran) is not made again: the keys of both come back as <c>Held</c>, so the caller can record them as
-    /// skipped on <paramref name="series"/>.
+    /// are, so none is made twice. Each rewrite and delete re-reads the row's Event metrics first (a row that
+    /// gained a value since the played check is left alone) and is conditional on the row's eTag as it was
+    /// read, so a row changed meanwhile is left alone, and a row gone meanwhile (an Occurrence cancelled while
+    /// this ran) is not made again: the keys of all three come back as <c>Held</c>, so the caller can record
+    /// them as skipped on <paramref name="series"/>.
     /// </summary>
     public async Task<Reconciled> ReconcileAsync(
         SeriesEntity series, IReadOnlyCollection<EventEntity> candidates, IReadOnlyCollection<DateTimeOffset> kept,
@@ -90,8 +91,11 @@ internal sealed class SeriesOccurrences(
         {
             if (occurrence.SeriesId == series.Id && occurrence.OccurrenceKey is { } key && wanted.Contains(key) && covered.Add(key))
             {
-                if (Rewrite(occurrence, series, key) && await events.UpdateAsync(occurrence, occurrence.ETag, ct) == UpdateOutcome.Updated)
+                if (!Rewrite(occurrence, series, key)) continue; // already as the Series says: nothing to write
+                if (await RewriteOneAsync(occurrence, ct))
                     updated++;
+                else
+                    held.Add(key); // played, changed or cancelled since it was read: it stays, or stays gone
                 continue;
             }
 
@@ -149,6 +153,15 @@ internal sealed class SeriesOccurrences(
         if (await events.DeleteAsync(occurrence.Id, occurrence.ETag, ct) != DeleteOutcome.Deleted) return false;
         if (row is not null) await metrics.DeleteAsync(occurrence.Id, row.ETag, ct);
         return true;
+    }
+
+    // Rewrites an Occurrence in place if it is unchanged since it was read and has not gained Event metrics
+    // since the played check (they live in another table, so the row's eTag does not show them). False when
+    // nothing was written.
+    private async Task<bool> RewriteOneAsync(EventEntity occurrence, CancellationToken ct)
+    {
+        if (await metrics.GetAsync(occurrence.Id, ct) is { } row && HasValues(row)) return false;
+        return await events.UpdateAsync(occurrence, occurrence.ETag, ct) == UpdateOutcome.Updated;
     }
 
     private static bool HasValues(EventMetricsEntity m) =>

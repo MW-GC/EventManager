@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using MW_GC.EventManager.Shared.Series;
 
 namespace MW_GC.EventManager.Shared.Entities;
@@ -29,11 +30,21 @@ public class SeriesEntity : EntityBase
     public SeriesFilters Filters { get; set; } = new();
 
     /// <summary>
-    /// The occurrence keys of cancelled Occurrences, which the generator never makes again, even after an
-    /// edit whose rule still produces them. Owned by the API: a request body's list is ignored. Stored as
-    /// JSON and split into numbered chunks when long, like an Event's Selections.
+    /// The occurrence keys the generator never makes again, even after an edit whose rule still produces them:
+    /// the keys of cancelled Occurrences, and the instants an edit would make on a date an Occurrence that
+    /// stays (Modified, played or past) already holds (ADR 0002). Owned by the API: a request body's list is
+    /// ignored. Stored as JSON and split into numbered chunks when long, like an Event's Selections.
     /// </summary>
     public List<DateTimeOffset> Skipped { get; set; } = [];
+
+    /// <summary>
+    /// Set by a "this and following" edit: the occurrence key of the chosen Occurrence, where the Series that
+    /// follows this one starts (its id is derived from this Series' id and that key). While it is set an edit
+    /// never removes this Series' end or moves it later, so the two never make Occurrences on the same dates,
+    /// and a repeat of that edit finds the key even after the chosen Occurrence has moved. Owned by the API.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? SplitAt { get; set; }
 }
 
 /// <summary>

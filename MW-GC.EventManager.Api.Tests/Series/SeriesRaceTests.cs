@@ -88,4 +88,63 @@ public sealed class SeriesRaceTests
         Assert.IsTrue(h.Metrics.ContainsKey(played.Value.ToString("D")), "the metrics row is not deleted");
         Assert.HasCount(8, after);
     }
+
+    [TestMethod]
+    public async Task An_Occurrence_edited_by_hand_during_a_rename_keeps_its_change_and_its_key_is_recorded_as_skipped()
+    {
+        var byDate = new SeriesHarness { ListEventsByDate = true };
+        var (id, _, _) = await byDate.CreateAsync();
+        var sixth = (await byDate.OccurrencesAsync(id))[5];
+        // Right before the rename rewrites its first Occurrence, an admin edits the sixth by hand.
+        byDate.BeforeEventUpdate = async _ => await byDate.EditOneAsync(sixth, "Special");
+
+        var change = await byDate.EditAsync(id, Body(name: "Game night"), "?scope=all");
+
+        Assert.AreEqual(7, change.Updated);
+        Assert.AreEqual("Special", (await byDate.EventsAsync()).Single(e => e.Id == sixth.Id).Name);
+        CollectionAssert.Contains((await byDate.SeriesAsync(id))!.Skipped, sixth.OccurrenceKey!.Value);
+    }
+
+    [TestMethod]
+    public async Task Event_metrics_saved_during_a_rename_keep_that_Occurrence_as_it_was()
+    {
+        var byDate = new SeriesHarness { ListEventsByDate = true };
+        var (id, _, _) = await byDate.CreateAsync();
+        var sixth = (await byDate.OccurrencesAsync(id))[5];
+        // After the played check, right before the rename rewrites its first Occurrence, the sixth gets Event
+        // metrics. Its row does not change, so only a re-read of its metrics can see it is played now.
+        byDate.BeforeEventUpdate = _ =>
+        {
+            byDate.SeedMetrics(sixth.Id, attendees: 9);
+            return Task.CompletedTask;
+        };
+
+        var change = await byDate.EditAsync(id, Body(name: "Game night"), "?scope=all");
+
+        Assert.AreEqual(7, change.Updated);
+        Assert.AreEqual("Thursday night", (await byDate.EventsAsync()).Single(e => e.Id == sixth.Id).Name);
+    }
+
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow("*")]
+    public async Task An_edit_with_no_version_named_wins_over_a_cancel_that_lands_meanwhile_and_keeps_it(string? ifMatch)
+    {
+        var (id, _, _) = await h.CreateAsync();
+        var third = (await h.OccurrencesAsync(id))[2];
+        // After the edit has read the Series and before it reads the Occurrences, an admin cancels the third one:
+        // the edit never sees that row, so only the Series' new skipped key keeps it from being made again.
+        h.BeforeEventQuery = async () =>
+            Assert.AreEqual(StatusCodes.Status204NoContent, ApiResults.Status(await h.EventApi.Delete(Bare(), third.Id, default)));
+
+        var result = await h.SeriesApi.Update(Request(Body(name: "Game night"), ifMatch, "?scope=all"), id, default);
+
+        Assert.AreEqual(StatusCodes.Status200OK, ApiResults.Status(result), result is Microsoft.AspNetCore.Mvc.ObjectResult o ? o.Value?.ToString() : null);
+        var series = (await h.SeriesAsync(id))!;
+        Assert.AreEqual("Game night", series.Name);
+        CollectionAssert.Contains(series.Skipped, third.OccurrenceKey!.Value);
+        var occurrences = await h.OccurrencesAsync(id);
+        Assert.HasCount(7, occurrences);
+        Assert.IsTrue(occurrences.All(o => o.Name == "Game night"), string.Join(", ", occurrences.Select(o => o.Name)));
+    }
 }

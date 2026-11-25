@@ -6,9 +6,11 @@ namespace MW_GC.EventManager.Shared.Series;
 /// <summary>
 /// Writes a rule's enum (<see cref="RecurrenceKind"/>, <see cref="WeekOfMonth"/>, <see cref="HolidayPreset"/>,
 /// the weekday) to JSON by name, so a stored Series row keeps meaning the same thing when a member is added
-/// in the middle later. Reads a name in any case, or a number. A name that is not a member reads as an
-/// undefined value instead of failing the whole body, so <see cref="RecurrenceRule.Validate"/> names the
-/// field (<c>Holiday preset must be a known preset.</c>) instead of the generic malformed-body message.
+/// in the middle later. Reads one member's name in any case, or a JSON number. Anything else in a string (a
+/// name that is not a member, a comma list such as <c>"Weekly,BiWeekly"</c>, which <see cref="Enum.TryParse{TEnum}(string, bool, out TEnum)"/>
+/// would OR into another member, or a number written as a string) reads as an undefined value instead of
+/// failing the whole body, so <see cref="RecurrenceRule.Validate"/> names the field (<c>Holiday preset must be
+/// a known preset.</c>) instead of the generic malformed-body message.
 /// </summary>
 public sealed class NamedEnumConverter<TEnum> : JsonConverter<TEnum> where TEnum : struct, Enum
 {
@@ -19,11 +21,17 @@ public sealed class NamedEnumConverter<TEnum> : JsonConverter<TEnum> where TEnum
         reader.TokenType switch
         {
             JsonTokenType.Number when reader.TryGetInt32(out var number) => (TEnum)Enum.ToObject(typeof(TEnum), number),
-            JsonTokenType.String => Enum.TryParse<TEnum>(reader.GetString(), ignoreCase: true, out var value) && Enum.IsDefined(value)
-                ? value
-                : Unknown,
+            JsonTokenType.String => Named(reader.GetString()),
             _ => throw new JsonException($"{typeof(TEnum).Name} must be a name or a number."),
         };
+
+    // One member's name, in any case: it starts with a letter (a number in a string does not) and holds no
+    // comma (a comma list would be ORed into another member).
+    private static TEnum Named(string? text) =>
+        text?.Trim() is { Length: > 0 } name && char.IsLetter(name[0]) && !name.Contains(',')
+        && Enum.TryParse<TEnum>(name, ignoreCase: true, out var value) && Enum.IsDefined(value)
+            ? value
+            : Unknown;
 
     public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options)
     {

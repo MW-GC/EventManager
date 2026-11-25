@@ -34,7 +34,9 @@ public abstract class FeedbackTestBase
         service.Setup(s => s.GetTableClient("EventMetrics")).Returns(TableMocks.Table(new ConcurrentDictionary<string, TableEntity>()).Object);
         var events = new TableStore<EventEntity>(service.Object, "Events", "Event");
         var metrics = new TableStore<EventMetricsEntity>(service.Object, "EventMetrics", "Metrics");
-        _eventApi = new EventFunctions(events, null!, null!, metrics, new ListLogger<EventFunctions>());
+        service.Setup(s => s.GetTableClient(TableNames.Series)).Returns(TableMocks.Table(new ConcurrentDictionary<string, TableEntity>()).Object);
+        var series = new TableStore<SeriesEntity>(service.Object, TableNames.Series, TableNames.SeriesPartition);
+        _eventApi = new EventFunctions(events, null!, null!, metrics, series, new ListLogger<EventFunctions>());
         _api = new FeedbackFunctions(new FeedbackStore(service.Object), events, new LikeRateLimiter(_time), new ListLogger<FeedbackFunctions>());
     }
 

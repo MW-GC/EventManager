@@ -30,6 +30,19 @@ public sealed class SeriesValidationTests
         [Body(rule: new { kind = "MonthlyNthWeekday", week = "Second", weekday = "Funday" }), "Weekday must be a day of the week."],
         [Body(rule: new { kind = "MonthlyNthWeekday", week = "Second", weekday = 7 }), "Weekday must be a day of the week."],
         [Body(rule: new { kind = "MonthlyNthWeekday", week = "Second" }), "Weekday must be a day of the week."],
+        // A comma list (which the enum parser would OR into BiWeekly) and a number written as a string.
+        [Body(rule: new { kind = "Weekly,BiWeekly" }), "Repeat must be a known rule."],
+        [Body(rule: new { kind = "3" }), "Repeat must be a known rule."],
+        // Dates the generator cannot step from: the start and the end must be in the years 2000 to 2100.
+        [Body(first: "9999-12-30T19:00:00-05:00"), "Start must be in the years 2000 to 2100."],
+        [Body(first: "9999-12-30T19:00:00-05:00", rule: new { kind = "MonthlySameDate" }), "Start must be in the years 2000 to 2100."],
+        [Body(first: "9999-12-30T19:00:00-05:00", rule: new { kind = "MonthlyNthWeekday", week = "Last", weekday = "Thursday" }), "Start must be in the years 2000 to 2100."],
+        [Body(first: "9999-12-30T19:00:00-05:00", rule: new { kind = "AnnualSameDate" }), "Start must be in the years 2000 to 2100."],
+        [Body(first: "9999-12-30T19:00:00-05:00", rule: new { kind = "AnnualHoliday", preset = "NewYearsEve" }), "Start must be in the years 2000 to 2100."],
+        [Body(first: "2101-01-01T00:00:00+00:00"), "Start must be in the years 2000 to 2100."],
+        [Body(first: "1999-12-31T19:00:00-05:00"), "Start must be in the years 2000 to 2100."],
+        [Body(end: "9999-12-31T00:00:00-05:00"), "End must be in the years 2000 to 2100."],
+        [Body(end: "2101-01-01T00:00:00+00:00"), "End must be in the years 2000 to 2100."],
     ];
 
     [TestMethod]

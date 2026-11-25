@@ -110,20 +110,23 @@ public sealed class SeriesEditFollowingTests
     }
 
     [TestMethod]
-    public async Task Repeating_a_following_edit_whose_Occurrence_moved_is_refused_and_makes_nothing_twice()
+    public async Task Repeating_a_completed_following_edit_whose_Occurrence_moved_changes_nothing_and_makes_nothing_twice()
     {
         var (id, _, _) = await h.CreateAsync();
         var fourth = (await h.OccurrencesAsync(id))[3];
         var body = Body(name: "Late night", first: "2027-03-25T21:00:00-05:00");
-        await h.EditAsync(id, body, Following(fourth.Id));
+        var change = await h.EditAsync(id, body, Following(fourth.Id));
+        var before = (await h.EventsAsync()).Select(e => (e.Id, e.Name, e.Date, e.ETag)).ToList();
 
-        // The chosen Occurrence moved to the new Series as a new row, so the same request names nothing now.
-        var again = await h.SeriesApi.Update(Request(body, query: Following(fourth.Id)), id, default);
+        // The chosen Occurrence moved to the new Series as a new row; the old Series remembers where it was split.
+        var again = await h.EditAsync(id, body, Following(fourth.Id));
 
-        Assert.AreEqual(StatusCodes.Status400BadRequest, ApiResults.Status(again));
-        Assert.AreEqual(OccurrenceMessage, ApiResults.Message(again));
+        Assert.AreEqual(change.NewSeries!.Id, again.NewSeries!.Id);
+        Assert.AreEqual(0, again.Created);
+        Assert.AreEqual(0, again.Updated);
+        Assert.AreEqual(0, again.Deleted);
         Assert.HasCount(2, h.SeriesRows);
-        Assert.HasCount(8, h.Events);
+        CollectionAssert.AreEqual(before, (await h.EventsAsync()).Select(e => (e.Id, e.Name, e.Date, e.ETag)).ToList());
     }
 
     [TestMethod]

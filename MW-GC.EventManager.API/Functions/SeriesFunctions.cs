@@ -9,6 +9,7 @@ using MW_GC.EventManager.API.Services;
 using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Shared.Requests;
+using MW_GC.EventManager.Shared.Series;
 
 namespace MW_GC.EventManager.API.Functions;
 
@@ -18,20 +19,22 @@ namespace MW_GC.EventManager.API.Functions;
 /// add. A Series edit or cancel names its scope; one Occurrence is edited or cancelled through
 /// <c>PUT</c> and <c>DELETE /api/events/{id}</c>. A Series edit never rewrites or deletes an Occurrence that
 /// is past, Modified or played (a Winner, Comments or Event metrics), and a Series cancel never deletes one
-/// that is past or played.
+/// that is past or played. The "this and following" edit is in <c>SeriesFunctions.Following.cs</c>.
 /// </summary>
-internal sealed class SeriesFunctions
+internal sealed partial class SeriesFunctions
 {
     public const string IdempotencyKeyMessage = "Idempotency-Key must be a non-empty GUID in D format.";
     public const string ReplayConflictMessage = "This create key already exists with different details. Reload the Series list and edit the saved Series; do not start another create to retry this save.";
     public const string EditScopeMessage = "Scope must be all or following. Edit one Occurrence through PUT /api/events/{id}.";
     public const string CancelScopeMessage = "Scope must be all. Cancel one Occurrence through DELETE /api/events/{id}.";
-    public const string OccurrenceMessage = "Occurrence must name an Occurrence of this Series.";
-    public const string FollowingStartMessage = "Start must be after the Occurrence before the one this change starts from.";
-    public const string FollowingFirstMessage = "This and following from the first Occurrence changes the whole Series: use scope all.";
+    public const string EndKeptMessage = "This Series has an end. Send its stored end to keep it, or a new one: an edit cannot remove it.";
+    public const string SplitEndMessage = "This Series was split by a this and following edit, so its end cannot be removed or moved later. Send its stored end, or edit the Series that follows it.";
 
-    /// <summary>How far before the chosen Occurrence a "this and following" edit ends the old Series.</summary>
-    public static readonly TimeSpan EndBefore = TimeSpan.FromSeconds(1);
+    /// <summary>
+    /// How many times a Series edit that names no version (no <c>If-Match</c>, or <c>*</c>) reads the Series again
+    /// and redoes itself when another write changed the Series between its read and its write.
+    /// </summary>
+    private const int Attempts = 5;
 
     private readonly TableStore<SeriesEntity> _store;
     private readonly TableStore<EventEntity> _events;
@@ -86,6 +89,9 @@ internal sealed class SeriesFunctions
 
         series.Id = id;
         series.Skipped = [];
+        series.SplitAt = null;
+        var now = Clock.GetUtcNow();
+        Plan(series, now);
         var isNew = await _store.TryAddAsync(series, ct);
         if (!isNew)
         {
@@ -95,7 +101,7 @@ internal sealed class SeriesFunctions
         }
 
         var kept = Keys(await _occurrences.OfSeriesAsync(id, ct));
-        var done = await _occurrences.ReconcileAsync(series, [], kept, Clock.GetUtcNow(), ct);
+        var done = await _occurrences.ReconcileAsync(series, [], kept, now, ct);
         var change = new SeriesChange { Series = series, Created = done.Created };
         SetETag(req, series);
         return isNew ? new CreatedResult($"/api/series/{id}", change) : new OkObjectResult(change);
@@ -105,6 +111,8 @@ internal sealed class SeriesFunctions
     /// <c>?scope=all</c> applies the body to the Series and to every future, unmodified, unplayed Occurrence.
     /// <c>?scope=following&amp;occurrence={eventId}</c> ends the Series just before that Occurrence and starts
     /// a new Series (the body) there, moving the future, unmodified, unplayed Occurrences from it on.
+    /// An <c>If-Match</c> naming a version makes a stale one a 409; without one, or with <c>*</c>, an edit that
+    /// lost to another write (an Occurrence cancelled meanwhile) reads the Series again and redoes itself.
     /// </summary>
     [Function("UpdateSeries")]
     public Task<IActionResult> Update(
@@ -121,10 +129,18 @@ internal sealed class SeriesFunctions
         var edited = body.Value;
         if (SeriesValidator.Validate(edited) is { } error) return new BadRequestObjectResult(error);
 
-        var now = Clock.GetUtcNow();
-        return scope == "all"
-            ? await EditAllAsync(req, existing, edited, now, ct)
-            : await EditFollowingAsync(req, existing, edited, now, ct);
+        var pinned = Pinned(req);
+        for (var attempt = 1; ; attempt++)
+        {
+            var now = Clock.GetUtcNow();
+            var result = scope == "all"
+                ? await EditAllAsync(req, existing, edited, pinned, now, ct)
+                : await EditFollowingAsync(req, existing, edited, pinned, now, ct);
+            if (result is not null) return result;
+            if (attempt == Attempts) return EntityResults.Conflict();
+            existing = await _store.GetAsync(id, ct);
+            if (existing is null) return new NotFoundResult();
+        }
     });
 
     /// <summary>
@@ -147,17 +163,22 @@ internal sealed class SeriesFunctions
         return result;
     });
 
-    private async Task<IActionResult> EditAllAsync(
-        HttpRequest req, SeriesEntity existing, SeriesEntity edited, DateTimeOffset now, CancellationToken ct)
+    // Null when the Series write lost to another write and the request named no version: read again and redo.
+    private async Task<IActionResult?> EditAllAsync(
+        HttpRequest req, SeriesEntity existing, SeriesEntity edited, ETag? pinned, DateTimeOffset now, CancellationToken ct)
     {
+        if (EndRule(existing, edited) is { } refused) return new BadRequestObjectResult(refused);
+        Plan(edited, now);
         var occurrences = await _occurrences.OfSeriesAsync(existing.Id, ct);
         var rewritable = await RewritableAsync(now, ct);
         var candidates = occurrences.Where(rewritable).ToList();
         var staying = occurrences.Except(candidates).ToList();
 
         edited.Id = existing.Id;
+        edited.SplitAt = existing.SplitAt;
         edited.Skipped = Held(edited, existing, staying, now);
-        var outcome = await _store.UpdateAsync(edited, Condition(req, existing), ct);
+        var outcome = await _store.UpdateAsync(edited, pinned ?? existing.ETag, ct);
+        if (outcome == UpdateOutcome.Conflict && pinned is null) return null;
         if (outcome != UpdateOutcome.Updated) return Refused(outcome);
 
         var done = await _occurrences.ReconcileAsync(edited, candidates, Keys(staying), now, ct);
@@ -166,64 +187,24 @@ internal sealed class SeriesFunctions
         return new OkObjectResult(new SeriesChange { Series = edited, Created = done.Created, Updated = done.Updated, Deleted = done.Deleted });
     }
 
-    private async Task<IActionResult> EditFollowingAsync(
-        HttpRequest req, SeriesEntity existing, SeriesEntity edited, DateTimeOffset now, CancellationToken ct)
+    /// <summary>
+    /// An edit never removes a Series' end. On a Series a "this and following" edit split, it never moves the
+    /// end later either, so the Series never makes Occurrences on the dates of the one that follows it.
+    /// </summary>
+    private static string? EndRule(SeriesEntity existing, SeriesEntity edited)
     {
-        if (!Guid.TryParseExact(req.Query["occurrence"].ToString(), "D", out var pivotId))
-            return new BadRequestObjectResult(OccurrenceMessage);
-        var pivot = await _events.GetAsync(pivotId, ct);
-        if (pivot is null || pivot.SeriesId != existing.Id || pivot.OccurrenceKey is not { } from)
-            return new BadRequestObjectResult(OccurrenceMessage);
-        // The old Series would end before its own start, which no stored Series may do.
-        if (from <= existing.Schedule.First) return new BadRequestObjectResult(FollowingFirstMessage);
-
-        var occurrences = await _occurrences.OfSeriesAsync(existing.Id, ct);
-        var before = Keys(occurrences).Where(k => k < from).ToList();
-        if (before.Count > 0 && edited.Schedule.First <= before.Max()) return new BadRequestObjectResult(FollowingStartMessage);
-
-        // End the old Series just before the chosen Occurrence (never later than an end it already had).
-        var end = from - EndBefore;
-        if (existing.Schedule.End is { } oldEnd && oldEnd < end) end = oldEnd;
-        existing.Schedule = existing.Schedule with { End = end };
-        var outcome = await _store.UpdateAsync(existing, Condition(req, existing), ct);
-        if (outcome != UpdateOutcome.Updated) return Refused(outcome);
-
-        var rewritable = await RewritableAsync(now, ct);
-        var following = occurrences.Where(o => o.OccurrenceKey >= from).ToList();
-        var moving = following.Where(rewritable).ToList();
-        var staying = following.Except(moving).ToList();
-
-        // The new Series has an id derived from the old one and the chosen key, so a repeated request finds
-        // the Series the first one made instead of making a second. It keeps the cancelled keys, and also
-        // skips its own instants on the dates of the Occurrences that stay with the old Series (Modified,
-        // played or past), so no run of the new Series makes a second Occurrence on one of those dates.
-        edited.Id = FollowingSeriesId(existing.Id, from);
-        edited.Skipped = Held(edited, existing, staying, now);
-        if (!await _store.TryAddAsync(edited, ct))
-        {
-            var stored = await _store.GetAsync(edited.Id, ct);
-            if (stored is null || Details(stored) != Details(edited)) return EntityResults.Conflict();
-            edited = stored;
-        }
-
-        // An Occurrence cancelled while this ran recorded its key on the old Series; it is held here and
-        // recorded on the new one too, so neither Series makes it again.
-        var done = await _occurrences.ReconcileAsync(edited, moving, Keys(staying), now, ct);
-        edited = await KeepHeldAsync(edited, done, ct);
-        SetETag(req, existing);
-        return new OkObjectResult(new SeriesChange
-        {
-            Series = existing, NewSeries = edited, Created = done.Created, Updated = done.Updated, Deleted = done.Deleted,
-        });
+        if (existing.Schedule.End is not { } end) return null;
+        var next = edited.Schedule.End;
+        if (existing.SplitAt is not null && (next is null || next > end)) return SplitEndMessage;
+        return next is null ? EndKeptMessage : null;
     }
 
     /// <summary>
-    /// The id of the Series a "this and following" edit of <paramref name="seriesId"/> at
-    /// <paramref name="from"/> starts: the first 16 bytes of the SHA-256 of
-    /// <c>series-following:{series id in D format}:{from as UTC ticks}</c> (UTF-8). Stored data depends on it.
+    /// Works the Series' Occurrences out before anything is written, so a schedule the generator cannot
+    /// follow fails the request before a row is stored, not after.
     /// </summary>
-    internal static Guid FollowingSeriesId(Guid seriesId, DateTimeOffset from) =>
-        SeriesOccurrences.DerivedId("series-following:", seriesId, from);
+    private static void Plan(SeriesEntity series, DateTimeOffset now) =>
+        _ = OccurrenceGenerator.Generate(series.Schedule, now, [], []);
 
     /// <summary>
     /// Records on <paramref name="series"/> the keys a reconcile left alone (rows changed or cancelled while it
@@ -242,7 +223,7 @@ internal sealed class SeriesFunctions
     }
 
     /// <summary>
-    /// The cancelled keys an edited Series carries: the old Series' own, plus every instant the edited rule
+    /// The skipped keys an edited Series carries: the old Series' own, plus every instant the edited rule
     /// would make on the date of an Occurrence that stays (Modified, played or past) or of a cancelled one.
     /// </summary>
     private static List<DateTimeOffset> Held(SeriesEntity edited, SeriesEntity existing, IEnumerable<EventEntity> staying, DateTimeOffset now) =>
@@ -256,17 +237,16 @@ internal sealed class SeriesFunctions
     private static string Scope(HttpRequest req) => req.Query["scope"].ToString().Trim().ToLowerInvariant();
 
     /// <summary>
-    /// The condition a Series edit writes under: the request's If-Match when it names a version (a stale one is
-    /// a 409), and otherwise the version just read, so a cancelled key recorded between the read and the write
-    /// is never dropped (the edit is then a 409 and the caller reloads).
+    /// The version the request's If-Match names, or null for none and for <c>*</c>: such an edit writes over the
+    /// version it read instead, so a cancelled key recorded between its read and its write is never dropped.
     /// </summary>
-    private static ETag Condition(HttpRequest req, SeriesEntity existing) =>
-        EntityResults.IfMatch(req) is var ifMatch && ifMatch != default && ifMatch != ETag.All ? ifMatch : existing.ETag;
+    private static ETag? Pinned(HttpRequest req) =>
+        EntityResults.IfMatch(req) is var ifMatch && ifMatch != default && ifMatch != ETag.All ? ifMatch : null;
 
     private static IActionResult Refused(UpdateOutcome outcome) =>
         outcome == UpdateOutcome.NotFound ? new NotFoundResult() : EntityResults.Conflict();
 
-    // The details a repeated create must match: everything the body sets, never keys, eTags or Skipped.
+    // The details a repeated create must match: everything the body sets, never keys, eTags, Skipped or SplitAt.
     private static string Details(SeriesEntity series) => JsonSerializer.Serialize(new
     {
         series.Name, series.Schedule, series.SlotCount, series.UniqueGamesOnly, series.Filters,
