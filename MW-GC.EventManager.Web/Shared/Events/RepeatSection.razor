@@ -1,0 +1,82 @@
+@* The Repeat section of the create Event dialog (#100, #204): the Repeat switch, the rule, the extra selects only the
+   rule that needs them shows (the week and weekday for Monthly on the nth weekday, the holiday preset for Yearly
+   on a holiday) and the optional end date. The choices live in Choice (RepeatChoice), which the dialog owns and resets
+   with every opening; every change is handed back through Changed, so the dialog can enable or disable Create. *@
+@using MW_GC.EventManager.Shared.Series
+
+<div class="repeat-section">
+<FluentCard Style="padding: 12px;" AreaRestricted="false">
+    <FluentSwitch Value="@Choice.IsOn" ValueChanged="@((bool on) => Change(() => Choice.IsOn = on))" Label="Repeat" />
+    @if (Choice.IsOn)
+    {
+        <div class="repeat-hint" style="color: var(--neutral-foreground-hint); font-size: 0.8rem; margin: 4px 0 8px 0;">@Hint</div>
+        <FluentGrid Spacing="3">
+            <FluentGridItem xs="12" sm="6">
+                <FluentSelect TOption="RepeatOption<RecurrenceKind>" Label="Repeats" aria-label="Repeats" Style="width: 100%;"
+                              Items="RepeatChoice.Rules" OptionValue="@(o => o.Value.ToString())" OptionText="@(o => o.Name)"
+                              SelectedOption="@RepeatChoice.Rules.Single(o => o.Value == Choice.Kind)"
+                              SelectedOptionChanged="@(o => Change(() => Choice.Kind = o.Value))" />
+            </FluentGridItem>
+            @if (Choice.Kind == RecurrenceKind.MonthlyNthWeekday)
+            {
+                <FluentGridItem xs="6" sm="3">
+                    <FluentSelect TOption="RepeatOption<WeekOfMonth>" Label="Week of the month" aria-label="Week of the month" Style="width: 100%;"
+                                  Items="RepeatChoice.Weeks" OptionValue="@(o => o.Value.ToString())" OptionText="@(o => o.Name)"
+                                  SelectedOption="@RepeatChoice.Weeks.Single(o => o.Value == Choice.WeekFor(StartDate))"
+                                  SelectedOptionChanged="@(o => Change(() => Choice.ChosenWeek = o.Value))" />
+                </FluentGridItem>
+                <FluentGridItem xs="6" sm="3">
+                    <FluentSelect TOption="RepeatOption<DayOfWeek>" Label="Weekday" aria-label="Weekday" Style="width: 100%;"
+                                  Items="RepeatChoice.Weekdays" OptionValue="@(o => o.Value.ToString())" OptionText="@(o => o.Name)"
+                                  SelectedOption="@RepeatChoice.Weekdays.Single(o => o.Value == Choice.WeekdayFor(StartDate))"
+                                  SelectedOptionChanged="@(o => Change(() => Choice.ChosenWeekday = o.Value))" />
+                </FluentGridItem>
+            }
+            @if (Choice.Kind == RecurrenceKind.AnnualHoliday)
+            {
+                <FluentGridItem xs="12" sm="6">
+                    <FluentSelect TOption="RepeatOption<HolidayPreset>" Label="Holiday preset" aria-label="Holiday preset" Style="width: 100%;"
+                                  Items="RepeatChoice.HolidayPresetOptions" OptionValue="@(o => o.Value.ToString())" OptionText="@(o => o.Name)"
+                                  SelectedOption="@RepeatChoice.HolidayPresetOptions.Single(o => o.Value == Choice.HolidayPresetFor(StartDate))"
+                                  SelectedOptionChanged="@(o => Change(() => Choice.ChosenHolidayPreset = o.Value))" />
+                </FluentGridItem>
+            }
+            <FluentGridItem xs="12" sm="6">
+                <FluentDatePicker @bind-Value="EndValue" @bind-Value:after="@(() => Changed.InvokeAsync())"
+                                  Label="Ends on (optional)" aria-label="Ends on (optional)" Style="width: 100%;" />
+                @if (Choice.EndProblem(Start) is { } problem)
+                {
+                    <div role="alert" style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">@problem</div>
+                }
+            </FluentGridItem>
+        </FluentGrid>
+    }
+</FluentCard>
+</div>
+
+@code {
+    /// <summary>The one hint under the switch: what a repeating Event saves, and that the roll shown is not saved.</summary>
+    public const string Hint = "Each repeat starts with no picks yet: the activities rolled below are not saved.";
+
+    // The dialog's choices for this opening.
+    [Parameter, EditorRequired] public RepeatChoice Choice { get; set; } = null!;
+    // The start as the dialog saves it: the defaults (weekday, week, holiday preset) follow its date, and the end must be after it.
+    [Parameter] public DateTimeOffset Start { get; set; }
+    // A choice changed and Choice already holds it.
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private DateOnly StartDate => DateOnly.FromDateTime(Start.DateTime);
+
+    // The end date box: a day, or empty for no end.
+    private DateTime? EndValue
+    {
+        get => Choice.EndDate?.ToDateTime(TimeOnly.MinValue);
+        set => Choice.EndDate = value is { } day ? DateOnly.FromDateTime(day) : null;
+    }
+
+    private Task Change(Action apply)
+    {
+        apply();
+        return Changed.InvokeAsync();
+    }
+}

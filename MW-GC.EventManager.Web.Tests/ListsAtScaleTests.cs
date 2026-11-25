@@ -81,6 +81,17 @@ public sealed class ListsAtScaleTests : IDisposable
             Order(page, events.Select(e => e.Name))));
     }
 
+    // #100, #204: the Name column became a template column (for the repeat marker); its header still sorts by the name,
+    // not the date (by date, March night would come before July night).
+    [TestMethod]
+    public async Task Events_NameHeaderClick_SortsByName()
+    {
+        var page = Open("events");
+        await SortHeader(page, "Name").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => Assert.AreEqual("December night, January night, July night, March night, October night",
+            Order(page, events.Select(e => e.Name))));
+    }
+
     [TestMethod]
     public async Task Events_NewEventAppearsAtTheTop()
     {
