@@ -65,6 +65,22 @@ public sealed class AvoidRecentRerollAndRefreshTests : IDisposable
         Assert.AreEqual(SlotPlanner.RerollAvoidRecentReason, RerollButton(page).GetAttribute("title"));
     }
 
+    // With N 1 only Newer is recent, so Beta is avoided but Alpha and Delta are not: the slot can still be re-rolled,
+    // and the enabled button keeps its plain title although avoid recent is on.
+    [TestMethod]
+    public async Task WhenAnAlternativeIsNotRecent_TheRerollButtonIsEnabled_AndKeepsItsPlainTitle()
+    {
+        var page = await OpenEdit("Yesterday");
+        await SwitchTo(page, SwitchLabel, true);
+        Assert.IsTrue(RerollButton(page).HasAttribute("disabled"), "with N 3 every alternative is recent");
+
+        await Box(page).InputAsync(new ChangeEventArgs { Value = "1" });
+
+        Assert.IsTrue(Switch(page, SwitchLabel).HasAttribute("current-checked"), "avoid recent stays on");
+        Assert.IsFalse(RerollButton(page).HasAttribute("disabled"));
+        Assert.AreEqual(RerollTitle, RerollButton(page).GetAttribute("title"));
+    }
+
     // Themed activities only leaves nothing even without avoid recent (no Activity has a Theme or Holiday), so the
     // disabled button keeps the old title although avoid recent is on too.
     [TestMethod]

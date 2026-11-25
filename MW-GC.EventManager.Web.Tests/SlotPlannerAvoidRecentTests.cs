@@ -234,6 +234,37 @@ public sealed class SlotPlannerAvoidRecentTests
         Assert.AreEqual(AddSlotNoMatch, planner.AddSlotError);
     }
 
+    // Add Activity Slot with Unique games only on: G1 holds the slot's A and B, G2 holds only the recent C. Unique games
+    // alone would leave C, so avoid recent is the cause and its reason wins over the Unique-games one.
+    [TestMethod]
+    public void WhenAvoidRecentRemovesTheLastCandidate_WithUniqueGamesOn_TheAddSlotReasonNamesTheFilter()
+    {
+        var g1 = Game();
+        var a = Add(game: g1);
+        Add(game: g1);
+        var c = Add();
+        var planner = Planner(Avoid(c) with { UniqueGames = true }, a);
+
+        Assert.AreEqual(SlotPlanner.AddSlotAvoidRecentReason, planner.GetAddSlotBlockedReason());
+    }
+
+    // Re-roll with Unique games only on: slots A (G1) and B (G2); the recent C is G2's other Activity. Without avoid
+    // recent slot 1 still could not take C, because G2 is in slot 2, so the old title stays.
+    [TestMethod]
+    public void WhenUniqueGamesAlsoBlocksTheRecentAlternative_TheRerollTitleIsTheOldOne()
+    {
+        var a = Add();
+        var g2 = Game();
+        var b = Add(game: g2);
+        var c = Add(game: g2);
+        var filter = Avoid(c) with { UniqueGames = true };
+        var planner = Planner(filter, a, b);
+
+        Assert.AreEqual(RerollNoMatch, planner.GetRerollBlockedReason(0));
+        planner.Filter = filter with { RecentActivityIds = null };
+        Assert.IsEmpty(planner.GetRerollCandidates(0));
+    }
+
     // With the Filter off a pool with nothing left uses the old messages too.
     [TestMethod]
     public void WithTheFilterOff_TheOldMessagesAreUsed()
