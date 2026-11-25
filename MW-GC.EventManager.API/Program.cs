@@ -21,6 +21,9 @@ builder.Services.AddHostedService<ActivityNoteConversionStartup>();
 // The anonymous Event feedback page (#101): its own tables, and a per-instance like rate limit.
 builder.Services.AddSingleton<FeedbackStore>();
 builder.Services.AddSingleton(new LikeRateLimiter(TimeProvider.System));
+// The daily timer that extends every Series to the horizon (#204, ADR 0002).
+builder.Services.AddSingleton<SeriesOccurrences>();
+builder.Services.AddSingleton<SeriesExtender>();
 
 builder.Build().Run();
 
