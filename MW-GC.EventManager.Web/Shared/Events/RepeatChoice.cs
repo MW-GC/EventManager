@@ -42,8 +42,11 @@ public sealed class RepeatChoice
     public static IReadOnlyList<RepeatOption<DayOfWeek>> Weekdays { get; } =
         Enum.GetValues<DayOfWeek>().Select(d => new RepeatOption<DayOfWeek>(d, d.ToString())).ToList();
 
-    /// <summary>The one table of readable names for the holiday presets, in calendar order.</summary>
-    public static IReadOnlyList<RepeatOption<HolidayPreset>> Holidays { get; } =
+    /// <summary>
+    /// The one table of readable names for the holiday presets (date rules, not the Holiday tag on Activities), in
+    /// calendar order. Not named HolidayPresets: that is the Shared rules table the dates come from.
+    /// </summary>
+    public static IReadOnlyList<RepeatOption<HolidayPreset>> HolidayPresetOptions { get; } =
     [
         new(HolidayPreset.NewYearsDay, "New Year's Day"),
         new(HolidayPreset.MartinLutherKingJrDay, "Martin Luther King Jr. Day"),
@@ -74,15 +77,15 @@ public sealed class RepeatChoice
     public WeekOfMonth? ChosenWeek { get; set; }
     public DayOfWeek? ChosenWeekday { get; set; }
 
-    /// <summary>The holiday the admin picked; null follows the date.</summary>
-    public HolidayPreset? ChosenHoliday { get; set; }
+    /// <summary>The holiday preset the admin picked; null follows the date.</summary>
+    public HolidayPreset? ChosenHolidayPreset { get; set; }
 
     /// <summary>The last day an Occurrence may fall on, or null for no end.</summary>
     public DateOnly? EndDate { get; set; }
 
     public WeekOfMonth WeekFor(DateOnly start) => ChosenWeek ?? DefaultWeek(start);
     public DayOfWeek WeekdayFor(DateOnly start) => ChosenWeekday ?? start.DayOfWeek;
-    public HolidayPreset HolidayFor(DateOnly start) => ChosenHoliday ?? DefaultHoliday(start);
+    public HolidayPreset HolidayPresetFor(DateOnly start) => ChosenHolidayPreset ?? DefaultHolidayPreset(start);
 
     /// <summary>
     /// Which week of its month <paramref name="date"/> is in: First to Fourth by its day (the 1st to 7th is First, and
@@ -99,12 +102,12 @@ public sealed class RepeatChoice
         _ => WeekOfMonth.Last,
     };
 
-    /// <summary>The holiday that falls on <paramref name="date"/>, or the first in the table when none does.</summary>
-    public static HolidayPreset DefaultHoliday(DateOnly date) =>
-        Holidays.Select(h => h.Value).FirstOrDefault(h => HolidayPresets.DateIn(h, date.Year) == date, Holidays[0].Value);
+    /// <summary>The holiday preset that falls on <paramref name="date"/>, or the first in the table when none does.</summary>
+    public static HolidayPreset DefaultHolidayPreset(DateOnly date) =>
+        HolidayPresetOptions.Select(h => h.Value).FirstOrDefault(h => HolidayPresets.DateIn(h, date.Year) == date, HolidayPresetOptions[0].Value);
 
     /// <summary>The readable name of <paramref name="preset"/>.</summary>
-    public static string HolidayName(HolidayPreset preset) => Holidays.Single(h => h.Value == preset).Name;
+    public static string HolidayPresetName(HolidayPreset preset) => HolidayPresetOptions.Single(h => h.Value == preset).Name;
 
     /// <summary>The rule the choices make for a Series that starts on <paramref name="start"/>.</summary>
     public RecurrenceRule RuleFor(DateOnly start) => Kind switch
@@ -114,7 +117,7 @@ public sealed class RepeatChoice
         RecurrenceKind.MonthlyNthWeekday => RecurrenceRule.MonthlyNthWeekday(WeekFor(start), WeekdayFor(start)),
         RecurrenceKind.MonthlySameDate => RecurrenceRule.MonthlySameDate(),
         RecurrenceKind.AnnualSameDate => RecurrenceRule.AnnualSameDate(),
-        RecurrenceKind.AnnualHoliday => RecurrenceRule.AnnualHoliday(HolidayFor(start)),
+        RecurrenceKind.AnnualHoliday => RecurrenceRule.AnnualHoliday(HolidayPresetFor(start)),
         _ => throw new ArgumentOutOfRangeException(nameof(Kind), Kind, "Repeat must be a known rule."),
     };
 
@@ -137,5 +140,5 @@ public sealed class RepeatChoice
         new(first, RuleFor(DateOnly.FromDateTime(first.DateTime)), EndFor(first));
 
     /// <summary>What the admin chose, for the dialog's unsaved-changes check; defaults that follow the date are not choices.</summary>
-    public object Snapshot() => new { IsOn, Kind, ChosenWeek, ChosenWeekday, ChosenHoliday, EndDate };
+    public object Snapshot() => new { IsOn, Kind, ChosenWeek, ChosenWeekday, ChosenHolidayPreset, EndDate };
 }

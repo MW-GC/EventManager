@@ -48,6 +48,7 @@ public sealed class EmptyOccurrenceTests : IDisposable
         var marker = Assert.ContainsSingle(occurrence.QuerySelectorAll(".repeat-marker"));
         Assert.AreEqual("Repeats", marker.GetAttribute("aria-label"));
         Assert.AreEqual("img", marker.GetAttribute("role"));
+        Assert.AreEqual("Repeats", marker.GetAttribute("title"), "the marker's hover text");
         Assert.IsEmpty(Row(page, "Game night").QuerySelectorAll(".repeat-marker"));
 
         var cells = occurrence.QuerySelectorAll("td").Select(c => Normalize(c.TextContent)).ToList();

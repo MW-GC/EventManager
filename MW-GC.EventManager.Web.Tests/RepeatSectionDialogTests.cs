@@ -22,6 +22,7 @@ public sealed class RepeatSectionDialogTests : IDisposable
 {
     private const string Start = "2026-12-10T19:00:00+05:45";
     private const string EndMessage = "End must be after the start.";
+    private const string LostAnswer = "The save could not be confirmed. Retry in this dialog to avoid creating a duplicate. If you changed the details, reload the event list and check for the saved event first.";
     private static readonly TimeSpan Kathmandu = new(5, 45, 0);
     private readonly StubApiHandler api = new();
     private readonly PageHarness harness;
@@ -84,7 +85,7 @@ public sealed class RepeatSectionDialogTests : IDisposable
     [DataRow(RecurrenceKind.MonthlyNthWeekday, new[] { "Week of the month", "Weekday" })]
     [DataRow(RecurrenceKind.MonthlySameDate, new string[0])]
     [DataRow(RecurrenceKind.AnnualSameDate, new string[0])]
-    [DataRow(RecurrenceKind.AnnualHoliday, new[] { "Holiday" })]
+    [DataRow(RecurrenceKind.AnnualHoliday, new[] { "Holiday preset" })]
     public async Task EachRule_ShowsExactlyItsExtraSelects(RecurrenceKind kind, string[] extra)
     {
         var page = await OpenCreate();
@@ -136,9 +137,9 @@ public sealed class RepeatSectionDialogTests : IDisposable
         await OpenCreate(page);
         await SwitchRepeat(page, true);
         await Choose(page, "Repeats", nameof(RecurrenceKind.AnnualHoliday));
-        Assert.AreEqual("Thanksgiving", Select(page, "Holiday").QuerySelectorAll("fluent-option")
+        Assert.AreEqual("Thanksgiving", Select(page, "Holiday preset").QuerySelectorAll("fluent-option")
             .Single(o => o.GetAttribute("value") == nameof(HolidayPreset.Thanksgiving)).TextContent.Trim());
-        await Choose(page, "Holiday", nameof(HolidayPreset.Thanksgiving));
+        await Choose(page, "Holiday preset", nameof(HolidayPreset.Thanksgiving));
         (series, _) = await CreateSeries(page);
         Assert.AreEqual(RecurrenceRule.AnnualHoliday(HolidayPreset.Thanksgiving), series.Schedule.Rule);
     }
@@ -208,7 +209,7 @@ public sealed class RepeatSectionDialogTests : IDisposable
         var page = await OpenCreate();
         await SwitchRepeat(page, true);
         await page.FormDialog().Button("Create Event").ClickAsync(new());
-        page.WaitForAssertion(() => Assert.IsNotEmpty(page.FormDialog().Alerts()));
+        page.WaitForAssertion(() => Assert.AreEqual(LostAnswer, Assert.ContainsSingle(page.FormDialog().Alerts())));
 
         api.Status(HttpMethod.Post, "/api/series", HttpStatusCode.Created, "{}");
         await page.FormDialog().Button("Create Event").ClickAsync(new());

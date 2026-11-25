@@ -114,7 +114,7 @@ public sealed class RepeatChoiceTests
         var choice = new RepeatChoice { IsOn = true, Kind = RecurrenceKind.AnnualHoliday };
 
         Assert.AreEqual(RecurrenceRule.AnnualHoliday(HolidayPreset.Thanksgiving), choice.ScheduleFor(thanksgiving).Rule);
-        choice.ChosenHoliday = HolidayPreset.EasterSunday;
+        choice.ChosenHolidayPreset = HolidayPreset.EasterSunday;
         Assert.AreEqual(RecurrenceRule.AnnualHoliday(HolidayPreset.EasterSunday), choice.ScheduleFor(thanksgiving).Rule);
     }
 
@@ -124,14 +124,14 @@ public sealed class RepeatChoiceTests
     {
         foreach (var preset in Enum.GetValues<HolidayPreset>())
         {
-            var name = Assert.ContainsSingle(RepeatChoice.Holidays.Where(h => h.Value == preset)).Name;
+            var name = Assert.ContainsSingle(RepeatChoice.HolidayPresetOptions.Where(h => h.Value == preset)).Name;
             Assert.IsFalse(string.IsNullOrWhiteSpace(name), preset.ToString());
         }
-        Assert.HasCount(Enum.GetValues<HolidayPreset>().Length, RepeatChoice.Holidays);
-        Assert.HasCount(RepeatChoice.Holidays.Count, RepeatChoice.Holidays.Select(h => h.Name).Distinct());
-        Assert.AreEqual("Thanksgiving", RepeatChoice.HolidayName(HolidayPreset.Thanksgiving));
-        Assert.AreEqual("Martin Luther King Jr. Day", RepeatChoice.HolidayName(HolidayPreset.MartinLutherKingJrDay));
-        Assert.AreEqual("St. Patrick's Day", RepeatChoice.HolidayName(HolidayPreset.StPatricksDay));
+        Assert.HasCount(Enum.GetValues<HolidayPreset>().Length, RepeatChoice.HolidayPresetOptions);
+        Assert.HasCount(RepeatChoice.HolidayPresetOptions.Count, RepeatChoice.HolidayPresetOptions.Select(h => h.Name).Distinct());
+        Assert.AreEqual("Thanksgiving", RepeatChoice.HolidayPresetName(HolidayPreset.Thanksgiving));
+        Assert.AreEqual("Martin Luther King Jr. Day", RepeatChoice.HolidayPresetName(HolidayPreset.MartinLutherKingJrDay));
+        Assert.AreEqual("St. Patrick's Day", RepeatChoice.HolidayPresetName(HolidayPreset.StPatricksDay));
     }
 
     // The start is sent exactly as given, its offset kept, and the end is the end date at the start's time and offset.

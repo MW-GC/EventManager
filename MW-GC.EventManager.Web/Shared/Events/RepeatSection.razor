@@ -1,6 +1,6 @@
 @* The Repeat section of the create Event dialog (#100, #204): the Repeat switch, the rule, the extra selects only the
-   rule that needs them shows (the week and weekday for Monthly on the nth weekday, the holiday for Yearly on a
-   holiday) and the optional end date. The choices live in Choice (RepeatChoice), which the dialog owns and resets
+   rule that needs them shows (the week and weekday for Monthly on the nth weekday, the holiday preset for Yearly
+   on a holiday) and the optional end date. The choices live in Choice (RepeatChoice), which the dialog owns and resets
    with every opening; every change is handed back through Changed, so the dialog can enable or disable Create. *@
 @using MW_GC.EventManager.Shared.Series
 
@@ -35,10 +35,10 @@
             @if (Choice.Kind == RecurrenceKind.AnnualHoliday)
             {
                 <FluentGridItem xs="12" sm="6">
-                    <FluentSelect TOption="RepeatOption<HolidayPreset>" Label="Holiday" aria-label="Holiday" Style="width: 100%;"
-                                  Items="RepeatChoice.Holidays" OptionValue="@(o => o.Value.ToString())" OptionText="@(o => o.Name)"
-                                  SelectedOption="@RepeatChoice.Holidays.Single(o => o.Value == Choice.HolidayFor(StartDate))"
-                                  SelectedOptionChanged="@(o => Change(() => Choice.ChosenHoliday = o.Value))" />
+                    <FluentSelect TOption="RepeatOption<HolidayPreset>" Label="Holiday preset" aria-label="Holiday preset" Style="width: 100%;"
+                                  Items="RepeatChoice.HolidayPresetOptions" OptionValue="@(o => o.Value.ToString())" OptionText="@(o => o.Name)"
+                                  SelectedOption="@RepeatChoice.HolidayPresetOptions.Single(o => o.Value == Choice.HolidayPresetFor(StartDate))"
+                                  SelectedOptionChanged="@(o => Change(() => Choice.ChosenHolidayPreset = o.Value))" />
                 </FluentGridItem>
             }
             <FluentGridItem xs="12" sm="6">
@@ -60,7 +60,7 @@
 
     // The dialog's choices for this opening.
     [Parameter, EditorRequired] public RepeatChoice Choice { get; set; } = null!;
-    // The start as the dialog saves it: the defaults (weekday, week, holiday) follow its date, and the end must be after it.
+    // The start as the dialog saves it: the defaults (weekday, week, holiday preset) follow its date, and the end must be after it.
     [Parameter] public DateTimeOffset Start { get; set; }
     // A choice changed and Choice already holds it.
     [Parameter] public EventCallback Changed { get; set; }
