@@ -99,6 +99,7 @@ public sealed class AvoidRecentFilterBoxTests : IDisposable
     [DataRow("1e1")]
     [DataRow("1,0")]
     [DataRow("(3)")]
+    [DataRow("0x5")]
     public async Task ABadN_ShowsTheBoxsMessage_AndLeavesItOff(string text)
     {
         var page = await OpenCreate();

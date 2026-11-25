@@ -220,7 +220,7 @@
     [Parameter, EditorRequired] public AvoidRecentFilter AvoidRecent { get; set; } = null!;
     // A filter input changed: the new Filter, for the dialog to keep and hand to the planner. The dialog keeps its
     // Game, Theme, Holiday, Themed only and Unique games values; players tonight and longest duration it takes
-    // from PlayersDuration instead.
+    // from PlayersDuration, and avoid recent from AvoidRecent, instead.
     [Parameter] public EventCallback<SlotFilter> FilterChanged { get; set; }
     // The slot held the edited Event's Winner and its Activity has been changed.
     [Parameter] public Func<SlotSelection, bool> ReplacesWinner { get; set; } = _ => false;

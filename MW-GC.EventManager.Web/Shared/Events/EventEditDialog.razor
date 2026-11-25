@@ -107,8 +107,9 @@
     internal void OpenCreate() { ShowCustomize(); StateHasChanged(); }
     internal void OpenEdit(EventEntity e) { ShowEditEvent(e); StateHasChanged(); }
 
-    // A filter input in the SlotPanel changed. Keeps the five Filters the dialog binds itself; players tonight and
-    // longest duration are not read from filter: the boxes typed them into _playersDuration, which SyncFilter reads.
+    // A filter input in the SlotPanel changed. Keeps the five Filters the dialog binds itself; players tonight, longest
+    // duration and avoid recent are not read from filter: the boxes typed them into _playersDuration and _avoidRecent,
+    // which SyncFilter reads (the recent Activity ids are worked out there, never taken from filter).
     private void ApplyFilter(SlotFilter filter)
     {
         _custThemedOnly = filter.ThemedOnly;

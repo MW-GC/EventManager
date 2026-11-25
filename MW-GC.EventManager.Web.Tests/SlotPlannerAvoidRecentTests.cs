@@ -171,7 +171,7 @@ public sealed class SlotPlannerAvoidRecentTests
     public void WhenAnotherFilterIsTheCause_TheOldMessagesAreUsed()
     {
         var first = Add();
-        var second = Add();
+        Add(); // not recent, and has no Theme or Holiday
         var filter = Avoid(first) with { ThemedOnly = true };
 
         var fresh = Planner(filter);
@@ -184,7 +184,54 @@ public sealed class SlotPlannerAvoidRecentTests
         Assert.AreEqual(RerollNoMatch, planner.GetRerollBlockedReason(0));
         planner.AddSlot();
         Assert.AreEqual(AddSlotNoMatch, planner.AddSlotError);
-        Assert.IsTrue(second.ThemeIds.Count == 0);
+        // Turning Avoid recent off does not help: the same slots still have nothing to add.
+        planner.Filter = filter with { RecentActivityIds = null };
+        Assert.IsEmpty(planner.GetAddSlotCandidates());
+        Assert.AreEqual(AddSlotNoMatch, planner.GetAddSlotBlockedReason());
+    }
+
+    // Re-roll: the slot holds the only themed Activity, and it is recent. Without avoid recent the only candidate is
+    // the slot's own Activity, which a re-roll never picks, so lowering N would not help: the old title stays.
+    [TestMethod]
+    public void WhenOnlyTheSlotsOwnActivityIsLeftWithoutTheFilter_TheRerollTitleIsTheOldOne()
+    {
+        var themed = Add();
+        themed.ThemeIds = [Guid.NewGuid()];
+        Add(); // not recent, but has no Theme or Holiday
+        var planner = Planner(Avoid(themed) with { ThemedOnly = true }, themed);
+
+        Assert.AreEqual(RerollNoMatch, planner.GetRerollBlockedReason(0));
+    }
+
+    // Randomize All: two slots with Unique games only on, and three Activities of one Game, one of them recent.
+    // Without avoid recent two distinct Activities are left, but only one Game, so the roll fails anyway: old message.
+    [TestMethod]
+    public void WhenUniqueGamesOnlyIsTheCause_TheKeptMessageIsTheOldOne()
+    {
+        var game = Game();
+        var first = Add(game: game);
+        var second = Add(game: game);
+        var recent = Add(game: game);
+        var planner = Planner(Avoid(recent), first, second);
+
+        planner.RandomizeAll();
+
+        Assert.AreEqual(SelectionsKept, planner.GenerationError);
+    }
+
+    // Add Activity Slot: the only themed Activity is already in a slot, and the recent one has no Theme. Without avoid
+    // recent nothing could be added either, so the old reason stays.
+    [TestMethod]
+    public void WhenTheOnlyMatchWithoutTheFilterIsAlreadyInASlot_TheAddSlotReasonIsTheOldOne()
+    {
+        var themed = Add();
+        themed.ThemeIds = [Guid.NewGuid()];
+        var recent = Add();
+        var planner = Planner(Avoid(recent) with { ThemedOnly = true }, themed);
+
+        Assert.AreEqual(AddSlotNoMatch, planner.GetAddSlotBlockedReason());
+        planner.AddSlot();
+        Assert.AreEqual(AddSlotNoMatch, planner.AddSlotError);
     }
 
     // With the Filter off a pool with nothing left uses the old messages too.

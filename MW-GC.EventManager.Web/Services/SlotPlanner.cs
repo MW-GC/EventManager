@@ -290,7 +290,8 @@ public sealed class SlotPlanner(Random random)
     }
 
     // The one activity filter: Activities of a known Game that pass every selected filter. The rolls also skip the
-    // recent Activities; the pickers pass avoidRecent false, because a slot changed by hand is not restricted (#203).
+    // recent Activities. Two callers pass avoidRecent false: the pickers, because a slot changed by hand is not
+    // restricted (#203), and AvoidRecentIsCause, which asks whether the same pool without the Filter would pass.
     private List<ActivityEntity> GetFilteredActivities(bool avoidRecent = true)
     {
         if (_activities is null || _games is null) return [];

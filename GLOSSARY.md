@@ -111,7 +111,8 @@ Themes or Holidays, Themed activities only, and three more, each off by default:
   turned on) dated before the date and time picked for the Event being planned,
   not counting the Event being edited. Only Events with at least one Selection
   count toward N. It skips Activities, never Games, and never relaxes itself:
-  when it leaves nothing to roll, the message names it.
+  the message names it only when it is the cause, that is when the same roll
+  without it would have something to pick.
 Players tonight and longest duration take a whole number within the limit of
 the matching Activity field (see Activity), avoid recent one from 1 to 10;
 anything else leaves that Filter off. None of the Filters is saved with the
