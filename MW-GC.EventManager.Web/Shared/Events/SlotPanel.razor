@@ -3,8 +3,9 @@
    All, and one card per slot with its Game and Activity pickers. The slots live in the SlotPlanner,
    which this panel drives directly. The filter values belong to the dialog (they count as unsaved
    changes and Unique games only is saved): the panel shows the planner's Filter and hands every
-   change back through FilterChanged. The two boxes write their text into PlayersDuration, the
-   dialog's own object, and then raise FilterChanged so the dialog reads them from there. *@
+   change back through FilterChanged. The two boxes write their text into PlayersDuration, and the
+   avoid-recent switch and box (#95) into AvoidRecent, the dialog's own objects, and then raise
+   FilterChanged so the dialog reads them from there. *@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 
 @* Themed-only toggle *@
@@ -74,6 +75,11 @@
     <PlayersDurationFilterBoxes Boxes="PlayersDuration" Typed="@(() => Change(Filter))" />
 </FluentCard>
 
+@* Avoid recent (#95): off until switched on or given a valid N; the dialog works the recent Activities out. *@
+<FluentCard Style="padding: 12px;" AreaRestricted="false">
+    <AvoidRecentFilterBox Filter="AvoidRecent" Changed="@(() => Change(Filter))" />
+</FluentCard>
+
 @* Selections header with controls *@
 <FluentStack Orientation="Orientation.Horizontal"
              HorizontalAlignment="HorizontalAlignment.SpaceBetween"
@@ -87,7 +93,7 @@
             <FluentLabel role="status">Single activity: this activity will automatically win when you save.</FluentLabel>
         }
         @if (Filter.ThemedOnly || Filter.GameIds.Count > 0 || Filter.ThemeIds.Count > 0 || Filter.HolidayIds.Count > 0
-             || Filter.PlayersTonight is not null || Filter.LongestDuration is not null)
+             || Filter.PlayersTonight is not null || Filter.LongestDuration is not null || Filter.RecentActivityIds is not null)
         {
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Filters apply when randomizing all selections or re-rolling a slot</FluentLabel>
         }
@@ -161,10 +167,11 @@
                     }
                 </FluentGridItem>
                 <FluentGridItem xs="12" sm="2" Style="display: flex; align-items: flex-end; justify-content: flex-end;">
+                    @{ var rerollBlocked = Planner.GetRerollBlockedReason(idx); }
                     <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
-                                  Title="@(Planner.GetRerollCandidates(idx).Count > 0 ? "Re-roll this slot" : "No alternative matches the current filters")"
+                                  Title="@(rerollBlocked ?? "Re-roll this slot")"
                                   aria-label="@($"Re-roll slot {idx + 1}")"
-                                  Disabled="@(Planner.GetRerollCandidates(idx).Count == 0)"
+                                  Disabled="@(rerollBlocked is not null)"
                                   OnClick="@(() => Planner.RerollSlot(idx))">
                         <FluentIcon Value="@(new Size16.ArrowShuffle())" />
                     </FluentButton>
@@ -209,6 +216,8 @@
     [Parameter] public List<HolidayEntity>? Holidays { get; set; }
     // The players tonight and longest duration boxes' typed text, which the dialog keeps for one opening.
     [Parameter, EditorRequired] public PlayersDurationFilters PlayersDuration { get; set; } = null!;
+    // The avoid-recent switch and box (#95), which the dialog keeps for one opening and reads when it syncs.
+    [Parameter, EditorRequired] public AvoidRecentFilter AvoidRecent { get; set; } = null!;
     // A filter input changed: the new Filter, for the dialog to keep and hand to the planner. The dialog keeps its
     // Game, Theme, Holiday, Themed only and Unique games values; players tonight and longest duration it takes
     // from PlayersDuration instead.

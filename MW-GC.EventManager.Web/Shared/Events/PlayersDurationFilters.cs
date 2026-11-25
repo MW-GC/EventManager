@@ -49,15 +49,20 @@ public sealed class PlayersDurationFilters
     /// <summary>The typed text of both boxes, compared to tell unsaved changes: text that is not valid counts too.</summary>
     public IReadOnlyList<string> Texts => All.Select(f => _texts[f]).ToList();
 
-    // True when the text is empty (value null) or a whole number from 1 to the box's limit, read as the Activity
-    // fields read it (PlayersDurationFields): trimmed, an optional sign, invariant digits.
-    private bool Read(Field field, out int? value)
+    private bool Read(Field field, out int? value) => ReadWholeNumber(_texts[field], field.Max, out value);
+
+    /// <summary>
+    /// True when <paramref name="text"/> is empty (value null) or a whole number from 1 to <paramref name="max"/>,
+    /// read as the Activity fields read it (PlayersDurationFields): trimmed, an optional sign, invariant digits. The
+    /// one reader of every Filter box (players tonight, longest duration, avoid recent).
+    /// </summary>
+    internal static bool ReadWholeNumber(string text, int max, out int? value)
     {
         value = null;
-        var trimmed = _texts[field].Trim();
+        var trimmed = text.Trim();
         if (trimmed.Length == 0) return true;
         if (!int.TryParse(trimmed, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var number)) return false;
-        if (number < 1 || number > field.Max) return false;
+        if (number < 1 || number > max) return false;
         value = number;
         return true;
     }

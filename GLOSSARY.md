@@ -103,19 +103,22 @@ Occurrences start with when rolled.
 
 **Filters**:
 The choices that narrow which Activities can fill a slot: specific Games,
-Themes or Holidays, Themed activities only, and two more, each off by default:
+Themes or Holidays, Themed activities only, and three more, each off by default:
 - players tonight: keeps an Activity unless its minimum or maximum players
   excludes that number; a missing bound is open.
 - longest duration: keeps an Activity with no duration or one within the limit.
-Each takes a whole number within the limit of the matching Activity field (see
-Activity); anything else leaves that Filter off. Like the Game, Theme and
-Holiday Filters they apply to Randomize All, re-roll, Add Activity Slot and the
-slot pickers, and they are not saved with the Event.
-Planned for 0.6.0 (#203), one more, off by default:
 - avoid recent: skips Activities offered in the last N Events (1 to 10, 3 when
-  turned on) dated before the Event being planned, not counting the Event being
-  edited. It skips Activities, never Games, never relaxes itself, and applies to
-  Randomize All, re-roll and Add Activity Slot, not to a slot changed by hand.
+  turned on) dated before the date and time picked for the Event being planned,
+  not counting the Event being edited. Only Events with at least one Selection
+  count toward N. It skips Activities, never Games, and never relaxes itself:
+  when it leaves nothing to roll, the message names it.
+Players tonight and longest duration take a whole number within the limit of
+the matching Activity field (see Activity), avoid recent one from 1 to 10;
+anything else leaves that Filter off. None of the Filters is saved with the
+Event. Like the Game, Theme and Holiday Filters, players tonight and longest
+duration apply to Randomize All, re-roll, Add Activity Slot and the slot
+pickers; avoid recent applies to Randomize All, re-roll and Add Activity Slot,
+not to a slot changed by hand.
 
 **Announcement**:
 Planned for 0.6.0 (#203): ready-to-paste Discord text for an Event, copied from
