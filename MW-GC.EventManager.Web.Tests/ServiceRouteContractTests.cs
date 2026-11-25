@@ -47,9 +47,11 @@ public sealed class ServiceRouteContractTests
         new(typeof(EventService), nameof(EventService.GetFeedbackLinkAsync), "GET", "api/events/{id}/feedback-link", h => new EventService(h).GetFeedbackLinkAsync(Id)),
         new(typeof(EventService), nameof(EventService.GetLikesAsync), "GET", "api/events/{id}/likes", h => new EventService(h).GetLikesAsync(Id)),
 
-        // A Series and its Occurrences (#204): the create and the cancel. The cancel's scope is a query string; the
-        // API route is matched without it.
+        // A Series and its Occurrences (#204): the create, the read, the edit and the cancel. A scope is a query string;
+        // the API route is matched without it. The edit's "following" query is pinned in SeriesServiceTests.
         new(typeof(SeriesService), nameof(SeriesService.CreateAsync), "POST", "api/series", h => new SeriesService(h).CreateAsync(new SeriesEntity { Id = Id }, Guid.NewGuid())),
+        new(typeof(SeriesService), nameof(SeriesService.GetAsync), "GET", "api/series/{id}", h => new SeriesService(h).GetAsync(Id)),
+        new(typeof(SeriesService), nameof(SeriesService.UpdateAsync), "PUT", "api/series/{id}?scope=all", h => new SeriesService(h).UpdateAsync(new SeriesEntity { Id = Id }, "W/\"1\"", SeriesScope.All, Guid.NewGuid())),
         new(typeof(SeriesService), nameof(SeriesService.DeleteAsync), "DELETE", "api/series/{id}?scope=all", h => new SeriesService(h).DeleteAsync(Id)),
 
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.LoadAllAsync), "GET", "api/event-metrics", h => new EventMetricsClient(h).LoadAllAsync()),

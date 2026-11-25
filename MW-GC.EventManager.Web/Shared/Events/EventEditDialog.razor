@@ -8,7 +8,7 @@
 
 @if (_showCustomize)
 {
-    <FluentDialog Modal="true" TrapFocus="@(_confirm is null)" PreventScroll="true" Style="--dialog-width: 860px; --dialog-height: 85vh;"
+    <FluentDialog Modal="true" TrapFocus="@(_confirm is null && _scope is null)" PreventScroll="true" Style="--dialog-width: 860px; --dialog-height: 85vh;"
                   AriaLabel="@(_editingEvent is not null ? "Edit Event" : "Customize Event")" @ondialogdismiss="@((DialogEventArgs _) => DismissCustomize())">
         <FluentDialogBody>
             <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 4px;">@(_editingEvent is not null ? "Edit Event" : "Customize Event")</FluentLabel>
@@ -61,6 +61,14 @@
     <ConfirmDialog @key="confirm" Title="@confirm.Title" Message="@confirm.Message" ConfirmText="@confirm.ConfirmText"
                    CancelText="@confirm.CancelText" Destructive="@confirm.Destructive"
                    OnConfirm="@(() => Confirmed(confirm))" OnCancel="@(() => Cancelled(confirm))" />
+}
+
+@* #204: which events of the Series an Occurrence's change applies to, asked over this dialog (EventEditDialog.razor.cs). *@
+@if (_scope is { } scope)
+{
+    <ScopeDialog @key="scope" Title="@scope.Title" Message="@scope.Message" GroupLabel="@scope.GroupLabel" Options="@scope.Options"
+                 Destructive="@scope.Destructive"
+                 OnConfirm="@((ScopeOption option) => ScopeConfirmed(scope, option))" OnCancel="@(() => ScopeCancelled(scope))" />
 }
 
 @code {
@@ -169,6 +177,8 @@
     {
         _customizeError = null;
         _editingEvent = e;
+        // An Occurrence's Series is read now, before the admin changes anything (story 22).
+        ReadSeriesOf(e);
         _planner.GenerationError = null;
         _custName = e.Name;
         var localStart = e.Date.ToLocalTime().DateTime;
@@ -214,6 +224,7 @@
     // Overlay click or Escape. A clean dialog closes once the slot selects are done with the same Escape (#105).
     private Task DismissCustomize()
     {
+        if (DropScope()) return Task.CompletedTask;
         var closing = Task.CompletedTask;
         _confirm = ConfirmRequest.ForDismiss(_confirm, _generating, _customize.IsDirty, CloseCustomize,
             closeNow: () => closing = _customize.CloseAfterKeyAsync(CloseCustomize));
@@ -268,7 +279,7 @@
         if (_generating || string.IsNullOrWhiteSpace(_custName)) return;
         _customizeError = null;
         var slots = _planner.Slots;
-        if (slots.Count is < 1 or > EventEntity.MaximumSelections)
+        if (slots.Count is < 1 or > EventEntity.MaximumSelections && !Unrolled())
         {
             _customizeError = "Select 1–5 activities before saving. Adjust the filters or add an activity slot.";
             return;
@@ -297,12 +308,14 @@
             // Replacing the Winner's slot clears the Winner, as its notice says.
             WinnerActivityId = slots.Any(ReplacesWinner) ? null : _editingEvent?.WinnerActivityId
         };
-        if (entity.ValidateSelections() is not null)
+        if (!Unrolled() && entity.ValidateSelections() is not null)
         {
             _customizeError = "Activities must be distinct, and games must be distinct when Unique games only is enabled.";
             return;
         }
         entity.NormalizeWinner();
+        // An Occurrence with a change asks which events take it first (#204).
+        if (AskScope(entity)) return;
         await SendAsync(() => _editingEvent is not null ? EventSvc.UpdateAsync(entity) : EventSvc.SaveAsync(entity, _createKey));
     }
 
@@ -319,18 +332,25 @@
         Filters = new SeriesFilters { ThemedOnly = _custThemedOnly, GameIds = _custGameIds.ToList(), ThemeIds = _custThemeIds.ToList(), HolidayIds = _custHolidayIds.ToList() }
     };
 
-    // Runs one save: its busy guard, the page's message cleared first, the API's message in this dialog (or the page's
-    // error bar once it closed), and the close and list reload on success. _createKey is kept on any failure.
-    private async Task SendAsync(Func<Task<HttpResponseMessage>> send)
+    private Task SendAsync(Func<Task<HttpResponseMessage>> send) => RunAsync(async () =>
     {
+        using var response = await send();
+        return await ApiResult.ErrorAsync(response);
+    });
+
+    // Runs one save (send answers the API's message, or null once saved): its busy guard, the page's message cleared
+    // first, the API's message in this dialog (or the page's error bar once it closed), and the close and list reload on
+    // success. _createKey is kept on any failure.
+    private async Task RunAsync(Func<Task<string?>> send)
+    {
+        if (_generating) return;
         _generating = true;
         // The dialog this save belongs to; a dismissed or replaced dialog is left alone.
         var token = _customize.Current;
         try
         {
             await PageError.InvokeAsync(null);
-            using var response = await send();
-            if (await ApiResult.ErrorAsync(response) is { } error)
+            if (await send() is { } error)
             {
                 if (_customize.IsCurrent(token)) _customizeError = $"The event was not saved. {error}";
                 else await ActionError.InvokeAsync($"The event was not saved. {error}");
