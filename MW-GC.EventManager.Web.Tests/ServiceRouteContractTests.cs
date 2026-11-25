@@ -47,8 +47,10 @@ public sealed class ServiceRouteContractTests
         new(typeof(EventService), nameof(EventService.GetFeedbackLinkAsync), "GET", "api/events/{id}/feedback-link", h => new EventService(h).GetFeedbackLinkAsync(Id)),
         new(typeof(EventService), nameof(EventService.GetLikesAsync), "GET", "api/events/{id}/likes", h => new EventService(h).GetLikesAsync(Id)),
 
-        // A Series and its Occurrences (#204): only the create so far.
+        // A Series and its Occurrences (#204): the create and the cancel. The cancel's scope is a query string; the
+        // API route is matched without it.
         new(typeof(SeriesService), nameof(SeriesService.CreateAsync), "POST", "api/series", h => new SeriesService(h).CreateAsync(new SeriesEntity { Id = Id }, Guid.NewGuid())),
+        new(typeof(SeriesService), nameof(SeriesService.DeleteAsync), "DELETE", "api/series/{id}?scope=all", h => new SeriesService(h).DeleteAsync(Id)),
 
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.LoadAllAsync), "GET", "api/event-metrics", h => new EventMetricsClient(h).LoadAllAsync()),
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.GetAsync), "GET", "api/events/{id}/metrics", h => new EventMetricsClient(h).GetAsync(Id)),
@@ -142,7 +144,7 @@ public sealed class ServiceRouteContractTests
     public async Task SeriesCreateSendsTheIdempotencyKeyHeader()
     {
         var key = Guid.NewGuid();
-        var (client, recorder) = Client(Table.Single(r => r.Service == typeof(SeriesService)));
+        var (client, recorder) = Client(Table.Single(r => r.Service == typeof(SeriesService) && r.Method == nameof(SeriesService.CreateAsync)));
 
         await new SeriesService(client).CreateAsync(new SeriesEntity { Id = Id }, key);
 
@@ -160,7 +162,7 @@ public sealed class ServiceRouteContractTests
         Assert.IsNotEmpty(routes);
 
         var unmatched = Table
-            .Where(r => !routes.Contains((r.Verb, r.Path.Replace("{id}", "{id:guid}").Replace("{commentId}", "{commentId:guid}"))))
+            .Where(r => !routes.Contains((r.Verb, PathOnly(r.Path).Replace("{id}", "{id:guid}").Replace("{commentId}", "{commentId:guid}"))))
             .Select(r => r.ToString())
             .ToList();
         Assert.IsEmpty(unmatched, "Route table rows with no matching API HttpTrigger:\n" + string.Join("\n", unmatched));
@@ -202,12 +204,15 @@ public sealed class ServiceRouteContractTests
     private static string Concrete(string path) =>
         path.Replace("{id}", Id.ToString("D")).Replace("{commentId}", CommentId.ToString("D"));
 
+    // A row's path without its query string (such as a Series cancel's ?scope=all): what an HttpTrigger route declares.
+    private static string PathOnly(string path) => path.Split('?')[0];
+
     // A stub API that answers the row's own route with JSON null (so the Get methods return
     // instead of throwing on a 404), behind a handler that records what was sent.
     private static (HttpClient Client, RequestRecorder Recorder) Client(Row row)
     {
         var api = new StubApiHandler();
-        api.On(new HttpMethod(row.Verb), "/" + Concrete(row.Path),
+        api.On(new HttpMethod(row.Verb), "/" + Concrete(PathOnly(row.Path)),
             () => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("null", Encoding.UTF8, "application/json") });
         var recorder = new RequestRecorder(api);
         return (new HttpClient(recorder) { BaseAddress = new Uri("https://example.test/") }, recorder);

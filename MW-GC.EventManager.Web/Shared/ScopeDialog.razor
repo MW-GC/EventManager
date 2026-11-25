@@ -1,0 +1,87 @@
+@* A scope question over the page (#204, story 21): which of two or three scopes a change to an Occurrence applies
+   to, such as "This event only" or "This and all future events". Built on the same plain FluentDialog and the same
+   focus handling as ConfirmDialog, and it carries ConfirmDialog's class so focus.js treats it as a question. Nothing
+   is chosen when it opens: the confirm button stays disabled until a scope is chosen, and then its own text names
+   that scope. Overlay click and Escape answer Cancel; a fast double click counts once. *@
+@using System.Globalization
+@implements IAsyncDisposable
+@inject FocusReturn Focus
+
+<FluentDialog Modal="true" TrapFocus="true" PreventScroll="true" Style="--dialog-width: 480px;" Class="confirm-dialog scope-dialog"
+              AriaLabel="@Title" @ondialogdismiss="@((DialogEventArgs _) => Cancel())">
+    <FluentDialogBody>
+        <FluentLabel aria-level="2" Typo="Typography.H4" Style="margin-bottom: 12px;">@Title</FluentLabel>
+        <FluentLabel Class="confirm-message">@Message</FluentLabel>
+        @* One radio group, so the browser moves between the scopes with the arrow keys. *@
+        <FluentRadioGroup TValue="string" @bind-Value="_chosen" Orientation="Orientation.Vertical" aria-label="@GroupLabel"
+                          Class="scope-options" Style="margin-top: 16px;">
+            @for (var i = 0; i < Options.Count; i++)
+            {
+                var option = Options[i];
+                var key = i.ToString(CultureInfo.InvariantCulture);
+                <FluentRadio TValue="string" Value="@key" aria-label="@option.Label" aria-describedby="@DescriptionId(key)" Style="margin-bottom: 8px;">
+                    <span class="scope-label" style="font-weight: 600;">@option.Label</span>
+                    <span class="scope-description" id="@DescriptionId(key)"
+                          style="color: var(--neutral-foreground-hint); display: block; font-size: 0.85rem;">@option.Description</span>
+                </FluentRadio>
+            }
+        </FluentRadioGroup>
+        <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.End" HorizontalGap="8" Style="margin-top: 20px;">
+            <FluentButton Appearance="Appearance.Neutral" OnClick="Cancel">@CancelText</FluentButton>
+            <FluentButton Appearance="Appearance.Accent" Class="scope-confirm" OnClick="Confirm" Disabled="@(Chosen is null)"
+                          BackgroundColor="@(Destructive && Chosen is not null ? "var(--error)" : null)"
+                          Color="@(Destructive && Chosen is not null ? "#fff" : null)">@(Chosen?.ConfirmText ?? NoChoiceText)</FluentButton>
+        </FluentStack>
+    </FluentDialogBody>
+</FluentDialog>
+
+@code {
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Message { get; set; } = string.Empty;
+    // The radio group's accessible name, such as "What to delete".
+    [Parameter] public string GroupLabel { get; set; } = string.Empty;
+    // Two or three scopes, in the order shown.
+    [Parameter, EditorRequired] public IReadOnlyList<ScopeOption> Options { get; set; } = [];
+    [Parameter] public string CancelText { get; set; } = "Cancel";
+    // The disabled confirm button's text while no scope is chosen.
+    [Parameter] public string NoChoiceText { get; set; } = "Choose an option";
+    // Paints the confirm button in the error colour once a scope is chosen, for answers that lose data.
+    [Parameter] public bool Destructive { get; set; }
+    // Confirmed with the chosen scope.
+    [Parameter] public EventCallback<ScopeOption> OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    // The chosen radio's value (the option's index), or null while none is chosen.
+    private string? _chosen;
+    // A fast double click lands before the page removes this dialog; only the first answer counts.
+    private bool _answered;
+    // Ties each description to its radio (aria-describedby) when two questions are ever on one page.
+    private readonly string _id = Guid.NewGuid().ToString("N")[..8];
+
+    private ScopeOption? Chosen =>
+        int.TryParse(_chosen, NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index < Options.Count ? Options[index] : null;
+
+    private string DescriptionId(string key) => $"scope-{_id}-{key}";
+
+    // A click that still reaches the disabled confirm button is ignored, without using up the answer.
+    private Task Confirm()
+    {
+        if (_answered || Chosen is not { } chosen) return Task.CompletedTask;
+        _answered = true;
+        return OnConfirm.InvokeAsync(chosen);
+    }
+
+    private Task Cancel()
+    {
+        if (_answered) return Task.CompletedTask;
+        _answered = true;
+        return OnCancel.InvokeAsync();
+    }
+
+    // Each question is its own instance (the page keys it by its ScopeRequest), so the first render
+    // is the moment it appears on the page.
+    protected override Task OnAfterRenderAsync(bool firstRender) => firstRender ? Focus.QuestionAsync() : Task.CompletedTask;
+
+    // However the question goes (either button, overlay click or Escape).
+    public async ValueTask DisposeAsync() => await Focus.AnsweredAsync();
+}
