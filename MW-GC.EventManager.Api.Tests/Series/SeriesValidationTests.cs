@@ -43,6 +43,8 @@ public sealed class SeriesValidationTests
         [Body(first: "1999-12-31T19:00:00-05:00"), "Start must be in the years 2000 to 2100."],
         [Body(end: "9999-12-31T00:00:00-05:00"), "End must be in the years 2000 to 2100."],
         [Body(end: "2101-01-01T00:00:00+00:00"), "End must be in the years 2000 to 2100."],
+        // After the start as an instant, but in 1999 at the offset it is written in.
+        [Body(first: "2000-01-01T00:00:00+00:00", end: "1999-12-31T23:30:00-05:00"), "End must be in the years 2000 to 2100."],
     ];
 
     [TestMethod]

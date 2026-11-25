@@ -65,6 +65,7 @@ internal sealed partial class SeriesFunctions
         // past), so no run of the new Series makes a second Occurrence on one of those dates.
         edited.Id = FollowingSeriesId(existing.Id, from);
         edited.SplitAt = null;
+        edited.SplitFrom = from;
         var skipped = Held(edited, existing, staying, now);
         edited.Skipped = skipped;
         if (!await _store.TryAddAsync(edited, ct))

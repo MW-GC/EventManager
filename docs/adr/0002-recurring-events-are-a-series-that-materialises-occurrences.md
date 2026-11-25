@@ -15,7 +15,7 @@ Holiday presets (Easter, Thanksgiving, Halloween and the others) come from an in
 Edits and cancels name a scope, as in Outlook:
 
 - **This Occurrence**: edits that one Event and marks it Modified. A Modified Occurrence is never overwritten by a later Series edit.
-- **This and following**: ends the current Series before that Occurrence and starts a new Series with the change, moving the unmodified, unplayed future Occurrences to it. The old Series records where it was split, so no later edit moves its end past that point, and repeating the same edit finishes one that stopped part-way.
+- **This and following**: ends the current Series before that Occurrence and starts a new Series with the change, moving the unmodified, unplayed future Occurrences to it. The old Series records where it was split, so no later edit moves its end past that point or makes an Occurrence on or after the day the new Series starts, and repeating the same edit finishes one that stopped part-way. The new Series records the same point, so no later edit moves its start back before it.
 - **All**: touches only Occurrences that are in the future, not Modified, and not played (no Winner, Comments or Event metrics).
 - **Cancel an Occurrence**: deletes its Event row and records its key as skipped on the Series, so the generator never makes it again.
 - **Cancel the Series**: ends it and deletes only its future, unplayed Occurrences; played ones stay as history.

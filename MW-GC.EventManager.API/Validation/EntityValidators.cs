@@ -152,7 +152,7 @@ internal static class SeriesValidator
         if (schedule.Rule is null) return RuleRequiredMessage;
         if (schedule.Rule.Validate() is { } rule) return rule;
         if (schedule.End is { } end && end <= schedule.First) return EndMessage;
-        if (schedule.End is { Year: > LastYear }) return EndRangeMessage;
+        if (schedule.End is { Year: < FirstYear or > LastYear }) return EndRangeMessage;
         if (series.SlotCount is < 1 or > MaxSlots) return SlotCountMessage;
         return null;
     }

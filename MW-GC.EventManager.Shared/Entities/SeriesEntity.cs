@@ -45,6 +45,16 @@ public class SeriesEntity : EntityBase
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? SplitAt { get; set; }
+
+    /// <summary>
+    /// Set on the Series a "this and following" edit started: the occurrence key it was split from (the old
+    /// Series' <see cref="SplitAt"/>). The instant rather than the old Series' id, because the check needs only
+    /// the instant and it still holds after the old Series is cancelled. While it is set an edit never moves this
+    /// Series' start before it (or before the stored start, when that is earlier), so the Series never moves back
+    /// into the dates of the one before it. Null on a Series no split started. Owned by the API.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? SplitFrom { get; set; }
 }
 
 /// <summary>

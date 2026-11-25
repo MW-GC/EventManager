@@ -68,6 +68,9 @@ internal sealed class SeriesHarness
     /// </summary>
     public Func<string, string, bool>? FailEventWrite { get; set; }
 
+    /// <summary>The same for every Series insert and update (<c>add</c> or <c>update</c>, and the row key).</summary>
+    public Func<string, string, bool>? FailSeriesWrite { get; set; }
+
     /// <summary>
     /// Lists the Event rows oldest first instead of in the dictionary's order (storage lists them by row key, an
     /// order that has nothing to do with their dates), so a test can say which Occurrence an edit reaches first.
@@ -126,6 +129,21 @@ internal sealed class SeriesHarness
                 return AsyncPageable<TableEntity>.FromPages([Page<TableEntity>.FromValues(rows, null, Mock.Of<Response>())]);
             });
         SeriesTable = TableMocks.Table(SeriesRows);
+        SeriesTable.Setup(t => t.AddEntityAsync(It.IsAny<TableEntity>(), It.IsAny<CancellationToken>()))
+            .Returns((TableEntity row, CancellationToken _) =>
+            {
+                Fail(FailSeriesWrite, "add", row.RowKey);
+                return SeriesRows.TryAdd(row.RowKey, row)
+                    ? Task.FromResult(Stamp(SeriesRows, row))
+                    : throw new RequestFailedException(409, "Entity already exists", "EntityAlreadyExists", null);
+            });
+        SeriesTable.Setup(t => t.UpdateEntityAsync(It.IsAny<TableEntity>(), It.IsAny<ETag>(), TableUpdateMode.Replace, It.IsAny<CancellationToken>()))
+            .Returns((TableEntity row, ETag ifMatch, TableUpdateMode _, CancellationToken _) =>
+            {
+                Fail(FailSeriesWrite, "update", row.RowKey);
+                Check(SeriesRows, row.RowKey, ifMatch);
+                return Task.FromResult(Stamp(SeriesRows, row));
+            });
         var service = new Mock<TableServiceClient>();
         service.Setup(s => s.GetTableClient(TableNames.Events)).Returns(EventTable.Object);
         service.Setup(s => s.GetTableClient(TableNames.Series)).Returns(SeriesTable.Object);
@@ -147,9 +165,11 @@ internal sealed class SeriesHarness
             metrics, series, new ListLogger<EventFunctions>());
     }
 
-    private void Fail(string write, string rowKey)
+    private void Fail(string write, string rowKey) => Fail(FailEventWrite, write, rowKey);
+
+    private static void Fail(Func<string, string, bool>? fail, string write, string rowKey)
     {
-        if (FailEventWrite?.Invoke(write, rowKey) == true)
+        if (fail?.Invoke(write, rowKey) == true)
             throw new RequestFailedException(503, "The server is busy.", "ServerBusy", null);
     }
 

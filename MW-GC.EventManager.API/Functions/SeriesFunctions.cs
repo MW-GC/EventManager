@@ -29,6 +29,8 @@ internal sealed partial class SeriesFunctions
     public const string CancelScopeMessage = "Scope must be all. Cancel one Occurrence through DELETE /api/events/{id}.";
     public const string EndKeptMessage = "This Series has an end. Send its stored end to keep it, or a new one: an edit cannot remove it.";
     public const string SplitEndMessage = "This Series was split by a this and following edit, so its end cannot be removed or moved later. Send its stored end, or edit the Series that follows it.";
+    public const string SplitDayMessage = "This Series was split by a this and following edit, so it cannot make an Occurrence on or after the day the Series that follows it starts. Send an earlier end, or edit the Series that follows it.";
+    public const string SplitStartMessage = "This Series was started by a this and following edit, so its start cannot move before the Occurrence it was split at (or its stored start, if that is earlier). Edit the Series before it instead.";
 
     /// <summary>
     /// How many times a Series edit that names no version (no <c>If-Match</c>, or <c>*</c>) reads the Series again
@@ -90,6 +92,7 @@ internal sealed partial class SeriesFunctions
         series.Id = id;
         series.Skipped = [];
         series.SplitAt = null;
+        series.SplitFrom = null;
         var now = Clock.GetUtcNow();
         Plan(series, now);
         var isNew = await _store.TryAddAsync(series, ct);
@@ -167,7 +170,8 @@ internal sealed partial class SeriesFunctions
     private async Task<IActionResult?> EditAllAsync(
         HttpRequest req, SeriesEntity existing, SeriesEntity edited, ETag? pinned, DateTimeOffset now, CancellationToken ct)
     {
-        if (EndRule(existing, edited) is { } refused) return new BadRequestObjectResult(refused);
+        if ((EndRule(existing, edited) ?? StartRule(existing, edited) ?? await SplitDayRuleAsync(existing, edited, now, ct)) is { } refused)
+            return new BadRequestObjectResult(refused);
         Plan(edited, now);
         var occurrences = await _occurrences.OfSeriesAsync(existing.Id, ct);
         var rewritable = await RewritableAsync(now, ct);
@@ -176,6 +180,7 @@ internal sealed partial class SeriesFunctions
 
         edited.Id = existing.Id;
         edited.SplitAt = existing.SplitAt;
+        edited.SplitFrom = existing.SplitFrom;
         edited.Skipped = Held(edited, existing, staying, now);
         var outcome = await _store.UpdateAsync(edited, pinned ?? existing.ETag, ct);
         if (outcome == UpdateOutcome.Conflict && pinned is null) return null;
@@ -200,8 +205,43 @@ internal sealed partial class SeriesFunctions
     }
 
     /// <summary>
+    /// On a Series a "this and following" edit started, an edit never moves the start before the key it was
+    /// split from (or before its stored start, when that is earlier: the split may have started it before the
+    /// key), so it never moves back into the dates of the Series before it. A Series stored without
+    /// <see cref="SeriesEntity.SplitFrom"/> has no such limit.
+    /// </summary>
+    private static string? StartRule(SeriesEntity existing, SeriesEntity edited)
+    {
+        if (existing.SplitFrom is not { } from) return null;
+        var floor = existing.Schedule.First < from ? existing.Schedule.First : from;
+        return edited.Schedule.First < floor ? SplitStartMessage : null;
+    }
+
+    /// <summary>
+    /// On a Series a "this and following" edit split, an edit never makes an Occurrence on or after the calendar
+    /// day the Series that follows it starts: the day of the split key, or of that Series' start when it starts
+    /// earlier, read at the earliest of the edited, stored and following Series' offsets, so a changed offset
+    /// cannot move the day. Dates, not instants, because a time of day moved earlier would otherwise put an
+    /// Occurrence beside the following Series' first one on the same day. Only instants from now on count: an
+    /// edit never makes or moves a past one.
+    /// </summary>
+    private async Task<string?> SplitDayRuleAsync(SeriesEntity existing, SeriesEntity edited, DateTimeOffset now, CancellationToken ct)
+    {
+        if (existing.SplitAt is not { } at) return null;
+        var next = await _store.GetAsync(FollowingSeriesId(existing.Id, at), ct);
+        var from = next is not null && next.Schedule.First < at ? next.Schedule.First : at;
+        TimeSpan[] offsets = next is null
+            ? [edited.Schedule.First.Offset, existing.Schedule.First.Offset]
+            : [edited.Schedule.First.Offset, existing.Schedule.First.Offset, next.Schedule.First.Offset];
+        var day = offsets.Select(o => new DateTimeOffset(from.ToOffset(o).Date, o)).Min();
+        // The end is at most the split key (EndRule), so this is every rule instant from that day to the end.
+        return OccurrenceGenerator.Generate(edited.Schedule, day > now ? day : now, [], []).Count > 0 ? SplitDayMessage : null;
+    }
+
+    /// <summary>
     /// Works the Series' Occurrences out before anything is written, so a schedule the generator cannot
-    /// follow fails the request before a row is stored, not after.
+    /// follow fails the request before a row is stored, not after. A second guard: the validator's year bounds
+    /// already keep every accepted schedule inside what the generator can step through.
     /// </summary>
     private static void Plan(SeriesEntity series, DateTimeOffset now) =>
         _ = OccurrenceGenerator.Generate(series.Schedule, now, [], []);
@@ -246,7 +286,7 @@ internal sealed partial class SeriesFunctions
     private static IActionResult Refused(UpdateOutcome outcome) =>
         outcome == UpdateOutcome.NotFound ? new NotFoundResult() : EntityResults.Conflict();
 
-    // The details a repeated create must match: everything the body sets, never keys, eTags, Skipped or SplitAt.
+    // The details a repeated create must match: everything the body sets, never keys, eTags, Skipped, SplitAt or SplitFrom.
     private static string Details(SeriesEntity series) => JsonSerializer.Serialize(new
     {
         series.Name, series.Schedule, series.SlotCount, series.UniqueGamesOnly, series.Filters,
