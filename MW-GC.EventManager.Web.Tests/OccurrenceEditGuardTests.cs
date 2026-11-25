@@ -1,7 +1,9 @@
 using System.Net;
+using System.Text.Json;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
+using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
 
 namespace MW_GC.EventManager.Web.Tests;
@@ -15,6 +17,9 @@ public sealed class OccurrenceEditGuardTests : OccurrenceEditFixture
 {
     private const string Stale = "The request conflicts with the stored data. Reload and try again.";
     private const string SplitAgain = "This Series was already split by a this and following edit at another Occurrence. Edit the Series that follows it, or this one with scope all.";
+    private const string ReadAgain = "Close this dialog and edit the event again to read its series.";
+    private const string NoVersion = "The series was read without its version, so saving it could overwrite another admin's change. Close this dialog and edit the event again.";
+    private const string OtherTag = "W/\"datetime'2026-11-25T11%3A30%3A00.0000000Z'\"";
 
     [TestMethod]
     [DataRow("cancel")]
@@ -62,10 +67,15 @@ public sealed class OccurrenceEditGuardTests : OccurrenceEditFixture
         page.WaitForAssertion(() => Assert.AreEqual($"The event was not saved. {message}", Assert.ContainsSingle(EditDialog(page).Alerts())));
         Assert.IsFalse(HasScopeQuestion(page));
         Assert.IsFalse(page.FormDialog().Button("Update Event").IsBusy(), "the dialog stayed busy after the refusal");
-        Assert.AreEqual(1, api.Count(HttpMethod.Put, SeriesPath(RaidSeries)));
+        var query = option == "All future events" ? "scope=all" : $"scope=following&occurrence={raid.Id:D}";
+        CollectionAssert.AreEqual(new[] { $"PUT {SeriesPath(RaidSeries)}?{query}" }, Sent(), "the refused save sent more than its one Series PUT");
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, EventPath(raid)), "an Event PUT followed the refused Series PUT");
+        Assert.IsTrue(page.HasFormDialog(), "the edit dialog closed after the refusal");
         Assert.IsEmpty(page.PageAlerts());
     }
 
+    // The Series is read once, as the edit dialog opens; a failed read is never repeated at Confirm (that read would take
+    // a version newer than the one the admin opened), so the message says to open the dialog again.
     [TestMethod]
     [DataRow(HttpStatusCode.NotFound, "Not found. It may have been deleted.")]
     [DataRow(HttpStatusCode.InternalServerError, "The server had a problem (HTTP 500). Try again.")]
@@ -78,8 +88,88 @@ public sealed class OccurrenceEditGuardTests : OccurrenceEditFixture
 
         await ChooseAndConfirm(page, "All future events");
 
-        page.WaitForAssertion(() => Assert.AreEqual($"The event was not saved. {message}", Assert.ContainsSingle(EditDialog(page).Alerts())));
-        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, Sent());
+        page.WaitForAssertion(() => Assert.AreEqual($"The event was not saved. {message} {ReadAgain}", Assert.ContainsSingle(EditDialog(page).Alerts())));
+        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, OpenReads());
+        Assert.IsEmpty(Sent());
+    }
+
+    // Only a series scope needs the Series: a failed read leaves This event only and an unchanged save as they were.
+    [TestMethod]
+    [DataRow("This event only")]
+    [DataRow("no change")]
+    public async Task AFailedSeriesRead_StillSavesThisEventOnly_AndAnUnchangedOccurrence(string how)
+    {
+        api.Status(HttpMethod.Get, SeriesPath(RaidSeries), HttpStatusCode.InternalServerError);
+        var page = await OpenEdit("Weekly raid");
+        if (how == "This event only")
+        {
+            await Rename(page, "Raid night");
+            await Update(page);
+            await ChooseAndConfirm(page, how);
+        }
+        else await Update(page);
+
+        page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
+        CollectionAssert.AreEqual(new[] { $"PUT {EventPath(raid)}" }, Sent());
+        Assert.IsEmpty(page.PageAlerts());
+    }
+
+    // Story 22: another admin saves the Series after this edit dialog opened and before Confirm. The series scope sends
+    // the eTag read when the dialog opened, so the API refuses it (409) instead of this admin silently overwriting the
+    // other's change. The dialog stays open with the API's words; no Event PUT and no list reload follow.
+    [TestMethod]
+    [DataRow("This and following events")]
+    [DataRow("All future events")]
+    public async Task ASeriesSavedByAnotherAdmin_AfterTheDialogOpened_IsRefused_NotOverwritten(string option)
+    {
+        // The API as it behaves: a Series PUT whose If-Match is not the version stored now is a 409.
+        var current = RaidTag;
+        api.On(HttpMethod.Put, SeriesPath(RaidSeries), () => api.IfMatches(HttpMethod.Put, SeriesPath(RaidSeries))[^1] == current
+            ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }
+            : new HttpResponseMessage(HttpStatusCode.Conflict) { Content = new StringContent(Stale) });
+        var page = await OpenEdit("Weekly raid");
+        var reads = api.Count(HttpMethod.Get, "/api/events");
+
+        // Another admin renames the Series: it now reads back with that name and a newer eTag.
+        var other = JsonSerializer.Deserialize<SeriesEntity>(JsonSerializer.Serialize(raidSeries, JsonSerializerOptions.Web), JsonSerializerOptions.Web)!;
+        other.Name = "Raid by another admin";
+        current = OtherTag;
+        api.On(HttpMethod.Get, SeriesPath(RaidSeries), () => Stored(other, OtherTag));
+
+        await Rename(page, "Raid night");
+        await Update(page);
+        await ChooseAndConfirm(page, option);
+
+        page.WaitForAssertion(() => Assert.AreEqual(1, api.Count(HttpMethod.Put, SeriesPath(RaidSeries))));
+        CollectionAssert.AreEqual(new[] { RaidTag }, api.IfMatches(HttpMethod.Put, SeriesPath(RaidSeries)), "the edit was sent under a version read after the dialog opened");
+        page.WaitForAssertion(() => Assert.AreEqual($"The event was not saved. {Stale}", Assert.ContainsSingle(EditDialog(page).Alerts())));
+        var query = option == "All future events" ? "scope=all" : $"scope=following&occurrence={raid.Id:D}";
+        CollectionAssert.AreEqual(new[] { $"PUT {SeriesPath(RaidSeries)}?{query}" }, Sent());
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, EventPath(raid)), "an Event PUT followed the refused Series PUT");
+        Assert.IsTrue(page.HasFormDialog(), "the edit dialog closed after the refusal");
+        Assert.IsFalse(HasScopeQuestion(page));
+        Assert.AreEqual(reads, api.Count(HttpMethod.Get, "/api/events"), "the list was read again as after a save");
+        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, OpenReads(), "opening the edit dialog did not read the Series");
+    }
+
+    // A Series read without its version could only be written back unconditionally: no PUT is sent, and the dialog says why.
+    [TestMethod]
+    [DataRow("This and following events")]
+    [DataRow("All future events")]
+    public async Task ASeriesReadWithoutAnETag_SendsNoPut_AndSaysWhy(string option)
+    {
+        api.Json(HttpMethod.Get, SeriesPath(RaidSeries), raidSeries);
+        var page = await OpenEdit("Weekly raid");
+        await Rename(page, "Raid night");
+        await Update(page);
+
+        await ChooseAndConfirm(page, option);
+
+        page.WaitForAssertion(() => Assert.AreEqual($"The event was not saved. {NoVersion}", Assert.ContainsSingle(EditDialog(page).Alerts())));
+        Assert.IsEmpty(Sent());
+        Assert.AreEqual(0, api.Count(HttpMethod.Put, SeriesPath(RaidSeries)));
+        Assert.IsTrue(page.HasFormDialog(), "the edit dialog closed");
+        Assert.IsFalse(page.FormDialog().Button("Update Event").IsBusy(), "the dialog stayed busy");
     }
 
     [TestMethod]
@@ -111,7 +201,8 @@ public sealed class OccurrenceEditGuardTests : OccurrenceEditFixture
         page.WaitForAssertion(() => Assert.AreEqual(
             "The event was not saved. At the series' own UTC offset this time falls on another day, so only this event can take it. Choose This event only, or another time.",
             Assert.ContainsSingle(EditDialog(page).Alerts())));
-        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, Sent());
+        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, OpenReads());
+        Assert.IsEmpty(Sent());
     }
 
     [TestMethod]
@@ -180,7 +271,11 @@ public sealed class OccurrenceEditGuardTests : OccurrenceEditFixture
         Assert.AreEqual("What to update", group.GetAttribute("aria-label"));
         var radios = group.QuerySelectorAll("fluent-radio").ToList();
         CollectionAssert.AreEqual(new[] { "This event only", "This and following events", "All future events" }, radios.Select(r => r.GetAttribute("aria-label")).ToList());
-        Assert.AreEqual(1, radios.Select(r => r.GetAttribute("name")).Append(group.GetAttribute("name")).Distinct().Count());
+        // One shared, non-empty name for the group and every radio: the browser's arrow keys move only between radios
+        // of one name, and Tab enters and leaves the group once.
+        var name = group.GetAttribute("name");
+        Assert.IsFalse(string.IsNullOrEmpty(name), "the radio group has no name");
+        CollectionAssert.AreEqual(new[] { name, name, name }, radios.Select(r => r.GetAttribute("name")).ToList());
         Assert.AreEqual("Cancel", ScopeQuestion(page).QuerySelectorAll("fluent-button").First().TextContent.Trim());
 
         // ArrowDown twice from the first radio, then back up once.
@@ -191,6 +286,7 @@ public sealed class OccurrenceEditGuardTests : OccurrenceEditFixture
         await ConfirmButton(page).ClickAsync(new());
 
         page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
-        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(CupSeries)}", $"PUT {SeriesPath(CupSeries)}?scope=following&occurrence={cup.Id:D}" }, Sent());
+        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(CupSeries)}" }, OpenReads());
+        CollectionAssert.AreEqual(new[] { $"PUT {SeriesPath(CupSeries)}?scope=following&occurrence={cup.Id:D}" }, Sent());
     }
 }

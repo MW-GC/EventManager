@@ -98,7 +98,8 @@ public sealed class OccurrenceEditScopeTests : OccurrenceEditFixture
         await ChooseAndConfirm(page, "This and following events");
 
         page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
-        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}", $"PUT {SeriesPath(RaidSeries)}?scope=following&occurrence={raid.Id:D}" }, Sent());
+        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, OpenReads());
+        CollectionAssert.AreEqual(new[] { $"PUT {SeriesPath(RaidSeries)}?scope=following&occurrence={raid.Id:D}" }, Sent());
         CollectionAssert.AreEqual(new[] { RaidTag }, api.IfMatches(HttpMethod.Put, SeriesPath(RaidSeries)));
         // The new Series starts on the Occurrence's own day at the Series' offset, at the Series' unchanged time of day.
         AssertStoredBut(SentSeries(RaidSeries), "Raid night", new DateTimeOffset(2026, 10, 15, 19, 0, 0, RaidOffset), uniqueGames: true);
@@ -115,7 +116,8 @@ public sealed class OccurrenceEditScopeTests : OccurrenceEditFixture
         await ChooseAndConfirm(page, "All future events");
 
         page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
-        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}", $"PUT {SeriesPath(RaidSeries)}?scope=all" }, Sent());
+        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, OpenReads());
+        CollectionAssert.AreEqual(new[] { $"PUT {SeriesPath(RaidSeries)}?scope=all" }, Sent());
         CollectionAssert.AreEqual(new[] { RaidTag }, api.IfMatches(HttpMethod.Put, SeriesPath(RaidSeries)));
         AssertStoredBut(SentSeries(RaidSeries), "Raid night", raidSeries.Schedule.First, uniqueGames: true);
     }
@@ -137,7 +139,8 @@ public sealed class OccurrenceEditScopeTests : OccurrenceEditFixture
 
         page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
         var query = option == "All future events" ? "scope=all" : $"scope=following&occurrence={occurrence.Id:D}";
-        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(series)}", $"PUT {SeriesPath(series)}?{query}" }, Sent());
+        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(series)}" }, OpenReads());
+        CollectionAssert.AreEqual(new[] { $"PUT {SeriesPath(series)}?{query}" }, Sent());
         CollectionAssert.AreEqual(new[] { tag }, api.IfMatches(HttpMethod.Put, SeriesPath(series)));
         Assert.AreEqual(series, SentSeries(series).Id);
         Assert.AreEqual(0, api.Count(HttpMethod.Put, SeriesPath(other)));
@@ -218,6 +221,7 @@ public sealed class OccurrenceEditScopeTests : OccurrenceEditFixture
     // the Event route included (the API takes an Occurrence with none). Unchanged, it keeps the 1 to 5 message as before.
     [TestMethod]
     [DataRow("This event only")]
+    [DataRow("This and following events")]
     [DataRow("All future events")]
     public async Task AnUnrolledOccurrencesRename_IsAsked_AndSavesWithNoSlots(string option)
     {
@@ -234,7 +238,8 @@ public sealed class OccurrenceEditScopeTests : OccurrenceEditFixture
             CollectionAssert.AreEqual(new[] { $"PUT {EventPath(empty)}" }, Sent());
             Assert.IsEmpty(SentEvent(empty).Selections);
         }
-        else CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}", $"PUT {SeriesPath(RaidSeries)}?scope=all" }, Sent());
+        else CollectionAssert.AreEqual(new[] { $"PUT {SeriesPath(RaidSeries)}?{(option == "All future events" ? "scope=all" : $"scope=following&occurrence={empty.Id:D}")}" }, Sent());
+        CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, OpenReads());
     }
 
     [TestMethod]

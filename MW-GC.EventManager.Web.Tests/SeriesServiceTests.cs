@@ -88,15 +88,18 @@ public sealed class SeriesServiceTests
         Assert.AreEqual((SeriesId, "Raid night", 4), (body.Id, body.Name, body.SlotCount));
     }
 
+    // An update without the eTag read would be the last writer winning over another admin's change: it is never sent.
     [TestMethod]
-    public async Task UpdateWithNoETagSendsNoIfMatch()
+    [DataRow(null)]
+    [DataRow("")]
+    public async Task UpdateWithNoETag_SendsNothing(string? eTag)
     {
         var recorder = new Recorder();
         using var http = new HttpClient(recorder) { BaseAddress = new Uri("https://example.test/") };
 
-        using var response = await new SeriesService(http).UpdateAsync(new SeriesEntity { Id = SeriesId }, null, SeriesScope.All, Guid.NewGuid());
+        await Assert.ThrowsAsync<ArgumentException>(() => new SeriesService(http).UpdateAsync(new SeriesEntity { Id = SeriesId }, eTag!, SeriesScope.All, Guid.NewGuid()));
 
-        Assert.IsNull(Assert.ContainsSingle(recorder.Sent).IfMatch);
+        Assert.IsEmpty(recorder.Sent);
     }
 
     private static readonly Guid SeriesId = Guid.Parse("c0ffee00-1234-4321-abcd-0123456789ab");

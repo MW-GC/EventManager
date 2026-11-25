@@ -158,6 +158,28 @@ public sealed class SeriesEditTests
         Assert.AreEqual(new DateTimeOffset(2026, 10, 15, 19, 0, 0, Summer), body.Schedule.First);
     }
 
+    // An Occurrence at 21:00 on 15 October at the Series' UTC-04:00 is 01:00 on 16 October in UTC (and 06:45 on 16
+    // October in the browser): "This and following" starts on 15 October, the key's day at the Series' own offset.
+    [TestMethod]
+    [DataRow("name")]
+    [DataRow("time")]
+    public void Following_StartsOnTheKeysDayAtTheSeriesOffset_NotItsUtcDay(string change)
+    {
+        var stored = Stored(new DateTimeOffset(2026, 9, 24, 21, 0, 0, Summer));
+        var key = new DateTimeOffset(2026, 10, 15, 21, 0, 0, Summer);
+        var late = new EventEntity { Name = "Raid", Date = key, OccurrenceKey = key, SeriesId = stored.Id };
+        // 22:00 on 15 October at UTC-04:00 is 07:45 on 16 October in the browser.
+        var edits = change == "name"
+            ? new OccurrenceEdits("Raid 2", key.ToOffset(Browser), true, [])
+            : new OccurrenceEdits("Raid", new DateTimeOffset(2026, 10, 16, 7, 45, 0, Browser), true, []);
+
+        var body = SeriesEdit.Body(stored, late, edits, SeriesScope.Following);
+
+        Assert.AreEqual(new DateTimeOffset(2026, 10, 15, change == "name" ? 21 : 22, 0, 0, Summer), body.Schedule.First);
+        Assert.AreEqual(Summer, body.Schedule.First.Offset);
+        Assert.IsNull(SeriesEdit.OtherDay(stored, late, edits));
+    }
+
     [TestMethod]
     [DataRow(11, 0, true)]
     [DataRow(4, 0, false)]

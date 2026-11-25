@@ -177,6 +177,8 @@
     {
         _customizeError = null;
         _editingEvent = e;
+        // An Occurrence's Series is read now, before the admin changes anything (story 22).
+        ReadSeriesOf(e);
         _planner.GenerationError = null;
         _custName = e.Name;
         var localStart = e.Date.ToLocalTime().DateTime;

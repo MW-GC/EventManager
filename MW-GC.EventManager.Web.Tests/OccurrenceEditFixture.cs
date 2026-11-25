@@ -126,7 +126,8 @@ public abstract class OccurrenceEditFixture : IDisposable
         return response;
     }
 
-    // The Events page, loaded, with the edit dialog of the row named so open.
+    // The Events page, loaded, with the edit dialog of the row named so open. What opening it read is OpenReads(); what
+    // the save sends afterwards is Sent().
     protected async Task<IRenderedComponent<Events>> OpenEdit(string row)
     {
         if (TimeZoneInfo.Local.BaseUtcOffset != Kathmandu) Assert.Inconclusive("This platform does not take the local zone from TZ.");
@@ -134,11 +135,21 @@ public abstract class OccurrenceEditFixture : IDisposable
         page.WaitForRows(4);
         await RowButton(page, row, "Edit").ClickAsync(new());
         Assert.AreEqual("Edit Event", page.DialogTitle());
+        opened = uris.Sent.Count;
         return page;
     }
 
-    // Every request but the page's first loads, in order, with its query: "GET /api/series/...", "PUT /api/events/...".
-    protected List<string> Sent() => uris.Sent.Where(s => !s.StartsWith("GET /api/") || s.StartsWith("GET /api/series/")).ToList();
+    // How many requests had been sent when the edit dialog finished opening.
+    private int opened;
+
+    // Every request the save sent once the edit dialog was open, in order, with its query (the list reloads left out):
+    // "PUT /api/series/...?scope=all", "PUT /api/events/...".
+    protected List<string> Sent() => uris.Sent.Skip(opened).Where(NotALoad).ToList();
+
+    // Every request but the page's first loads that opening the edit dialog sent: an Occurrence's Series read.
+    protected List<string> OpenReads() => uris.Sent.Take(opened).Where(NotALoad).ToList();
+
+    private static bool NotALoad(string sent) => !sent.StartsWith("GET /api/") || sent.StartsWith("GET /api/series/");
 
     protected static Task Rename(IRenderedComponent<Events> page, string name) =>
         page.FormDialog().QuerySelector("fluent-text-field[placeholder='Enter event name...']")!.InputAsync(new ChangeEventArgs { Value = name });

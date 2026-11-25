@@ -57,16 +57,18 @@ public sealed class SeriesService(HttpClient http)
     /// <summary>
     /// Edits the Series <paramref name="series"/> names with <paramref name="scope"/>; <see cref="SeriesScope.Following"/>
     /// starts the change at <paramref name="occurrenceId"/>, the Occurrence the admin edited. <paramref name="eTag"/> is
-    /// the one <see cref="GetAsync"/> read, sent as <c>If-Match</c> as read (Azure's weak tags are not .NET-parsed).
+    /// the one <see cref="GetAsync"/> read, sent as <c>If-Match</c> as read (Azure's weak tags are not .NET-parsed). It is
+    /// required: without it the API would write over a Series another admin saved meanwhile, so none is never sent.
     /// </summary>
-    public async Task<HttpResponseMessage> UpdateAsync(SeriesEntity series, string? eTag, SeriesScope scope, Guid occurrenceId)
+    public async Task<HttpResponseMessage> UpdateAsync(SeriesEntity series, string eTag, SeriesScope scope, Guid occurrenceId)
     {
+        ArgumentException.ThrowIfNullOrEmpty(eTag);
         var query = scope == SeriesScope.Following ? $"scope=following&occurrence={occurrenceId:D}" : "scope=all";
         using var request = new HttpRequestMessage(HttpMethod.Put, $"api/series/{series.Id}?{query}")
         {
             Content = JsonContent.Create(series)
         };
-        if (eTag is not null) request.Headers.TryAddWithoutValidation("If-Match", eTag);
+        request.Headers.TryAddWithoutValidation("If-Match", eTag);
         return await http.SendAsync(request);
     }
 }

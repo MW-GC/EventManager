@@ -33,6 +33,12 @@ public static class SeriesEdit
     /// <summary>A series scope refused before the Series is written: the new time is on another day at the Series' offset.</summary>
     public const string OtherDayMessage = "At the series' own UTC offset this time falls on another day, so only this event can take it. Choose This event only, or another time.";
 
+    /// <summary>After the message of a failed Series read: the read is taken again only when the edit dialog opens again.</summary>
+    public const string ReadAgainMessage = "Close this dialog and edit the event again to read its series.";
+
+    /// <summary>A series scope refused before any write: the Series was read without the version If-Match must name.</summary>
+    public const string NoVersionMessage = "The series was read without its version, so saving it could overwrite another admin's change. Close this dialog and edit the event again.";
+
     /// <summary>
     /// What changed. The day and the time of day are read at <paramref name="edits"/>' own UTC offset (the browser's,
     /// as the dialog shows them), so an unchanged date and time are never a change. Slots compare by their Game and

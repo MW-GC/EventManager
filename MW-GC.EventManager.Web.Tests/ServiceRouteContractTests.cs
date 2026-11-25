@@ -51,7 +51,7 @@ public sealed class ServiceRouteContractTests
         // the API route is matched without it. The edit's "following" query is pinned in SeriesServiceTests.
         new(typeof(SeriesService), nameof(SeriesService.CreateAsync), "POST", "api/series", h => new SeriesService(h).CreateAsync(new SeriesEntity { Id = Id }, Guid.NewGuid())),
         new(typeof(SeriesService), nameof(SeriesService.GetAsync), "GET", "api/series/{id}", h => new SeriesService(h).GetAsync(Id)),
-        new(typeof(SeriesService), nameof(SeriesService.UpdateAsync), "PUT", "api/series/{id}?scope=all", h => new SeriesService(h).UpdateAsync(new SeriesEntity { Id = Id }, null, SeriesScope.All, Guid.NewGuid())),
+        new(typeof(SeriesService), nameof(SeriesService.UpdateAsync), "PUT", "api/series/{id}?scope=all", h => new SeriesService(h).UpdateAsync(new SeriesEntity { Id = Id }, "W/\"1\"", SeriesScope.All, Guid.NewGuid())),
         new(typeof(SeriesService), nameof(SeriesService.DeleteAsync), "DELETE", "api/series/{id}?scope=all", h => new SeriesService(h).DeleteAsync(Id)),
 
         new(typeof(EventMetricsClient), nameof(EventMetricsClient.LoadAllAsync), "GET", "api/event-metrics", h => new EventMetricsClient(h).LoadAllAsync()),
