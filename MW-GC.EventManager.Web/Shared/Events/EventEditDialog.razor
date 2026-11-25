@@ -99,7 +99,8 @@
     internal void OpenCreate() { ShowCustomize(); StateHasChanged(); }
     internal void OpenEdit(EventEntity e) { ShowEditEvent(e); StateHasChanged(); }
 
-    // A filter input in the SlotPanel changed.
+    // A filter input in the SlotPanel changed. Keeps the five Filters the dialog binds itself; players tonight and
+    // longest duration are not read from filter: the boxes typed them into _playersDuration, which SyncFilter reads.
     private void ApplyFilter(SlotFilter filter)
     {
         _custThemedOnly = filter.ThemedOnly;
@@ -110,7 +111,7 @@
         SyncFilter();
     }
 
-    // Hands the filter inputs to the planner; called whenever one of them changes.
+    // Hands the filter inputs to the planner, the two boxes' values from _playersDuration; called whenever one changes.
     private void SyncFilter() => _planner.Filter = _playersDuration.ApplyTo(
         new SlotFilter(_custThemedOnly, _custGameIds, _custThemeIds, _custHolidayIds, _custUniqueGames));
 

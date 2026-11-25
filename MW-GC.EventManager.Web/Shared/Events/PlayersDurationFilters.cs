@@ -37,7 +37,7 @@ public sealed class PlayersDurationFilters
     public void Type(Field field, string? text) => _texts[field] = text ?? string.Empty;
 
     /// <summary>The number the box turns its Filter on with; null when it is empty or its text is not valid.</summary>
-    public int? Value(Field field) => Read(field, out var value) ? value : null;
+    private int? Value(Field field) => Read(field, out var value) ? value : null;
 
     /// <summary>The box's message while its text is not valid; null when it is empty or valid.</summary>
     public string? Message(Field field) => Read(field, out _) ? null : field.Message;

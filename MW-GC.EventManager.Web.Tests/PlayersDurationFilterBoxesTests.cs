@@ -3,6 +3,7 @@ using Bunit;
 using Microsoft.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
+using MW_GC.EventManager.Web.Shared.Library;
 using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
@@ -89,11 +90,20 @@ public sealed class PlayersDurationFilterBoxesTests : IDisposable
     [DataRow(Players, "-3", PlayersMessage)]
     [DataRow(Players, "2.5", PlayersMessage)]
     [DataRow(Players, "100", PlayersMessage)]
+    // Whole numbers written as a decimal, an exponent, with a thousands separator or in brackets are refused too.
+    [DataRow(Players, "2.0", PlayersMessage)]
+    [DataRow(Players, "1e1", PlayersMessage)]
+    [DataRow(Players, "1,0", PlayersMessage)]
+    [DataRow(Players, "(5)", PlayersMessage)]
     [DataRow(Duration, "abc", DurationMessage)]
     [DataRow(Duration, "0", DurationMessage)]
     [DataRow(Duration, "-30", DurationMessage)]
     [DataRow(Duration, "30.5", DurationMessage)]
     [DataRow(Duration, "1441", DurationMessage)]
+    [DataRow(Duration, "2.0", DurationMessage)]
+    [DataRow(Duration, "1e1", DurationMessage)]
+    [DataRow(Duration, "1,0", DurationMessage)]
+    [DataRow(Duration, "(5)", DurationMessage)]
     public async Task AValueThatIsNotValid_ShowsTheBoxsMessage_AndLeavesItsFilterOff(string box, string text, string message)
     {
         var page = await OpenCreate();
@@ -118,19 +128,51 @@ public sealed class PlayersDurationFilterBoxesTests : IDisposable
 
     // ---- accessible names and the hint ---------------------------------------------------------
 
+    // The field is found through its visible label, never by the name being checked.
     [TestMethod]
-    [DataRow(Players)]
-    [DataRow(Duration)]
-    public async Task EachBox_HasItsAccessibleName_AndNamesItsMessage(string box)
+    [DataRow(Players, "filter-players-tonight", "filter-players-tonight-message")]
+    [DataRow(Duration, "filter-longest-duration", "filter-longest-duration-message")]
+    public async Task EachBox_HasItsAccessibleName_AndNamesItsMessage(string box, string id, string messageId)
     {
         var page = await OpenCreate();
 
-        var field = Box(page, box);
-        Assert.AreEqual(box, field.GetAttribute("aria-label"));
         var label = page.FormDialog().QuerySelectorAll("label").Single(l => l.TextContent.Trim() == box);
-        Assert.AreEqual(field.Id, label.GetAttribute("for"));
-        var holder = page.Find($"[id='{field.GetAttribute("aria-describedby")}']");
+        Assert.AreEqual(id, label.GetAttribute("for"));
+        var field = page.FormDialog().QuerySelector($"fluent-text-field#{id}")
+            ?? throw new AssertFailedException($"No box with the id {id}.");
+        Assert.AreEqual(box, field.GetAttribute("aria-label"));
+        Assert.AreEqual(messageId, field.GetAttribute("aria-describedby"));
+        var holder = page.Find($"#{messageId}");
         Assert.AreSame(field.ParentElement, holder.ParentElement);
+    }
+
+    // The message is inside the element the box names, so a screen reader reads it with the box.
+    [TestMethod]
+    [DataRow(Players, PlayersMessage)]
+    [DataRow(Duration, DurationMessage)]
+    public async Task ABoxsMessage_SitsInsideTheHolderItsBoxNames(string box, string message)
+    {
+        var page = await OpenCreate();
+
+        await Type(page, box, "abc");
+
+        var holder = page.Find($"[id='{Box(page, box).GetAttribute("aria-describedby")}']");
+        Assert.AreEqual(message, Assert.ContainsSingle(holder.Alerts()));
+    }
+
+    // Each message is linked into its field's shadow root by the module the Activities editor uses.
+    [TestMethod]
+    public async Task TheBoxes_LinkTheirMessagesIntoTheFieldsShadowRoots()
+    {
+        var module = harness.JSInterop.SetupModule(LibraryFieldMessage.Module);
+
+        var page = await OpenCreate();
+
+        page.WaitForAssertion(() => CollectionAssert.AreEquivalent(
+            new[] { "filter-players-tonight-message", "filter-longest-duration-message" },
+            module.Invocations["link"].Select(i => (string)i.Arguments[0]!).ToList()));
+        var named = new[] { Players, Duration }.Select(b => Box(page, b).GetAttribute("aria-describedby")).ToList();
+        CollectionAssert.AreEquivalent(named, module.Invocations["link"].Select(i => (string)i.Arguments[0]!).ToList());
     }
 
     [TestMethod]
@@ -183,6 +225,40 @@ public sealed class PlayersDurationFilterBoxesTests : IDisposable
         Assert.AreEqual(string.Empty, Box(page, Duration).GetAttribute("value") ?? string.Empty);
         Assert.IsEmpty(page.FormDialog().Alerts());
         Assert.Contains(stock.Id.ToString(), BrawlActivityOptions(page));
+    }
+
+    // Opening Edit on an Event starts the boxes again too. The Event's Brawl slot holds Plain, so its picker offers
+    // Stock only while both Filters are off.
+    [TestMethod]
+    public async Task OpeningEdit_AfterTypingInACreateDialog_StartsWithBothBoxesEmptyAndOff()
+    {
+        var night = new EventEntity
+        {
+            Name = "Game night",
+            Date = new DateTimeOffset(2026, 10, 9, 19, 0, 0, TimeSpan.Zero),
+            Selections = [Pick(kart, race), Pick(brawl, plain)]
+        };
+        api.Json(HttpMethod.Get, "/api/events", new[] { night });
+        var page = await OpenCreate();
+        page.WaitForAssertion(() => Assert.IsTrue(page.Rows().Any(r => r.Contains("Game night"))));
+        await Type(page, Players, "5");
+        await Type(page, Duration, "30");
+        Assert.Contains(Hint, page.FormDialog().TextContent);
+        await page.FormDialog().Button("Cancel").ClickAsync(new());
+
+        await RowButton(page, "Game night", "Edit").ClickAsync(new());
+
+        Assert.AreEqual(string.Empty, Box(page, Players).GetAttribute("value") ?? string.Empty);
+        Assert.AreEqual(string.Empty, Box(page, Duration).GetAttribute("value") ?? string.Empty);
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        Assert.DoesNotContain(Hint, page.FormDialog().TextContent);
+        CollectionAssert.AreEquivalent(new[] { stock.Id.ToString(), plain.Id.ToString() }, BrawlActivityOptions(page));
+        // The text typed in the create dialog is not this dialog's starting text: emptying both boxes changes nothing.
+        await Type(page, Players, "");
+        await Type(page, Duration, "");
+        await Dismiss(page);
+        Assert.IsFalse(page.HasConfirmation());
+        Assert.IsFalse(page.HasFormDialog());
     }
 
     // ---- helpers -------------------------------------------------------------------------------

@@ -29,7 +29,7 @@
 @code {
     // The typed text of both boxes, kept by the dialog so it resets with every opening.
     [Parameter, EditorRequired] public PlayersDurationFilters Boxes { get; set; } = null!;
-    // A box changed: the panel hands the Filters it now turns on to the dialog.
+    // A box changed and its text is already in Boxes: the panel tells the dialog, which reads the values from Boxes.
     [Parameter] public EventCallback Typed { get; set; }
 
     private IJSObjectReference? _module;
