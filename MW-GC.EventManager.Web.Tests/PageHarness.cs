@@ -112,16 +112,10 @@ internal static class Rendered
 }
 
 // The Comments panel inside a page's details dialog (Activities or Events), as a user sees it (#131, #132).
-// Shared by the tests of both dialogs; import with `using static`.
+// Shared by the tests of both dialogs; import with `using static`. What any page does (a row's button, Dismiss)
+// is in PageActions (#200.9), not here.
 internal static class CommentsPanelView
 {
-    // The page's row (outside any dialog) that names the item, and its button with this title, such as Details.
-    public static IElement RowButton<T>(IRenderedComponent<T> page, string item, string title) where T : IComponent =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
-
     // One list item per Comment, in the order shown.
     public static List<IElement> Items<T>(IRenderedComponent<T> page) where T : IComponent =>
         page.FormDialog().QuerySelectorAll("li.comment").ToList();
@@ -148,13 +142,6 @@ internal static class CommentsPanelView
     {
         await button.ClickAsync(new());
         page.WaitForAssertion(() => Assert.IsFalse(page.FormDialog().Button("Close").IsBusy()));
-    }
-
-    // Overlay click or Escape on the details dialog.
-    public static Task Dismiss<T>(IRenderedComponent<T> page) where T : IComponent
-    {
-        var dialog = page.FormDialog();
-        return dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
     }
 
     // A Comment's added time: a local wall-clock time, sent in UTC as the API sends it. The panel shows local

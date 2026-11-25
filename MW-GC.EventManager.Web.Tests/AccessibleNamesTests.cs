@@ -9,6 +9,7 @@ using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
 using MW_GC.EventManager.Web.Services;
 using MW_GC.EventManager.Web.Shared;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -492,21 +493,18 @@ public sealed class AccessibleNamesTests : IDisposable
             case "activities-create": await page.Button("Add Activity").ClickAsync(new()); break;
             case "themes-create": await page.Button("Add Theme").ClickAsync(new()); break;
             case "holidays-create": await page.Button("Add Holiday").ClickAsync(new()); break;
-            case "events-edit": await RowButton(page, "Game night", "Edit"); break;
-            case "events-details": await RowButton(page, "Game night", "Details"); break;
-            case "games-edit": await RowButton(page, "Alpha", "Edit"); break;
-            case "activities-edit": await RowButton(page, "Tagged", "Edit"); break;
-            case "activities-details": await RowButton(page, "Tagged", "Details"); break;
-            case "themes-edit": await RowButton(page, "Spooky", "Edit"); break;
-            case "holidays-edit": await RowButton(page, "Halloween", "Edit"); break;
+            case "events-edit": await RowButton(page, "Game night", "Edit").ClickAsync(new()); break;
+            case "events-details": await RowButton(page, "Game night", "Details").ClickAsync(new()); break;
+            case "games-edit": await RowButton(page, "Alpha", "Edit").ClickAsync(new()); break;
+            case "activities-edit": await RowButton(page, "Tagged", "Edit").ClickAsync(new()); break;
+            case "activities-details": await RowButton(page, "Tagged", "Details").ClickAsync(new()); break;
+            case "themes-edit": await RowButton(page, "Spooky", "Edit").ClickAsync(new()); break;
+            case "holidays-edit": await RowButton(page, "Halloween", "Edit").ClickAsync(new()); break;
             default: throw new ArgumentOutOfRangeException(nameof(form), form);
         }
         Assert.IsTrue(page.HasFormDialog());
         return page;
     }
-
-    private static Task RowButton(IRenderedComponent<IComponent> page, string item, string title) =>
-        Row(page, item).QuerySelector($"fluent-button[title={title}]")!.ClickAsync(new());
 
     private static IElement Row(IRenderedComponent<IComponent> page, string item) =>
         page.FindAll("tbody tr.fluent-data-grid-row")

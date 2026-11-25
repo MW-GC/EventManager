@@ -86,6 +86,24 @@
 
         <FluentTextArea @bind-Value="edit.Item.SetupRequirements" Immediate="true" Label="Setup Requirements" Style="width: 100%;" Rows="3" Placeholder="What's needed to set up this activity..." />
 
+        @* #98: players and duration, each optional: empty is not set, so clearing one unsets it. The API's rules are
+           checked first (PlayersDurationFields) and each message shows under its field, as the Game's does. *@
+        <FluentGrid Spacing="3">
+            @foreach (var field in PlayersDurationFields.All)
+            {
+                var numbers = Numbers(edit.Item);
+                <FluentGridItem xs="12" sm="4">
+                    <div style="width: 100%;">
+                        <FluentTextField Id="@field.Id" Label="@field.Label" aria-label="@field.Label"
+                                         Value="@numbers.Text(field)" ValueChanged="@((string? v) => numbers.Type(field, v))"
+                                         Field="@(field.Key.On(edit.Item))" @attributes="@edit.FieldAttributes(field.Key)"
+                                         Immediate="true" Placeholder="@field.Placeholder" Style="width: 100%;" />
+                        <LibraryFieldMessage Field="@field.Key" />
+                    </div>
+                </FluentGridItem>
+            }
+        </FluentGrid>
+
         @* Side-by-side theme/holiday multi-select *@
         <FluentGrid Spacing="3">
             <FluentGridItem xs="12" sm="6">
@@ -201,7 +219,7 @@
                 @* #131: the Activity's Comments, read and written through their own routes (ADR 0001). Keyed by
                    the Activity, so another Activity gets a new panel. *@
                 <CommentsPanel @key="_detailActivity.Id" @ref="_commentsPanel" ActivityId="_detailActivity.Id" Events="DetailEvents"
-                               SavingChanged="@((bool running) => _commentRequestRunning = running)"
+                               RequestRunningChanged="@((bool running) => _commentRequestRunning = running)"
                                Ask="@((ConfirmRequest question) => _confirm = question)" />
             </FluentStack>
 
@@ -260,22 +278,38 @@
     {
         Id = a.Id, GameId = a.GameId, Name = a.Name, Description = a.Description,
         Rules = a.Rules, ThemeIds = [.. a.ThemeIds], HolidayIds = [.. a.HolidayIds],
-        SetupRequirements = a.SetupRequirements
+        SetupRequirements = a.SetupRequirements,
+        MinPlayers = a.MinPlayers, MaxPlayers = a.MaxPlayers, DurationMinutes = a.DurationMinutes
     };
 
-    // The bound fields of the Add or Edit dialog, compared to tell unsaved changes. Theme and Holiday
-    // ids count as sets: unticking a box and ticking it again moves its id to the end of the list.
-    private static object FormFields(ActivityEntity a) =>
-        new { a.GameId, a.Name, a.Description, a.Rules, a.SetupRequirements, ThemeIds = a.ThemeIds.Order(), HolidayIds = a.HolidayIds.Order() };
+    // The open editor's players and duration fields, made for the item in the form (a new item, or a new copy on Edit).
+    private PlayersDurationFields? _numbers;
 
-    // An Activity needs a Game; the API refuses one without it too.
-    private static IEnumerable<LibraryFieldError> Rules(ActivityEntity a) =>
-        LibraryRules.GameMessage(a.GameId) is { } message ? [new LibraryFieldError(GameField, message)] : [];
+    private PlayersDurationFields Numbers(ActivityEntity item) =>
+        _numbers is { } numbers && ReferenceEquals(numbers.Item, item) ? numbers : _numbers = new PlayersDurationFields(item);
+
+    // The bound fields of the Add or Edit dialog, compared to tell unsaved changes. Theme and Holiday
+    // ids count as sets: unticking a box and ticking it again moves its id to the end of the list. Text typed into
+    // players or duration that is not a number is a change too.
+    private object FormFields(ActivityEntity a) =>
+        new { a.GameId, a.Name, a.Description, a.Rules, a.SetupRequirements, ThemeIds = a.ThemeIds.Order(), HolidayIds = a.HolidayIds.Order(),
+              a.MinPlayers, a.MaxPlayers, a.DurationMinutes, Unreadable = Numbers(a).Unreadable() };
+
+    // An Activity needs a Game; the API refuses one without it too. Then the API's players and duration rules.
+    private IEnumerable<LibraryFieldError> Rules(ActivityEntity a)
+    {
+        if (LibraryRules.GameMessage(a.GameId) is { } message) yield return new LibraryFieldError(GameField, message);
+        foreach (var error in Numbers(a).Errors()) yield return error;
+    }
 
     private bool ByGame(ActivityEntity a) => _filterGame is null || a.GameId == _filterGame.Id;
 
+    // An Activity's Game name, or a dash while the Games have not loaded (or no longer have its Game): a name, not an
+    // Activity performance number, so it has its own dash rather than PerformanceFormat.NoValue (#198.8).
+    private const string NoGameName = "—";
+
     private string GameName(Guid gameId) =>
-        _games?.FirstOrDefault(g => g.Id == gameId)?.Name ?? PlayStats.NoValue;
+        _games?.FirstOrDefault(g => g.Id == gameId)?.Name ?? NoGameName;
 
     private static void ToggleId(List<Guid> list, Guid id, bool add)
     {

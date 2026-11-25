@@ -13,12 +13,6 @@ public sealed class RowAction
     /// <summary>Some row's action is running.</summary>
     public bool AnyBusy => BusyId is not null;
 
-    /// <summary>
-    /// The old name of <see cref="AnyBusy"/>, kept only for the Events list (Shared/Events/EventList.razor), which
-    /// another card owns; it moves to <see cref="AnyBusy"/> there and this goes.
-    /// </summary>
-    public bool Running => AnyBusy;
-
     public bool IsBusy(Guid id) => BusyId == id;
 
     public async Task RunAsync(Guid id, Func<Task> action)

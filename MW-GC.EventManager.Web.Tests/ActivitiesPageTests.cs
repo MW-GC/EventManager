@@ -7,6 +7,7 @@ using MW_GC.EventManager.API.Validation;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
 using MW_GC.EventManager.Web.Shared.Library;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -237,12 +238,6 @@ public sealed class ActivitiesPageTests : IDisposable
 
     private static IElement Search(IRenderedComponent<Activities> page) =>
         page.FindAll("fluent-search").Single(s => s.Closest("fluent-dialog") is null);
-
-    private static IElement RowButton(IRenderedComponent<Activities> page, string item, string title) =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
 
     private static JsonElement Json(string? body)
     {

@@ -97,7 +97,10 @@ internal sealed class ActivityFunctions
             Rules = source.Rules,
             ThemeIds = [.. source.ThemeIds],
             HolidayIds = [.. source.HolidayIds],
-            SetupRequirements = source.SetupRequirements
+            SetupRequirements = source.SetupRequirements,
+            MinPlayers = source.MinPlayers,
+            MaxPlayers = source.MaxPlayers,
+            DurationMinutes = source.DurationMinutes
         };
 
         // A new id, so this never replaces a row that still holds an old text: no conversion first.

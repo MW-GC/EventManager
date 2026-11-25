@@ -17,9 +17,10 @@ A game in the Library, with a name and optional image, icon and website links.
 
 **Activity**:
 Something to play in one Game, with a description, rules and setup
-requirements. Every Activity belongs to exactly one Game. Planned for 0.6.0
-(#203), not built yet: optional minimum players, maximum players and duration
-in minutes, each a whole number of at least 1, the minimum at most the maximum.
+requirements, and optional players (a minimum and a maximum, each 1 to 99, the
+minimum at most the maximum) and duration (in minutes, 1 to 1440). Every
+Activity belongs to exactly one Game. An Activity with none of these set is
+still a whole Activity: nothing has to be filled in.
 
 **Theme**:
 A named tag for Activities, such as Fantasy or Horror. An Activity can have any

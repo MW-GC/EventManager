@@ -7,6 +7,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -166,12 +167,6 @@ public sealed class ThemesHolidaysPageTests : IDisposable
 
     private static IElement NameField(IRenderedComponent<IComponent> page) =>
         page.FormDialog().QuerySelector("fluent-text-field")!;
-
-    private static IElement RowButton(IRenderedComponent<IComponent> page, string item, string title) =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item))
-            .QuerySelector($"fluent-button[title={title}]")!;
 
     private static IElement CardButton(IRenderedComponent<IComponent> page, string item, string title) =>
         page.FindAll("fluent-card")

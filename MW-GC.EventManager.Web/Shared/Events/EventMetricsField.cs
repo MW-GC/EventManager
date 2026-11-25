@@ -15,8 +15,6 @@ internal abstract class EventMetricsField(string label, string placeholder)
     public string Placeholder { get; } = placeholder;
     /// <summary>The text field's id, which its label points at.</summary>
     public string Id => "metrics-" + Label.ToLowerInvariant().Replace(' ', '-');
-    /// <summary>The id of the message under the field.</summary>
-    public string MessageId => Id + "-message";
 
     /// <summary>The text as typed.</summary>
     public string Text { get; set; } = string.Empty;

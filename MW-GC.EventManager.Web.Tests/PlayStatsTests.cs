@@ -272,7 +272,7 @@ public sealed class PlayStatsTests
     }
 
     [TestMethod]
-    public void AverageLikes_IsTheMeanLikeCountOfTheEventsTheActivityWasOfferedIn()
+    public void AverageLikes_IsTheMeanLikeCount_OfTheEventsOfferedIn()
     {
         var first = Event(Day(3, 1), sprint.Id, Pick(kart, sprint), Pick(puzzle, tiles));
         var second = Event(Day(4, 1), null, Pick(kart, sprint));
@@ -284,7 +284,7 @@ public sealed class PlayStatsTests
     }
 
     [TestMethod]
-    public void AverageAttendees_IsTheMeanAttendeesOfTheEventsTheActivityWasOfferedIn()
+    public void AverageAttendees_IsTheMeanAttendees_OfTheEventsOfferedIn()
     {
         var first = Event(Day(3, 1), sprint.Id, Pick(kart, sprint), Pick(puzzle, tiles));
         var second = Event(Day(4, 1), null, Pick(kart, sprint));

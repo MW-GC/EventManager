@@ -50,7 +50,7 @@ public sealed class CommentClientTests
 
         Assert.AreEqual("{\"text\":\"Ran long\"}", Assert.ContainsSingle(api.Bodies(HttpMethod.Post, ListPath)));
         Assert.IsNull(Assert.ContainsSingle(api.IfMatches(HttpMethod.Post, ListPath)));
-        var stored = Assert.IsInstanceOfType<CommentResult.Stored>(result).Comment!;
+        var stored = Assert.IsInstanceOfType<CommentResult.Stored>(result).Comment;
         Assert.AreEqual(CommentId, stored.Id);
         Assert.AreEqual(TagAsRead, stored.ETag.ToString());
     }
@@ -67,7 +67,7 @@ public sealed class CommentClientTests
         Assert.AreEqual("{\"text\":\"Ran long\",\"eventId\":\"99999999-8888-7777-6666-555555555555\"}",
             Assert.ContainsSingle(api.Bodies(HttpMethod.Post, ListPath)));
         Assert.IsNull(Assert.ContainsSingle(api.IfMatches(HttpMethod.Post, ListPath)));
-        Assert.AreEqual(CommentId, Assert.IsInstanceOfType<CommentResult.Stored>(result).Comment!.Id);
+        Assert.AreEqual(CommentId, Assert.IsInstanceOfType<CommentResult.Stored>(result).Comment.Id);
     }
 
     [TestMethod]
@@ -79,7 +79,7 @@ public sealed class CommentClientTests
 
         Assert.AreEqual("{\"text\":\"Ran longer\"}", Assert.ContainsSingle(api.Bodies(HttpMethod.Put, OnePath)));
         Assert.AreEqual(TagAsRead, Assert.ContainsSingle(api.IfMatches(HttpMethod.Put, OnePath)));
-        var stored = Assert.IsInstanceOfType<CommentResult.Stored>(result).Comment!;
+        var stored = Assert.IsInstanceOfType<CommentResult.Stored>(result).Comment;
         Assert.AreEqual("Ran longer", stored.Text);
         Assert.AreEqual(NewTag, stored.ETag.ToString());
     }
@@ -96,9 +96,13 @@ public sealed class CommentClientTests
         Assert.AreEqual(OnePath, request.Path);
         Assert.IsNull(request.Body);
         Assert.AreEqual(TagAsRead, Assert.ContainsSingle(api.IfMatches(HttpMethod.Delete, OnePath)));
-        Assert.IsNull(Assert.IsInstanceOfType<CommentResult.Stored>(result).Comment);
+        // #200.11: a delete is its own outcome, not a Stored with no Comment.
+        Assert.AreSame(CommentResult.Deleted.Instance, result);
     }
 
+    // #200.7: the DELETE 404 row stays on purpose. The API never sends it for a Comment already gone (that is a 204,
+    // CommentClient's NotFound doc says so), but a 404 can still reach the client from anything between, and it
+    // must be NotFound, never Deleted: a delete that did not reach the API must not remove the row.
     [TestMethod]
     [DataRow("PUT", HttpStatusCode.Conflict)]
     [DataRow("DELETE", HttpStatusCode.Conflict)]

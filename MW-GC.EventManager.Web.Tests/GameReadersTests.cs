@@ -66,7 +66,8 @@ public sealed class GameReadersTests : IDisposable
     public void ActivityDetails_PerformancePanel_SendsOneGamesRead()
     {
         var panel = harness.Render<ActivityPerformancePanel>(p => p.Add(x => x.ActivityId, race.Id));
-        panel.WaitForAssertion(() => Assert.IsNotNull(panel.Find(".performance-offered")));
+        // P4: a count, which fails while the panel still loads (Find would throw, never return null).
+        panel.WaitForAssertion(() => Assert.HasCount(1, panel.FindAll(".performance-offered")));
 
         Assert.AreEqual("1", panel.Find(".performance-offered").TextContent.Trim());
         Assert.AreEqual(1, api.Count(HttpMethod.Get, "/api/games"));

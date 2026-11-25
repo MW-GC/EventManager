@@ -111,8 +111,9 @@ public sealed class CommentsSelectWinnerTests : CommentsFromEventDetailsFixture
         var running = page.FormDialog().Button(request == "comment add" ? "Add Comment" : "Save metrics").ClickAsync(new());
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Close").IsBusy(), $"the {request} is running"));
 
-        Assert.IsTrue(page.Confirmation().Button("Discard").IsBusy(), "Discard waits while the request runs");
-        Assert.AreEqual("Discard", page.Confirmation().Button("Discard").TextContent.Trim());
+        // P5: disabled, not only showing a spinner (IsBusy accepts either); the button was found by its text, so its
+        // text is not checked again.
+        Assert.IsTrue(page.Confirmation().Button("Discard").HasAttribute("disabled"), "Discard waits while the request runs");
         Assert.IsFalse(page.Confirmation().Button("Keep editing").IsBusy());
         // A click that still reaches Discard's handler is held: the question stays and nothing is sent.
         await page.InvokeAsync(() => PageActions.ClickHandler(page, "Discard").InvokeAsync(new()));

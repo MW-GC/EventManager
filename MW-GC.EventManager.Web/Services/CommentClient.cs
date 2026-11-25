@@ -63,7 +63,7 @@ public sealed class CommentClient(HttpClient http)
             if (response.StatusCode == HttpStatusCode.Conflict) return CommentResult.Stale.Instance;
             if (response.StatusCode == HttpStatusCode.NotFound) return CommentResult.NotFound.Instance;
             if (await ApiResult.ErrorAsync(response) is { } error) return new CommentResult.Failed(error);
-            if (method == HttpMethod.Delete) return new CommentResult.Stored(null);
+            if (method == HttpMethod.Delete) return CommentResult.Deleted.Instance;
             return await response.Content.ReadFromJsonAsync<CommentEntity>() is { } comment
                 ? new CommentResult.Stored(comment)
                 : new CommentResult.Failed(ApiResult.UnreadableMessage);
@@ -78,13 +78,19 @@ public sealed class CommentClient(HttpClient http)
 /// <summary>A read of an Activity's Comments: the list, or the failure message.</summary>
 public sealed record CommentListResult(List<CommentEntity>? Comments, string? Error);
 
-/// <summary>An add, edit or delete of one Comment: exactly one of the four outcomes below.</summary>
+/// <summary>An add, edit or delete of one Comment: exactly one of the five outcomes below.</summary>
 public abstract record CommentResult
 {
     private CommentResult() { }
 
-    /// <summary>The API stored the write: the Comment as stored, with its new tag; null for a delete.</summary>
-    public sealed record Stored(CommentEntity? Comment) : CommentResult;
+    /// <summary>The API stored an add or edit: the Comment as stored, with its new tag.</summary>
+    public sealed record Stored(CommentEntity Comment) : CommentResult;
+
+    /// <summary>The API answered a delete with success (204), which it also does for a Comment already gone.</summary>
+    public sealed record Deleted : CommentResult
+    {
+        public static readonly Deleted Instance = new();
+    }
 
     /// <summary>The request failed; the message says why.</summary>
     public sealed record Failed(string Error) : CommentResult;
@@ -96,8 +102,10 @@ public abstract record CommentResult
     }
 
     /// <summary>
-    /// The API has no such Comment or Activity (404); <see cref="ApiResult.NotFoundMessage"/> says so. A delete
-    /// never gets it for a Comment that is already gone: the API answers that with 204.
+    /// A 404 on any write; <see cref="ApiResult.NotFoundMessage"/> says so. The API sends it for an edit of a Comment
+    /// or an add to an Activity that no longer exists. A delete never gets it for a Comment that is already gone (the
+    /// API answers that with 204), but a 404 on a delete (from anything between the page and the API) is still this
+    /// outcome, never a success, so a delete that did not reach the API never removes the row.
     /// </summary>
     public sealed record NotFound : CommentResult
     {
