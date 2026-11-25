@@ -15,9 +15,12 @@ public sealed record SlotSelection
 /// <summary>
 /// The filters that limit which Activities a roll may pick. An empty id list means no limit.
 /// ThemedOnly keeps Activities with at least one Theme or Holiday. UniqueGames keeps every slot on
-/// a different Game.
+/// a different Game. PlayersTonight and LongestDuration (#98), null when off, keep an Activity unless its
+/// minimum or maximum players excludes that number, or its duration is over that many minutes; a missing
+/// value never excludes.
 /// </summary>
-public sealed record SlotFilter(bool ThemedOnly, IReadOnlyList<Guid> GameIds, IReadOnlyList<Guid> ThemeIds, IReadOnlyList<Guid> HolidayIds, bool UniqueGames)
+public sealed record SlotFilter(bool ThemedOnly, IReadOnlyList<Guid> GameIds, IReadOnlyList<Guid> ThemeIds, IReadOnlyList<Guid> HolidayIds, bool UniqueGames,
+    int? PlayersTonight = null, int? LongestDuration = null)
 {
     /// <summary>What a new customize dialog starts with: no filters, Unique games only on.</summary>
     public static SlotFilter Default { get; } = new(false, [], [], [], true);
@@ -259,6 +262,11 @@ public sealed class SlotPlanner(Random random)
             q = q.Where(a => a.ThemeIds.Any(t => filter.ThemeIds.Contains(t)));
         if (filter.HolidayIds.Count > 0)
             q = q.Where(a => a.HolidayIds.Any(h => filter.HolidayIds.Contains(h)));
+        // A missing minimum, maximum or duration never excludes.
+        if (filter.PlayersTonight is { } players)
+            q = q.Where(a => (a.MinPlayers is null || a.MinPlayers <= players) && (a.MaxPlayers is null || players <= a.MaxPlayers));
+        if (filter.LongestDuration is { } limit)
+            q = q.Where(a => a.DurationMinutes is null || a.DurationMinutes <= limit);
         return q.ToList();
     }
 

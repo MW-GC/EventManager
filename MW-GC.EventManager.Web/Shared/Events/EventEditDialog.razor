@@ -30,7 +30,7 @@
                 </FluentGrid>
 
                 <SlotPanel Planner="_planner" Games="Games" Activities="Activities" Themes="Themes" Holidays="Holidays"
-                           FilterChanged="ApplyFilter" ReplacesWinner="ReplacesWinner" />
+                           PlayersDuration="_playersDuration" FilterChanged="ApplyFilter" ReplacesWinner="ReplacesWinner" />
             </FluentStack>
 
             @if (_customizeError is not null)
@@ -87,6 +87,8 @@
     private List<Guid> _custThemeIds = [];
     private List<Guid> _custHolidayIds = [];
     private bool _custUniqueGames = true;
+    // The players tonight and longest duration boxes (#98): off with every opening, never saved with the Event.
+    private PlayersDurationFilters _playersDuration = new();
     // The slots and every rule that fills them; the dialog keeps only what its inputs bind.
     private readonly SlotPlanner _planner = new(Random.Shared);
 
@@ -97,7 +99,8 @@
     internal void OpenCreate() { ShowCustomize(); StateHasChanged(); }
     internal void OpenEdit(EventEntity e) { ShowEditEvent(e); StateHasChanged(); }
 
-    // A filter input in the SlotPanel changed.
+    // A filter input in the SlotPanel changed. Keeps the five Filters the dialog binds itself; players tonight and
+    // longest duration are not read from filter: the boxes typed them into _playersDuration, which SyncFilter reads.
     private void ApplyFilter(SlotFilter filter)
     {
         _custThemedOnly = filter.ThemedOnly;
@@ -108,9 +111,9 @@
         SyncFilter();
     }
 
-    // Hands the filter inputs to the planner; called whenever one of them changes.
-    private void SyncFilter() => _planner.Filter =
-        new SlotFilter(_custThemedOnly, _custGameIds, _custThemeIds, _custHolidayIds, _custUniqueGames);
+    // Hands the filter inputs to the planner, the two boxes' values from _playersDuration; called whenever one changes.
+    private void SyncFilter() => _planner.Filter = _playersDuration.ApplyTo(
+        new SlotFilter(_custThemedOnly, _custGameIds, _custThemeIds, _custHolidayIds, _custUniqueGames));
 
     private void ShowCustomize()
     {
@@ -125,6 +128,7 @@
         _custThemeIds = [];
         _custHolidayIds = [];
         _custUniqueGames = true;
+        _playersDuration = new();
         SyncFilter();
         _planner.SetSlots([]);
         _planner.AddSlotError = null;
@@ -149,6 +153,7 @@
         _custGameIds = [];
         _custThemeIds = [];
         _custHolidayIds = [];
+        _playersDuration = new();
         SyncFilter();
         _planner.SetSlots(e.Selections.Select(s => new SlotSelection { GameId = s.Game.Id, ActivityId = s.Activity.Id, Stored = s }));
         _planner.AddSlotError = null;
@@ -169,6 +174,8 @@
         Time = _custTime?.TimeOfDay,
         _custThemedOnly, _custUniqueGames,
         _custGameIds, _custThemeIds, _custHolidayIds,
+        // As the other Filters count; the typed text, so text that is not valid counts too.
+        PlayersDuration = _playersDuration.Texts,
         Slots = _planner.Slots.Select(s => new { s.GameId, s.ActivityId })
     };
 

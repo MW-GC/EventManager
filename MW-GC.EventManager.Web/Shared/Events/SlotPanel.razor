@@ -1,8 +1,10 @@
 @* The Filters and slots of the create-and-edit Event dialog: Themed activities only, the Game, Theme
-   and Holiday filters, Unique games only, Randomize All, and one card per slot with its Game and
-   Activity pickers. The slots live in the SlotPlanner, which this panel drives directly. The filter
-   values belong to the dialog (they count as unsaved changes and Unique games only is saved): the
-   panel shows the planner's Filter and hands every change back through FilterChanged. *@
+   and Holiday filters, the players tonight and longest duration boxes, Unique games only, Randomize
+   All, and one card per slot with its Game and Activity pickers. The slots live in the SlotPlanner,
+   which this panel drives directly. The filter values belong to the dialog (they count as unsaved
+   changes and Unique games only is saved): the panel shows the planner's Filter and hands every
+   change back through FilterChanged. The two boxes write their text into PlayersDuration, the
+   dialog's own object, and then raise FilterChanged so the dialog reads them from there. *@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 
 @* Themed-only toggle *@
@@ -66,6 +68,12 @@
     </FluentGridItem>
 </FluentGrid>
 
+@* Players tonight and longest duration (#98): empty is off, and a value that is not valid leaves its Filter off.
+   The boxes have already written into PlayersDuration; the dialog reads the two values from it when it syncs. *@
+<FluentCard Style="padding: 12px;" AreaRestricted="false">
+    <PlayersDurationFilterBoxes Boxes="PlayersDuration" Typed="@(() => Change(Filter))" />
+</FluentCard>
+
 @* Selections header with controls *@
 <FluentStack Orientation="Orientation.Horizontal"
              HorizontalAlignment="HorizontalAlignment.SpaceBetween"
@@ -78,7 +86,8 @@
         {
             <FluentLabel role="status">Single activity: this activity will automatically win when you save.</FluentLabel>
         }
-        @if (Filter.ThemedOnly || Filter.GameIds.Count > 0 || Filter.ThemeIds.Count > 0 || Filter.HolidayIds.Count > 0)
+        @if (Filter.ThemedOnly || Filter.GameIds.Count > 0 || Filter.ThemeIds.Count > 0 || Filter.HolidayIds.Count > 0
+             || Filter.PlayersTonight is not null || Filter.LongestDuration is not null)
         {
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); font-size: 0.75rem;">Filters apply when randomizing all selections or re-rolling a slot</FluentLabel>
         }
@@ -198,7 +207,11 @@
     [Parameter] public List<ActivityEntity>? Activities { get; set; }
     [Parameter] public List<ThemeEntity>? Themes { get; set; }
     [Parameter] public List<HolidayEntity>? Holidays { get; set; }
-    // A filter input changed: the new Filter, for the dialog to keep and hand to the planner.
+    // The players tonight and longest duration boxes' typed text, which the dialog keeps for one opening.
+    [Parameter, EditorRequired] public PlayersDurationFilters PlayersDuration { get; set; } = null!;
+    // A filter input changed: the new Filter, for the dialog to keep and hand to the planner. The dialog keeps its
+    // Game, Theme, Holiday, Themed only and Unique games values; players tonight and longest duration it takes
+    // from PlayersDuration instead.
     [Parameter] public EventCallback<SlotFilter> FilterChanged { get; set; }
     // The slot held the edited Event's Winner and its Activity has been changed.
     [Parameter] public Func<SlotSelection, bool> ReplacesWinner { get; set; } = _ => false;
