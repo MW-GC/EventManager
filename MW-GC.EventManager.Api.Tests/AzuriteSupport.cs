@@ -7,7 +7,7 @@ namespace MW_GC.EventManager.Api.Tests;
 /// The two environment variables of the tests that run against real Table Storage (Azurite), and the
 /// guard that keeps them on local Azurite. Both variables are optional, so <c>dotnet test</c> on the
 /// solution needs no emulator: without <see cref="ConnectionVariable"/> those tests are reported as
-/// skipped (inconclusive). They write, delete and convert rows, so they also skip, before anything is
+/// skipped (inconclusive). They write and delete rows, so they also skip, before anything is
 /// contacted, when the connection string does not point at local Azurite (<see cref="IsLocalAzurite"/>).
 /// </summary>
 internal static class AzuriteSupport
@@ -37,8 +37,8 @@ internal static class AzuriteSupport
 
     /// <summary>Why an Azurite test skipped a connection string that is set but not local Azurite.</summary>
     public static string NotLocalMessage(string reason) =>
-        $"Azurite test skipped: {ConnectionVariable} does not point at local Azurite: {reason}. These tests write, " +
-        "delete and convert rows, so they run only when the Tables client it builds talks to a loopback host " +
+        $"Azurite test skipped: {ConnectionVariable} does not point at local Azurite: {reason}. These tests write " +
+        "and delete rows, so they run only when the Tables client it builds talks to a loopback host " +
         "(127.0.0.1, localhost or ::1).";
 
     /// <summary>
@@ -90,32 +90,5 @@ internal static class AzuriteSupport
         var pass = EqualityComparer<T>.Default.Equals(expected, actual);
         context.WriteLine($"{(pass ? "PASS" : "FAIL")} {name}: expected {expected}, actual {actual}");
         Assert.AreEqual(expected, actual, name);
-    }
-
-    /// <summary>The old-text conversion's marker row as the test found it, to put back when it is done.</summary>
-    public static async Task<TableEntity?> ReadMarkerAsync(TableClient comments, CancellationToken ct)
-    {
-        var found = await comments.GetEntityIfExistsAsync<TableEntity>(
-            API.Services.ActivityNoteConversion.MarkerPartitionKey, API.Services.ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
-        return found.HasValue ? found.Value : null;
-    }
-
-    /// <summary>
-    /// Puts the marker back as <see cref="ReadMarkerAsync"/> found it: the same row (its columns) when there
-    /// was one, none when there was none. A storage that had finished its conversion stays finished.
-    /// </summary>
-    public static async Task RestoreMarkerAsync(TableClient comments, TableEntity? found, CancellationToken ct)
-    {
-        if (found is not null)
-        {
-            // Its own columns only: Timestamp and the ETag are storage's.
-            var row = new TableEntity(found.PartitionKey, found.RowKey);
-            foreach (var (name, value) in found)
-                if (name is not ("PartitionKey" or "RowKey" or "Timestamp" or "odata.etag")) row[name] = value;
-            await comments.UpsertEntityAsync(row, TableUpdateMode.Replace, ct);
-        }
-        else
-            await comments.DeleteEntityAsync(
-                API.Services.ActivityNoteConversion.MarkerPartitionKey, API.Services.ActivityNoteConversion.MarkerRowKey, cancellationToken: ct);
     }
 }

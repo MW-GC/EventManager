@@ -21,17 +21,12 @@ namespace MW_GC.EventManager.API.Functions;
 /// Optional. When given, deleting a missing row is an idempotent 204 without touching storage, and a
 /// non-null message refuses the delete with a 409 carrying that message; nothing is deleted.
 /// </param>
-/// <param name="beforeReplace">
-/// Optional. Runs on update after validation, right before the row is replaced. When it throws,
-/// nothing is written and the failure is answered as any other route failure.
-/// </param>
 internal sealed class CrudHandler<TEntity>(
     TableStore<TEntity> store,
     ILogger logger,
     string resource,
     Func<TEntity, CancellationToken, Task<string?>> validate,
-    Func<Guid, CancellationToken, Task<string?>>? deleteRefusal = null,
-    Func<CancellationToken, Task>? beforeReplace = null)
+    Func<Guid, CancellationToken, Task<string?>>? deleteRefusal = null)
     where TEntity : EntityBase, new()
 {
     /// <summary>Wraps a synchronous validator for the <c>validate</c> step.</summary>
@@ -77,7 +72,6 @@ internal sealed class CrudHandler<TEntity>(
             if (await validate(entity, ct) is { } error) return new BadRequestObjectResult(error);
 
             entity.Id = id;
-            if (beforeReplace is not null) await beforeReplace(ct);
             return await EntityResults.UpdateAsync(store, req, entity, ct);
         });
 

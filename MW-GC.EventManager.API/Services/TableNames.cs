@@ -2,10 +2,8 @@ namespace MW_GC.EventManager.API.Services;
 
 /// <summary>
 /// The table and partition name of each of the eight <see cref="TableStore{TEntity}"/> tables.
-/// <see cref="TableStoreRegistration.AddTableStores"/> registers the stores with them, and the
-/// old-text conversion (<see cref="ActivityNoteConversion"/>) reads the Activity rows raw and writes
-/// its marker beside the Comments with them. Renaming one moves stored data out of reach, so a test
-/// pins every value as a literal.
+/// <see cref="TableStoreRegistration.AddTableStores"/> registers the stores with them. Renaming one
+/// moves stored data out of reach, so a test pins every value as a literal.
 /// </summary>
 internal static class TableNames
 {

@@ -8,7 +8,7 @@ namespace MW_GC.EventManager.Api.Tests;
 
 /// <summary>
 /// <see cref="TableMocks"/>, continued: a whole table whose rows of several partitions share one
-/// dictionary, for the Comment table and the old-text conversion's marker.
+/// dictionary, for the Comment table.
 /// </summary>
 internal static partial class TableMocks
 {

@@ -14,7 +14,6 @@ public class RetiredOldTextFieldTests
     [TestMethod]
     public async Task AnOldTextValueOfAnyLengthIsIgnoredOnCreateAndUpdate()
     {
-        h.SeedMarker();
         var game = h.SeedGame();
         var overOldCap = new string('c', 2001);
 

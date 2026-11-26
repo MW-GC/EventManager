@@ -54,7 +54,6 @@ public class StoredNamesTests
             ("Comment partition", "Comment", TableNames.CommentPartition),
             ("Series table", "Series", TableNames.Series),
             ("Series partition", "Series", TableNames.SeriesPartition),
-            ("old-text conversion marker partition", "Migration", ActivityNoteConversion.MarkerPartitionKey),
             ("feedback links table", "FeedbackLinks", FeedbackStore.LinksTable),
             ("feedback link Event partition", "Event", FeedbackStore.EventPartition),
             ("feedback link token partition", "Token", FeedbackStore.TokenPartition),

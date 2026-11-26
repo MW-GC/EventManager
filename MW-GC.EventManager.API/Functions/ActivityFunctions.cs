@@ -20,7 +20,6 @@ internal sealed class ActivityFunctions
         TableStore<ActivityEntity> store,
         TableStore<GameEntity> games,
         TableStore<CommentEntity> comments,
-        ActivityNoteConversion conversion,
         ILogger<ActivityFunctions> logger)
     {
         _store = store;
@@ -28,12 +27,7 @@ internal sealed class ActivityFunctions
         _comments = comments;
         _logger = logger;
         // No delete guard: nothing refers to an Activity by id, so a delete goes straight to storage.
-        // A PUT replaces the row through the typed entity, which has no old Comments column, so the
-        // old texts are converted into Comments first (#133); when that fails the PUT fails and
-        // writes nothing. A create and a duplicate always write a new id, so they never replace a
-        // row that holds an old text, and a delete removes the row and its old text on purpose.
-        _crud = new CrudHandler<ActivityEntity>(store, logger, "activities", ValidateAsync,
-            beforeReplace: conversion.EnsureConvertedAsync);
+        _crud = new CrudHandler<ActivityEntity>(store, logger, "activities", ValidateAsync);
     }
 
     [Function("GetActivities")]
@@ -68,8 +62,6 @@ internal sealed class ActivityFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "activities/{id:guid}")] HttpRequest req,
         Guid id, CancellationToken ct) => RouteFailures.RunAsync(_logger, "DeleteActivity", ct, async () =>
     {
-        // No conversion first: the row goes, and its unconverted old text going with it is the
-        // user's intent.
         var result = await _crud.DeleteAsync(req, id, "DeleteActivity", ct);
         // Deleting an Activity deletes its Comments (ADR 0001), only once the Activity delete
         // answered 204: a stale If-Match (409) deletes nothing. A 204 for a row that was already
@@ -103,7 +95,6 @@ internal sealed class ActivityFunctions
             DurationMinutes = source.DurationMinutes
         };
 
-        // A new id, so this never replaces a row that still holds an old text: no conversion first.
         await _store.UpsertAsync(duplicate, ct);
         return EntityResults.Created(req, $"/api/activities/{duplicate.Id}", duplicate);
     });
