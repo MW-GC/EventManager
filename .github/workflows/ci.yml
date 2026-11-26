@@ -39,9 +39,33 @@ jobs:
         id: build
         run: dotnet build MW-GC.EventManager.slnx --no-restore -c Release
 
+      # The Azurite storage tests of Api.Tests skip unless EM_AZURITE_CONNECTION is set (#194). Same
+      # Node.js and Azurite pins as the E2E workflow.
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install Azurite
+        run: npm install --global azurite@3.37.0
+
+      - name: Start Azurite
+        run: |
+          nohup azurite --silent --skipApiVersionCheck --location "$RUNNER_TEMP/azurite" > "$RUNNER_TEMP/azurite.log" 2>&1 &
+          # Any answer from the Blob and the Table port means Azurite is up.
+          for i in $(seq 1 60); do
+            if curl -sS -o /dev/null http://127.0.0.1:10000/ && curl -sS -o /dev/null http://127.0.0.1:10002/; then
+              echo "Azurite up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Azurite NOT up after 60s"; cat "$RUNNER_TEMP/azurite.log"; exit 1
+
       - name: Api tests
         id: test-api
         continue-on-error: true
+        env:
+          EM_AZURITE_CONNECTION: UseDevelopmentStorage=true
         run: dotnet test MW-GC.EventManager.Api.Tests/MW-GC.EventManager.Api.Tests.csproj --no-build -c Release --logger "trx;LogFileName=api.trx" --results-directory TestResults
 
       - name: Web tests
