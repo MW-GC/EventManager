@@ -137,8 +137,10 @@ and empty for now (#9).
 **Series**:
 A recurrence rule with a start, a slot template (slot count, Filters and Unique
 games only) and an optional end, from which the app generates Occurrences ahead
-of time. Its rule is weekly, every other week, monthly on the nth weekday or on
-a date, yearly on a date, or yearly on a holiday preset (such as Thanksgiving or
+of time; the start is an anchor, and the first Occurrence is the first rule
+date at or after it, so a rule whose date the start is not falls later. Its
+rule is weekly, every other week, monthly on the nth weekday or on a date,
+yearly on a date, or yearly on a holiday preset (such as Thanksgiving or
 Easter). It is stored in its own table, apart from its Events; ADR 0002 records
 why.
 
