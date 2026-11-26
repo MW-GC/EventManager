@@ -205,16 +205,19 @@ public sealed class OccurrenceEditScopeTests : OccurrenceEditFixture
         CollectionAssert.AreEqual(new[] { $"PUT {EventPath(raid)}" }, Sent());
     }
 
+    // #237 S1: an unchanged Occurrence sends nothing (the API would mark it Modified); a standalone Event saves as before.
     [TestMethod]
-    public async Task NoChange_AsksNothing_AndSavesThroughTheEventRouteAsBefore()
+    [DataRow("Weekly raid", false)]
+    [DataRow("Quiz night", true)]
+    public async Task NoChange_AsksNothing_AndSendsNothingForAnOccurrence_AStandaloneEventSavesAsBefore(string row, bool sends)
     {
-        var page = await OpenEdit("Weekly raid");
+        var page = await OpenEdit(row);
 
         await Update(page);
 
-        Assert.IsFalse(HasScopeQuestion(page), "an unchanged Occurrence asked the scope question");
+        Assert.IsFalse(HasScopeQuestion(page), "an unchanged event asked the scope question");
         page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
-        CollectionAssert.AreEqual(new[] { $"PUT {EventPath(raid)}" }, Sent());
+        CollectionAssert.AreEqual(sends ? new[] { $"PUT {EventPath(quiz)}" } : Array.Empty<string>(), Sent());
     }
 
     // An Occurrence not rolled yet (no Selections) renamed: the question is asked, and each scope saves with no slots,
@@ -242,15 +245,17 @@ public sealed class OccurrenceEditScopeTests : OccurrenceEditFixture
         CollectionAssert.AreEqual(new[] { $"GET {SeriesPath(RaidSeries)}" }, OpenReads());
     }
 
+    // #237 S1: unchanged, it closes with no message and sends nothing (it used to keep the 1 to 5 message).
     [TestMethod]
-    public async Task AnUnchangedUnrolledOccurrence_KeepsTheOneToFiveMessage()
+    public async Task AnUnchangedUnrolledOccurrence_ClosesWithNoMessage_AndSendsNothing()
     {
         var page = await OpenEdit("Empty night");
 
         await Update(page);
 
         Assert.IsFalse(HasScopeQuestion(page));
-        StringAssert.StartsWith(Assert.ContainsSingle(EditDialog(page).Alerts()), "Select 1–5 activities before saving.");
+        Assert.IsFalse(page.HasFormDialog(), "the unchanged dialog stayed open");
+        Assert.IsEmpty(page.PageAlerts());
         Assert.IsEmpty(Sent());
     }
 

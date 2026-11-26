@@ -93,11 +93,12 @@ public sealed class OccurrenceEditGuardTests : OccurrenceEditFixture
         Assert.IsEmpty(Sent());
     }
 
-    // Only a series scope needs the Series: a failed read leaves This event only and an unchanged save as they were.
+    // Only a series scope needs the Series: a failed read leaves This event only and an unchanged save (which sends
+    // nothing, #237 S1) as they were.
     [TestMethod]
     [DataRow("This event only")]
     [DataRow("no change")]
-    public async Task AFailedSeriesRead_StillSavesThisEventOnly_AndAnUnchangedOccurrence(string how)
+    public async Task AFailedSeriesRead_StillSavesThisEventOnly_AndClosesAnUnchangedOccurrence(string how)
     {
         api.Status(HttpMethod.Get, SeriesPath(RaidSeries), HttpStatusCode.InternalServerError);
         var page = await OpenEdit("Weekly raid");
@@ -110,7 +111,7 @@ public sealed class OccurrenceEditGuardTests : OccurrenceEditFixture
         else await Update(page);
 
         page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
-        CollectionAssert.AreEqual(new[] { $"PUT {EventPath(raid)}" }, Sent());
+        CollectionAssert.AreEqual(how == "no change" ? Array.Empty<string>() : new[] { $"PUT {EventPath(raid)}" }, Sent());
         Assert.IsEmpty(page.PageAlerts());
     }
 

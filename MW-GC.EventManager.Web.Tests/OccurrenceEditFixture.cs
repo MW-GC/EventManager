@@ -32,6 +32,9 @@ public abstract class OccurrenceEditFixture : IDisposable
 
     private protected readonly StubApiHandler api = new();
     protected readonly UriRecorder uris;
+    // The clock the edit dialog reads to tell a past Occurrence (#237 S2): before every Occurrence here unless a test
+    // moves it, so the scopes these tests choose are offered whatever day they run on.
+    protected readonly SettableClock clock = new(new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero));
     private readonly BunitContext context = new();
     private readonly string? zone = Environment.GetEnvironmentVariable("TZ");
     private readonly CultureInfo culture = CultureInfo.CurrentCulture;
@@ -102,6 +105,7 @@ public abstract class OccurrenceEditFixture : IDisposable
         context.Services.AddSingleton(new EventMetricsClient(http));
         context.Services.AddSingleton(new CommentClient(http));
         context.Services.AddScoped<FocusReturn>();
+        context.Services.AddSingleton<TimeProvider>(clock);
     }
 
     public void Dispose()
@@ -222,6 +226,13 @@ public abstract class OccurrenceEditFixture : IDisposable
         page.FormDialog().QuerySelectorAll("fluent-card")
             .Where(c => c.QuerySelector("fluent-button[aria-label^='Re-roll slot']") is not null && c.QuerySelectorAll("fluent-card").Length == 0)
             .Select(c => c.QuerySelectorAll("fluent-select")[1].GetAttribute("current-value")!).ToList();
+
+    // A clock that stands still at Now until a test moves it.
+    protected sealed class SettableClock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
 
     // Records each request's method and full path with its query, then hands it to the stub.
     protected sealed class UriRecorder(HttpMessageHandler inner) : DelegatingHandler(inner)
