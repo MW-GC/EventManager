@@ -67,8 +67,7 @@ public class StorageQueryAzuriteTests
         var games = new TableStore<GameEntity>(service, TableNames.Games, TableNames.GamePartition);
         var activities = new TableStore<ActivityEntity>(service, TableNames.Activities, TableNames.ActivityPartition);
         var comments = new TableStore<CommentEntity>(service, TableNames.Comments, TableNames.CommentPartition);
-        var conversion = new ActivityNoteConversion(activities, comments, service, new ListLogger<ActivityNoteConversion>());
-        var activityApi = new ActivityFunctions(activities, games, comments, conversion, new ListLogger<ActivityFunctions>());
+        var activityApi = new ActivityFunctions(activities, games, comments, new ListLogger<ActivityFunctions>());
         var commentApi = new CommentFunctions(comments, activities,
             new TableStore<EventEntity>(service, TableNames.Events, TableNames.EventPartition), new ListLogger<CommentFunctions>());
         // The raw client checks storage without the code under test, and seeds rows the routes cannot write.

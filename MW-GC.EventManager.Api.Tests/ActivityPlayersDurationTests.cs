@@ -20,8 +20,6 @@ public class ActivityPlayersDurationTests
     public ActivityPlayersDurationTests()
     {
         game = h.SeedGame();
-        // The old-text conversion already finished (its marker is stored), so a PUT writes only the Activity.
-        h.SeedMarker();
     }
 
     private object Body(string name = "Werewolf", int? minPlayers = null, int? maxPlayers = null, int? durationMinutes = null) =>

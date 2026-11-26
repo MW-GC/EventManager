@@ -174,10 +174,8 @@ internal sealed class LibraryHarness
     public ConcurrentDictionary<string, TableEntity> Events { get; } = new();
     public ConcurrentDictionary<string, TableEntity> EventMetrics { get; } = new();
     /// <summary>
-    /// The whole <c>ActivityComments</c> table, keyed by partition and row key (<see cref="TableMocks.Key"/>):
-    /// the Comments (<see cref="CommentEntity"/> rows) and the old-text conversion's marker (a plain
-    /// row in its own partition) side by side, as storage keeps them. Read it through
-    /// <see cref="StoredComments"/>, <see cref="StoredComment"/> and <see cref="MarkerStored"/>.
+    /// The whole <c>ActivityComments</c> table, keyed by partition and row key (<see cref="TableMocks.Key"/>).
+    /// Read it through <see cref="StoredComments"/> and <see cref="StoredComment"/>.
     /// </summary>
     public ConcurrentDictionary<string, ITableEntity> CommentRows { get; } = new();
 
@@ -206,7 +204,6 @@ internal sealed class LibraryHarness
     public ListLogger<EventFunctions> EventLog { get; } = new();
     public ListLogger<EventMetricsFunctions> EventMetricsLog { get; } = new();
     public ListLogger<CommentFunctions> CommentLog { get; } = new();
-    public ListLogger<ActivityNoteConversion> OldTextConversionLog { get; } = new();
 
     public GameFunctions GameApi { get; }
     public ThemeFunctions ThemeApi { get; }
@@ -215,8 +212,6 @@ internal sealed class LibraryHarness
     public EventFunctions EventApi { get; }
     public EventMetricsFunctions EventMetricsApi { get; }
     public CommentFunctions CommentApi { get; }
-    /// <summary>The old-text conversion (<see cref="ActivityNoteConversion"/>) over this library.</summary>
-    public ActivityNoteConversion OldTextConversion { get; }
 
     public LibraryHarness()
     {
@@ -251,8 +246,7 @@ internal sealed class LibraryHarness
         GameApi = new GameFunctions(games, activities, GameLog);
         ThemeApi = new ThemeFunctions(new TableStore<ThemeEntity>(service.Object, TableNames.Themes, TableNames.ThemePartition), activities, ThemeLog);
         HolidayApi = new HolidayFunctions(new TableStore<HolidayEntity>(service.Object, TableNames.Holidays, TableNames.HolidayPartition), activities, HolidayLog);
-        OldTextConversion = new ActivityNoteConversion(activities, comments, service.Object, OldTextConversionLog);
-        ActivityApi = new ActivityFunctions(activities, games, comments, OldTextConversion, ActivityLog);
+        ActivityApi = new ActivityFunctions(activities, games, comments, ActivityLog);
         service.Setup(s => s.GetTableClient(TableNames.Series)).Returns(TableMocks.Table(new ConcurrentDictionary<string, TableEntity>()).Object);
         EventApi = new EventFunctions(events, games, activities, metrics,
             new TableStore<SeriesEntity>(service.Object, TableNames.Series, TableNames.SeriesPartition), EventLog);
@@ -278,18 +272,6 @@ internal sealed class LibraryHarness
         comment.PartitionKey = TableNames.CommentPartition;
         CommentRows[TableMocks.Key(comment.PartitionKey, comment.RowKey)] = comment;
     }
-
-    private static string MarkerKey => TableMocks.Key(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey);
-
-    /// <summary>Whether the old-text conversion's marker row is stored in the Comment table.</summary>
-    public bool MarkerStored() => CommentRows.ContainsKey(MarkerKey);
-
-    /// <summary>The stored marker row (fails when there is none).</summary>
-    public TableEntity Marker() => Assert.IsInstanceOfType<TableEntity>(CommentRows[MarkerKey]);
-
-    /// <summary>Stores the marker, as a deployment whose conversion finished earlier has it.</summary>
-    public void SeedMarker() =>
-        CommentRows[MarkerKey] = new TableEntity(ActivityNoteConversion.MarkerPartitionKey, ActivityNoteConversion.MarkerRowKey);
 
     /// <summary>Stores a Game directly and returns it, for routes that need one to exist.</summary>
     public GameEntity SeedGame(string name = "Alpha")
