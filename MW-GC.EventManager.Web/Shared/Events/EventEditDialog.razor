@@ -321,16 +321,25 @@
 
     // The Series a create with Repeat on sends (#204): the start exactly as the Event's, its offset kept (the Series'
     // calendar arithmetic runs at it), the slot count and the Filters the dialog holds. Avoid recent, players tonight
-    // and longest duration are not in a Series' Filters and are not sent.
-    private SeriesEntity BuildSeries() => new()
+    // and longest duration (#232) go as the Filter's own setting, read as the Filters panel reads its boxes: null while
+    // a box is empty or holds text it does not take, so a box that filters nothing is sent as off.
+    private SeriesEntity BuildSeries()
     {
-        Id = _createKey,
-        Name = _custName,
-        Schedule = _repeat.ScheduleFor(BuildEventDate()),
-        SlotCount = _planner.Slots.Count,
-        UniqueGamesOnly = _custUniqueGames,
-        Filters = new SeriesFilters { ThemedOnly = _custThemedOnly, GameIds = _custGameIds.ToList(), ThemeIds = _custThemeIds.ToList(), HolidayIds = _custHolidayIds.ToList() }
-    };
+        var boxes = _playersDuration.ApplyTo(SlotFilter.Default);
+        return new()
+        {
+            Id = _createKey,
+            Name = _custName,
+            Schedule = _repeat.ScheduleFor(BuildEventDate()),
+            SlotCount = _planner.Slots.Count,
+            UniqueGamesOnly = _custUniqueGames,
+            Filters = new SeriesFilters
+            {
+                ThemedOnly = _custThemedOnly, GameIds = _custGameIds.ToList(), ThemeIds = _custThemeIds.ToList(), HolidayIds = _custHolidayIds.ToList(),
+                AvoidRecent = _avoidRecent.Count, PlayersTonight = boxes.PlayersTonight, LongestDuration = boxes.LongestDuration
+            }
+        };
+    }
 
     private Task SendAsync(Func<Task<HttpResponseMessage>> send) => RunAsync(async () =>
     {

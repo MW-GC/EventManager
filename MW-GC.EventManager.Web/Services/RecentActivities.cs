@@ -11,8 +11,9 @@ namespace MW_GC.EventManager.Web.Services;
 /// </summary>
 public static class RecentActivities
 {
-    /// <summary>The largest number of recent Events the Filter may look back over.</summary>
-    public const int MaxCount = 10;
+    /// <summary>The largest number of recent Events the Filter may look back over: Shared's limit, which the API checks a
+    /// Series' avoid recent against (#232), so the box and the API never disagree.</summary>
+    public const int MaxCount = SeriesFilters.MaxAvoidRecent;
 
     public static IReadOnlySet<Guid> Ids(IEnumerable<EventEntity> events, DateTimeOffset planned, Guid? editing, int count) =>
         events
