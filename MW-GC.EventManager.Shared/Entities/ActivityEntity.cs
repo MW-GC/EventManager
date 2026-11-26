@@ -19,5 +19,6 @@ public class ActivityEntity : EntityBase
     public int? DurationMinutes { get; set; }
 
     // An Activity's Comments are rows of their own (CommentEntity, ADR 0001). The old single text
-    // left this class in #133; ActivityNoteConversion still reads its stored column raw.
+    // left this class in #133. A stored row may still hold its column, which nothing reads since the one-time
+    // conversion to Comments was removed (#247).
 }

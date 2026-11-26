@@ -99,7 +99,6 @@ public abstract class OccurrenceEditFixture : IDisposable
         context.Services.AddFluentUIComponents();
         context.Services.AddSingleton(http);
         context.Services.AddLibraryClients();
-        context.Services.AddSingleton(new ActivityService(http));
         context.Services.AddSingleton(new EventService(http));
         context.Services.AddSingleton(new SeriesService(http));
         context.Services.AddSingleton(new EventMetricsClient(http));

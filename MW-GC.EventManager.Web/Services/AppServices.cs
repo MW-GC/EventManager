@@ -25,7 +25,6 @@ public static class AppServices
 
         // Games, Activities, Themes and Holidays: one LibraryClient each (ServiceRouteContractTests checks the routes).
         services.AddLibraryClients();
-        services.AddScoped<ActivityService>();
         services.AddScoped<EventService>();
         services.AddScoped<SeriesService>();
         services.AddScoped<EventMetricsClient>();

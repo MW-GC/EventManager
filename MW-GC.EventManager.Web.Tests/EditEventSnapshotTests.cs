@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
@@ -22,6 +23,7 @@ public sealed class EditEventSnapshotTests : IDisposable
     private readonly ActivityEntity stock;
     private readonly ActivityEntity teams;
     private readonly ActivityEntity timeTrial;
+    private readonly ThemeEntity spooky = new() { Id = Guid.Parse("5b00c1e5-0000-4000-8000-000000000001"), Name = "Spooky" };
     private EventEntity ev = new();
 
     public EditEventSnapshotTests()
@@ -174,7 +176,7 @@ public sealed class EditEventSnapshotTests : IDisposable
         grandPrix.HolidayIds = [easter.Id];
         StoreEvent(winner: null);
         UseLibrary([kart, brawl], [grandPrix, timeTrial, stock, teams]);
-        api.Status(HttpMethod.Get, "/api/themes", System.Net.HttpStatusCode.InternalServerError)
+        api.Status(HttpMethod.Get, "/api/themes", HttpStatusCode.InternalServerError)
            .Json(HttpMethod.Get, "/api/holidays", new[] { easter });
         var page = await OpenEdit();
 
@@ -183,7 +185,6 @@ public sealed class EditEventSnapshotTests : IDisposable
     }
 
     private const string ReplaceNotice = "Replacing this activity clears the Winner.";
-    private readonly ThemeEntity spooky = new() { Id = Guid.Parse("5b00c1e5-0000-4000-8000-000000000001"), Name = "Spooky" };
 
     private enum Picker { Game = 0, Activity = 1 }
 
@@ -243,7 +244,7 @@ public sealed class EditEventSnapshotTests : IDisposable
     private async Task<EventEntity> SaveWithName(IRenderedComponent<Events> page, string name)
     {
         var path = $"/api/events/{ev.Id}";
-        api.On(HttpMethod.Put, path, () => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        api.On(HttpMethod.Put, path, () => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(api.Bodies(HttpMethod.Put, path).Last()!, System.Text.Encoding.UTF8, "application/json")
         });

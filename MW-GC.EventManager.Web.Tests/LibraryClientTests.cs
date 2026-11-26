@@ -21,6 +21,7 @@ public sealed class LibraryClientTests
     // Each client the app registers (AddLibraryClients) sends what the service it replaced sent: the same verb,
     // path, headers (no If-Match) and body, call for call. GameService's writes, ThemeService and HolidayService were
     // removed in #125, ActivityService's read, create, update and delete in #126, and GameService's read in #196.1.
+    // ActivityService's last call, the duplicate, moved onto the Activities' client in #200.1 (ServiceRouteContractTests).
     // The paths are written out per list and the bodies by hand (web-default JSON: camelCase, the entity's fields),
     // so a wrong route in the registration or a changed body fails here.
     [TestMethod]

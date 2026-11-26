@@ -2,7 +2,6 @@
 @using Microsoft.FluentUI.AspNetCore.Components.Icons.Regular
 @using MW_GC.EventManager.Web.Shared.Activities
 @inject LibraryClient<ActivityEntity> ActivityClient
-@inject ActivityService ActivitySvc
 @inject LibraryClient<GameEntity> GameClient
 @inject LibraryClient<ThemeEntity> ThemeClient
 @inject LibraryClient<HolidayEntity> HolidayClient
@@ -318,7 +317,7 @@
     }
 
     // Run by the shared page's row-action guard, which shows a failure above the list and reloads after a success.
-    private Task<string?> Duplicate(Guid id) => ApiResult.SendAsync(() => ActivitySvc.DuplicateAsync(id));
+    private Task<string?> Duplicate(Guid id) => ActivityClient.DuplicateAsync(id);
 
     // The Events list for the open details dialog: the first panel to ask starts the read and the other gets the
     // same one. A failed read is not kept, so the Performance panel's Retry reads again.
