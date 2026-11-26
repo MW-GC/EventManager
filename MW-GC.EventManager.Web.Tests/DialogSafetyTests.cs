@@ -172,9 +172,9 @@ public sealed class DialogSafetyTests : DialogSafetyFixture
     // ---- A late save leaves a newer dialog alone ------------------------------------------------
     // While a save runs the page itself never lets its dialog close (Cancel is disabled and guarded, overlay
     // click and Escape do nothing), so no page event can close it then. These two tests close it through the
-    // page's own close method anyway, to prove the save's dialog token on its own (#196 item 7: kept, since no
-    // page event reaches it). What the newer dialog holds is read through the page: its fields, and where its
-    // own save goes.
+    // page's own close method anyway, to prove the save's dialog token on its own. The Library page's CloseForm is
+    // internal for this (#196.7), called as an event handler would be. What the newer dialog holds is read through
+    // the page: its fields, and where its own save goes.
 
     [TestMethod]
     public async Task SaveFinishingAfterCancelAndReopen_DoesNotCloseOrResetTheNewerDialog()
@@ -190,7 +190,8 @@ public sealed class DialogSafetyTests : DialogSafetyFixture
         // The submit may still be queued behind other renderer work, so wait for the save's render.
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
-        await CloseThrough(page, page.FindComponent<LibraryPage<GameEntity>>().Instance, "CloseForm");
+        var library = page.FindComponent<LibraryPage<GameEntity>>().Instance;
+        await page.InvokeAsync(() => EventCallback.Factory.Create(library, library.CloseForm).InvokeAsync());
         Assert.IsFalse(page.HasFormDialog());
         await RowButton(page, "Brawl", "Edit").ClickAsync(new());
         await TextField(page).ChangeAsync(new ChangeEventArgs { Value = "Brawl typed" });
@@ -344,8 +345,8 @@ public sealed class DialogSafetyTests : DialogSafetyFixture
     private static List<IElement> WinnerButtons(IRenderedComponent<IComponent> page) =>
         page.FormDialog().QuerySelectorAll("fluent-button").Where(b => b.TextContent.Trim() == "Select Winner").ToList();
 
-    // Runs a close method of a component inside the page (the shared Library page that holds the Games dialogs,
-    // or the Event edit dialog), then renders, as an event handler would. No page event can reach it during a save.
+    // Runs a private close method of a component inside the page (the Event edit dialog), then renders, as an event
+    // handler would. No page event can reach it during a save.
     private static Task CloseThrough(IRenderedComponent<IComponent> page, IComponent component, string method) => page.InvokeAsync(() =>
     {
         component.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, []);
