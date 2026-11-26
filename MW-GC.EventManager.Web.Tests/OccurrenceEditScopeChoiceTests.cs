@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Pages;
+using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
@@ -163,6 +164,61 @@ public sealed class OccurrenceEditScopeChoiceTests : OccurrenceEditFixture
 
         page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { "This event only", "All future events" }, Labels(page)));
         Assert.IsEmpty(Sent());
+    }
+
+    // #251: Update Event pressed again while the first press waits for the Series read does nothing. The question opens
+    // once (one emFocus.question, none answered: a second question would replace the first) and one save is sent.
+    [TestMethod]
+    public async Task UpdatePressedAgainWhileTheSeriesReadIsPending_AsksOnce_AndSavesOnce()
+    {
+        var gate = api.Hold(HttpMethod.Get, SeriesPath(RaidSeries), () => Stored(raidSeries, RaidTag));
+        var page = await OpenEdit("Weekly raid");
+        await Rename(page, "Raid night");
+
+        var first = Update(page);
+        var second = page.InvokeAsync(() => Update(page));
+        gate.SetResult();
+        await first;
+        await second;
+
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(EveryScope, Labels(page)));
+        JSInterop.VerifyInvoke("emFocus.question", 1);
+        JSInterop.VerifyNotInvoke("emFocus.answered");
+        Assert.IsEmpty(Sent());
+        await ChooseAndConfirm(page, "All future events");
+        page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
+        CollectionAssert.AreEqual(new[] { $"PUT {SeriesPath(RaidSeries)}?scope=all" }, Sent());
+    }
+
+    // #251: a dialog closed (Cancel), closed and opened again, or showing the Discard question (Escape) while Update
+    // Event waits for the Series read gets no scope question once the read is in, and nothing is saved (opened again
+    // reads the Series once more for its own session). The Discard question is the one question focus.js is told of.
+    [TestMethod]
+    [DataRow("closed")]
+    [DataRow("opened again")]
+    [DataRow("discard question")]
+    public async Task ADialogClosedOrAskingToDiscard_WhileTheSeriesReadIsPending_GetsNoScopeQuestion(string how)
+    {
+        var gate = api.Hold(HttpMethod.Get, SeriesPath(RaidSeries), () => Stored(raidSeries, RaidTag));
+        var page = await OpenEdit("Weekly raid");
+        await Rename(page, "Raid night");
+        var update = Update(page);
+
+        // Each element is found and acted on in one turn of the renderer: the pending save may draw the dialog again
+        // between a lookup and its event otherwise.
+        if (how == "discard question") await page.InvokeAsync(() => Dismiss(page));
+        else await page.InvokeAsync(() => page.FormDialog().Button("Cancel").ClickAsync(new()));
+        if (how == "opened again") await page.InvokeAsync(() => RowButton(page, "Weekly raid", "Edit").ClickAsync(new()));
+        gate.SetResult();
+        await update;
+        await Task.Run(() => page.InvokeAsync(() => { }));
+
+        Assert.IsFalse(HasScopeQuestion(page), $"a scope question opened over a dialog {how} while the Series read ran");
+        Assert.AreEqual(how != "closed", page.HasFormDialog());
+        Assert.AreEqual(how == "discard question", page.HasConfirmation());
+        if (how == "discard question") JSInterop.VerifyInvoke("emFocus.question", 1);
+        else JSInterop.VerifyNotInvoke("emFocus.question");
+        CollectionAssert.AreEqual(how == "opened again" ? new[] { $"GET {SeriesPath(RaidSeries)}" } : Array.Empty<string>(), Sent());
     }
 
     // A failed read cannot tell the first Occurrence: every scope is offered, and a series scope then says the read failed.
