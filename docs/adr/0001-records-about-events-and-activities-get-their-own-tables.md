@@ -6,6 +6,8 @@ Amended 2026-11-21: in #146 this paragraph replaced "Deleting an Event or Activi
 
 An Activity's old single text becomes its first Comment through a conversion that runs in the background each time the API host starts (#130). It needs no manual step, never edits the Activity row, dates the Comment by the row's last write, and is idempotent: the Comment id is derived from the Activity id and only inserted, and a marker row in `ActivityComments`, under its own `Migration` partition, makes every later start skip the pass, so a converted Comment that was deleted stays deleted.
 
+Amended 2026-11-26: the conversion was removed in #247. Stored data was left as it was, the marker row included, and the API no longer turns an Activity row's old text into a Comment.
+
 Activity performance is computed in the browser, by the same code that builds the Stats page, from the Events, Event metrics and Like counts, and is not stored. There is no server route for it. Table Storage has no transactions across tables, so a stored copy would drift from the Events it summarises. If reads get slow, a stored copy can be added behind a read route without changing the pages.
 
 ## Considered Options

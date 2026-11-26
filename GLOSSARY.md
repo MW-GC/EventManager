@@ -28,8 +28,8 @@ number of Themes.
 
 **Holiday**:
 A named tag for Activities, such as Halloween. It is a label, not a date. An
-Activity can have any number of Holidays. Planned for 0.6.0 (#204): a Series'
-holiday preset (such as Thanksgiving) is a built-in date rule, not a Holiday.
+Activity can have any number of Holidays. A Series' holiday preset (such as
+Thanksgiving) is a built-in date rule, not a Holiday.
 
 **Themed activity**:
 An Activity with at least one Theme or Holiday.
@@ -40,15 +40,14 @@ of Comments, each with its own added date, and each can be edited or deleted. A
 Comment written from an Event's details lands on the Activity that won that
 Event and records which Event it came from. This replaces the Activity's old
 single text field.
-_Avoid_: note, Activity comments (`ActivityNoteConversion` and its marker
-`activity-notes-v1` keep the word because they name the retired column)
+_Avoid_: note, Activity comments
 
 ### Events
 
 **Event**:
 A named, dated gaming event made of one to five Selections, with at most one
-Winner. Planned for 0.6.0 (#204): an Event that is an Occurrence may have zero
-Selections until they are rolled.
+Winner. An Event that is an Occurrence may have zero Selections until they are
+rolled.
 
 **Selection**:
 One Game and one of that Game's Activities chosen for an Event, stored as a
@@ -97,9 +96,9 @@ Selections.
 A position for one Selection while an Event is put together in the create or
 edit Event dialog. Re-rolling a slot
 gives it a different random Activity that matches the Filters and does not
-clash with the other slots, which stay unchanged. Planned for 0.6.0 (#204): a
-Series' slot template holds how many slots, and which Filters, its
-Occurrences start with when rolled.
+clash with the other slots, which stay unchanged. A Series' slot template
+holds how many slots, and which Filters, its Occurrences start with when
+rolled.
 
 **Filters**:
 The choices that narrow which Activities can fill a slot: specific Games,
@@ -136,38 +135,44 @@ and a line break becomes a space. A line for a link to the Event is reserved
 and empty for now (#9).
 
 **Series**:
-Planned for 0.6.0 (#204): a recurrence rule with a start, a slot template (slot
-count, Filters and Unique games only) and an optional end, from which the app
-generates Occurrences ahead of time. Its rule is weekly, every other week,
-monthly on the nth weekday or on a date, yearly on a date, or yearly on a
-holiday preset (such as Thanksgiving or Easter). It is stored in its own table,
-apart from its Events; the Series ticket records why in a new ADR 0002.
+A recurrence rule with a start, a slot template (slot count, Filters and Unique
+games only) and an optional end, from which the app generates Occurrences ahead
+of time. Its rule is weekly, every other week, monthly on the nth weekday or on
+a date, yearly on a date, or yearly on a holiday preset (such as Thanksgiving or
+Easter). It is stored in its own table, apart from its Events; ADR 0002 records
+why.
 
 **Occurrence**:
-Planned for 0.6.0 (#204): an Event that belongs to a Series, generated for one
-instant of its rule (its occurrence key). It is an ordinary Event with its own
-Selections, Winner, Comments and Event metrics, and may have no Selections
-until they are rolled. Editing one by hand marks it Modified; a Modified or
-played Occurrence (one with a Winner, Comments or Event metrics) is never
-rewritten by an edit to its Series.
+An Event that belongs to a Series, generated for one instant of its rule (its
+occurrence key). It is an ordinary Event with its own Selections, Winner,
+Comments and Event metrics, and may have no Selections until they are rolled.
+Editing one by hand marks it Modified; a Modified, played (one with a Winner,
+Comments or Event metrics) or past Occurrence is never rewritten by an edit to
+its Series.
 Deleting one asks: This event only (it stays cancelled), or This and all future
 events (the Series is cancelled with its future, unplayed Occurrences).
-Saving a change to one asks: This event only, This and following events, or
-All future events. The two that reach the Series are offered only when nothing
-but the name, the time of day or Unique games only changed, and refuse a time
-that falls on another day at the Series' own UTC offset (This event only takes
-it); a changed date or changed Selections apply to this event only. This and
-following events starts the new Series on the day of the Occurrence's key.
-Saving no change asks nothing, and a changed Occurrence not yet rolled saves
-with no Selections.
+Update Event with nothing changed in the dialog asks nothing and sends nothing,
+so the Occurrence is not marked Modified. One that is Modified, has a Winner or
+is past shows "Series changes skip played, modified and past events." and saves
+as This event only with no question; one played only through Comments or Event
+metrics is still asked, and a Series change leaves it as it is.
+Otherwise a change to the name, date, time, Unique games only or Selections
+asks: This event only, This and following events, or All future events. The
+first Occurrence of its Series is offered only This event only and All future
+events (all three when its Series cannot be read). The two that reach the
+Series are offered only when nothing but the name, the time of day or Unique
+games only changed, and refuse a time that falls on another day at the Series'
+own UTC offset (This event only takes it); a changed date or changed Selections
+apply to this event only. This and following events starts the new Series on
+the day of the Occurrence's key. A changed Occurrence not yet rolled saves with
+no Selections.
 
 ## Relationships
 
 - A **Game** has many **Activities**; each **Activity** belongs to one **Game**.
 - An **Activity** has zero or more **Themes** and zero or more **Holidays**.
 - An **Event** has one to five **Selections**; each **Selection** is one
-  **Game** and one of its **Activities**. (Planned for 0.6.0: an
-  **Occurrence** may have zero.)
+  **Game** and one of its **Activities**. (An **Occurrence** may have zero.)
 - An **Event** has zero or one **Winner**, which is one of its **Selections**.
 - Each **slot** becomes one **Selection** when the **Event** is saved.
 - An **Activity** has zero or more **Comments**; a **Comment** may record the
@@ -175,8 +180,7 @@ with no Selections.
 - An **Event** has zero or one set of **Event metrics**.
 - **Activity performance** is built from the **Event metrics** and **Likes** of
   the **Events** that offered an **Activity**.
-- Planned for 0.6.0: a **Series** has many **Occurrences**; an **Occurrence**
-  is an **Event**.
+- A **Series** has many **Occurrences**; an **Occurrence** is an **Event**.
 
 ## Storage
 
