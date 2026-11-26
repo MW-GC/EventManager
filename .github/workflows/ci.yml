@@ -65,7 +65,8 @@ jobs:
         id: test-api
         continue-on-error: true
         env:
-          EM_AZURITE_CONNECTION: UseDevelopmentStorage=true
+          # MUTATION PROBE (throwaway, never merged): a loopback Table endpoint on a port nothing listens on.
+          EM_AZURITE_CONNECTION: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;TableEndpoint=http://127.0.0.1:1/devstoreaccount1;
         run: dotnet test MW-GC.EventManager.Api.Tests/MW-GC.EventManager.Api.Tests.csproj --no-build -c Release --logger "trx;LogFileName=api.trx" --results-directory TestResults
 
       - name: Web tests
