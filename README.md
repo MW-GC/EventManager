@@ -108,23 +108,19 @@ Package restore requires access to NuGet or a populated local package cache.
 
 ### Storage tests (Azurite)
 
-A few API tests run against real Table Storage instead of the in-memory tables
-(`ActivityNoteConversionAzuriteTests` and `StorageQueryAzuriteTests`). They are
-reported as skipped (inconclusive) unless `EM_AZURITE_CONNECTION` is set to an
-Azurite connection string, so the solution-wide `dotnet test` needs no emulator.
-Each test deletes the rows it seeded. When `EM_API_URL` also names a running API
-on the same Azurite (its base address, ending in `/api`), the conversion test
-reads the converted Comments back through that API too. A blank value of either
-variable counts as unset.
+Two API tests (`StorageQueryAzuriteTests`) run against real Table Storage
+instead of the in-memory tables. They are reported as skipped (inconclusive)
+unless `EM_AZURITE_CONNECTION` is set to an Azurite connection string, so the
+solution-wide `dotnet test` needs no emulator. A blank value counts as unset.
+Each test deletes the rows it seeded.
 
 Point `EM_AZURITE_CONNECTION` only at a throwaway local Azurite, never at shared
-or production storage. The conversion tests delete the conversion's marker and
-run the conversion over that storage, which turns the old text of every Activity
-row there into a Comment, not only the rows the tests seeded.
+or production storage. The tests also skip when the connection string would
+reach a host that is not a loopback address (`localhost`, `127.0.0.1`, `::1`).
 
 ```sh
-# Azurite running with its default ports, the API (optional) on 7071
-EM_AZURITE_CONNECTION=UseDevelopmentStorage=true EM_API_URL=http://localhost:7071/api \
+# Azurite running with its default ports
+EM_AZURITE_CONNECTION=UseDevelopmentStorage=true \
   dotnet test MW-GC.EventManager.Api.Tests/MW-GC.EventManager.Api.Tests.csproj
 ```
 
