@@ -1,3 +1,4 @@
+using System.Net;
 using Bunit;
 using Microsoft.FluentUI.AspNetCore.Components;
 using MW_GC.EventManager.Shared.Entities;
@@ -108,6 +109,52 @@ public sealed class OccurrenceEditSeriesSeedTests : OccurrenceEditFixture
 
         Assert.IsEmpty(page.FormDialog().Alerts());
         Assert.HasCount(2, SlotActivities(page), "the roll did not take the Series' slot count");
+    }
+
+    // #249: a library with no Theme (or no Holiday) shows no checkbox in that group, so a Series id of it could never be
+    // cleared: the group seeds off, and the roll is not left with an id no Activity carries.
+    [TestMethod]
+    [DataRow("Filter by themes")]
+    [DataRow("Filter by holidays")]
+    public async Task ASeriesSeededWhileItsGroupsLibraryListIsEmpty_SeedsThatFilterOff(string group)
+    {
+        if (group == "Filter by themes")
+        {
+            api.Json(HttpMethod.Get, "/api/themes", Array.Empty<ThemeEntity>());
+            raidSeries.Filters.ThemeIds = [goneTheme];
+        }
+        else
+        {
+            api.Json(HttpMethod.Get, "/api/holidays", Array.Empty<HolidayEntity>());
+            raidSeries.Filters.HolidayIds = [goneHoliday];
+        }
+        var page = await Seeded();
+
+        Assert.IsEmpty(Checked(page, group));
+        await Roll(page);
+
+        Assert.IsEmpty(page.FormDialog().Alerts());
+        Assert.HasCount(2, SlotActivities(page), "the roll did not take the Series' slot count");
+    }
+
+    // #249: a library list that failed to load is not there when the Series read seeds the dialog, so none of that
+    // group's ids could be shown: the group seeds off, and stays off once Retry loads the list.
+    [TestMethod]
+    [DataRow("Filter by games", "/api/games")]
+    [DataRow("Filter by themes", "/api/themes")]
+    [DataRow("Filter by holidays", "/api/holidays")]
+    public async Task ASeriesSeededBeforeItsGroupsLibraryListLoaded_SeedsThatFilterOff(string group, string list)
+    {
+        api.Status(HttpMethod.Get, list, HttpStatusCode.InternalServerError);
+        var page = await Seeded();
+        if (list == "/api/games") api.Json(HttpMethod.Get, list, new[] { alpha, beta, gamma });
+        else if (list == "/api/themes") api.Json(HttpMethod.Get, list, new[] { spooky, cozy });
+        else api.Json(HttpMethod.Get, list, new[] { halloween, yule });
+
+        await page.Button("Retry").ClickAsync(new());
+
+        page.WaitForAssertion(() => Assert.IsNotEmpty(page.FormDialog().QuerySelectorAll($"[role=group][aria-label='{group}'] fluent-checkbox")));
+        Assert.IsEmpty(Checked(page, group), "an id seeded while its list was not loaded is ticked once the list is in");
     }
 
     // #246 item 4: the Occurrence's own Unique games only (copied from its Series when it was made) is what the dialog
