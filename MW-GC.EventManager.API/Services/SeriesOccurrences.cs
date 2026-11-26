@@ -32,9 +32,8 @@ internal sealed class SeriesOccurrences(
     /// every run, so a retried or overlapping generation inserts the same row and the atomic add refuses the
     /// second one. Derivation (stored data depends on it; it must never change): the UTF-8 bytes of
     /// <c>series-occurrence:{series id in D format}:{occurrence key as UTC ticks, invariant digits}</c>,
-    /// hashed with SHA-256, and the first 16 bytes of the hash passed to <c>new Guid(ReadOnlySpan&lt;byte&gt;)</c>
-    /// (the same shape as the old-text conversion's Comment id, with its own prefix). UTC ticks make the
-    /// same instant written at another offset the same Occurrence.
+    /// hashed with SHA-256, and the first 16 bytes of the hash passed to <c>new Guid(ReadOnlySpan&lt;byte&gt;)</c>.
+    /// UTC ticks make the same instant written at another offset the same Occurrence.
     /// </summary>
     public static Guid OccurrenceId(Guid seriesId, DateTimeOffset occurrenceKey) => DerivedId(IdPrefix, seriesId, occurrenceKey);
 

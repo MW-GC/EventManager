@@ -279,7 +279,7 @@ public sealed class EventsPageWiringTests : IDisposable
         Assert.IsEmpty(PlainPageAlerts(page), "an error-bar message, not the page's plain message");
         var bar = page.FindAll("[role=alert]").Single(a => a.Closest("fluent-dialog") is null);
         bar.Button("Dismiss").Click();
-        Assert.IsEmpty(page.PageAlerts());
+        page.WaitForAssertion(() => Assert.IsEmpty(page.PageAlerts()));
     }
 
     // Runs a dialog's own close method, then renders, as an event handler would.
