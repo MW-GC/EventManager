@@ -149,8 +149,17 @@ instant of its rule (its occurrence key). It is an ordinary Event with its own
 Selections, Winner, Comments and Event metrics, and may have no Selections
 until they are rolled. Editing one by hand marks it Modified; a Modified or
 played Occurrence (one with a Winner, Comments or Event metrics) is never
-rewritten by an edit to its Series. An edit or cancel asks for its scope: this
-occurrence, this and following, or all.
+rewritten by an edit to its Series.
+Deleting one asks: This event only (it stays cancelled), or This and all future
+events (the Series is cancelled with its future, unplayed Occurrences).
+Saving a change to one asks: This event only, This and following events, or
+All future events. The two that reach the Series are offered only when nothing
+but the name, the time of day or Unique games only changed, and refuse a time
+that falls on another day at the Series' own UTC offset (This event only takes
+it); a changed date or changed Selections apply to this event only. This and
+following events starts the new Series on the day of the Occurrence's key.
+Saving no change asks nothing, and a changed Occurrence not yet rolled saves
+with no Selections.
 
 ## Relationships
 
