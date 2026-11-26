@@ -57,6 +57,12 @@ public sealed class SlotPlanner(Random random)
     /// <summary>The filters every roll and candidate list applies.</summary>
     public SlotFilter Filter { get; set; } = SlotFilter.Default;
 
+    /// <summary>
+    /// How many slots Randomize All aims for while there are none (1 to 5): <see cref="DefaultSlotCount"/> unless an
+    /// Occurrence's Series sets its slot count (#204). The roll still settles for what the library can fill.
+    /// </summary>
+    public int StartingSlotCount { get; set; } = DefaultSlotCount;
+
     /// <summary>The slots in order. A failed roll keeps this very list.</summary>
     public IReadOnlyList<SlotSelection> Slots => _slots;
 
@@ -114,14 +120,14 @@ public sealed class SlotPlanner(Random random)
         }
         else
         {
-            // Fresh dialog: aim for the default slot count but settle for what the library can fill.
+            // Fresh dialog: aim for the starting slot count but settle for what the library can fill.
             var capacity = uniqueGames ? grouped.Count : available.Count;
             if (capacity == 0)
             {
                 SetGenerationFailure();
                 return;
             }
-            count = Math.Min(DefaultSlotCount, capacity);
+            count = Math.Min(Math.Clamp(StartingSlotCount, 1, EventEntity.MaximumSelections), capacity);
         }
 
         if (uniqueGames)

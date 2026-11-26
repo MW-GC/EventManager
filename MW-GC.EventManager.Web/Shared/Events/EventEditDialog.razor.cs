@@ -20,6 +20,53 @@ public partial class EventEditDialog
     // Called each time the edit dialog opens: starts the read of an Occurrence's Series, or drops the last one.
     private void ReadSeriesOf(EventEntity? e) => _seriesRead = e?.SeriesId is { } seriesId ? SeriesSvc.GetAsync(seriesId) : null;
 
+    // Called once the edit dialog has opened (its unsaved-changes baseline taken): the first Randomize All aims for the
+    // dialog's own slot count again, and an Occurrence waits for its Series read to start from its slot template.
+    private void StartFromSeriesOf(EventEntity e)
+    {
+        _planner.StartingSlotCount = SlotPlanner.DefaultSlotCount;
+        if (_seriesRead is { } read) _ = SeedWhenReadAsync(e, read);
+    }
+
+    // #204 story 11, #237 S5: an Occurrence not rolled yet (no Selections) starts from its Series' slot template: the
+    // slot count the first Randomize All aims for and the Filters, typed into the same boxes the admin types into.
+    // Seeded only into the dialog that started the read (a dialog closed or opened again since is another session),
+    // and only while the admin has changed nothing in it: a change made before the read finished is kept, and nothing
+    // is seeded (the save's busy guard, the scope and the Discard questions all follow a change, so none is open then).
+    // A failed read seeds nothing and says nothing: the dialog rolls with its own defaults, as before. The seeded values
+    // are the dialog's new baseline, so closing it untouched asks nothing. The dialog draws itself again once the read
+    // is in, whatever it seeded.
+    private async Task SeedWhenReadAsync(EventEntity occurrence, Task<SeriesRead> read)
+    {
+        var token = _customize.Current;
+        var opened = await read;
+        await InvokeAsync(() =>
+        {
+            if (_customize.IsCurrent(token) && occurrence.Selections is not { Count: > 0 } && !_customize.IsDirty
+                && opened is SeriesRead.Stored(var series, _))
+                Seed(series);
+            StateHasChanged();
+        });
+    }
+
+    private void Seed(SeriesEntity series)
+    {
+        var filters = series.Filters ?? new();
+        _planner.StartingSlotCount = series.SlotCount;
+        _custThemedOnly = filters.ThemedOnly;
+        _custGameIds = filters.GameIds?.ToList() ?? [];
+        _custThemeIds = filters.ThemeIds?.ToList() ?? [];
+        _custHolidayIds = filters.HolidayIds?.ToList() ?? [];
+        _avoidRecent.Type(BoxText(filters.AvoidRecent));
+        _playersDuration.Type(PlayersDurationFilters.PlayersTonight, BoxText(filters.PlayersTonight));
+        _playersDuration.Type(PlayersDurationFilters.LongestDuration, BoxText(filters.LongestDuration));
+        SyncFilter();
+        _customize.Open(CustomizeFields);
+    }
+
+    // A stored number as its box shows it; null (off) is an empty box.
+    private static string BoxText(int? value) => value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+
     // What the dialog holds now, as a change is read from it.
     private OccurrenceEdits Edits() =>
         new(_custName, BuildEventDate(), _custUniqueGames, _planner.Slots.Select(s => (s.GameId, s.ActivityId)).ToList());
