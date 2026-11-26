@@ -83,7 +83,7 @@ internal static class ActivityValidator
         ?? (activity.MinPlayers > activity.MaxPlayers ? MinAboveMaxMessage : null);
 
     // A range check: null, or 1 to max. An int? is always whole; a fractional JSON number is the malformed body.
-    private static string? InRangeFromOne(int? value, string field, int max) =>
+    internal static string? InRangeFromOne(int? value, string field, int max) =>
         value is < 1 || value > max ? $"{field} must be a whole number from 1 to {max}." : null;
 }
 
@@ -130,11 +130,13 @@ internal static class SeriesValidator
     public static readonly string EndRangeMessage = $"End must be in the years {FirstYear} to {LastYear}.";
 
     /// <summary>
-    /// A Series' name, start, rule, end and slot count, in that order; the first failure wins. The start and
+    /// A Series' name, start, rule, end, slot count, then the avoid recent, players tonight and longest duration
+    /// Filters, in that order; the first failure wins. The start and
     /// the end must fall in the years <see cref="FirstYear"/> to <see cref="LastYear"/>, so the generator never
     /// steps past the last date a <see cref="DateTimeOffset"/> holds. The Filter id lists are lenient, as an
-    /// Activity's are: a missing list is stored empty and duplicates are removed. The skipped occurrence keys
-    /// belong to the API and are not checked here.
+    /// Activity's are: a missing list is stored empty and duplicates are removed. The three number Filters are
+    /// off (null) or a whole number from 1 to the Events page's limit, with the Filters panel's names and
+    /// messages (#232). The skipped occurrence keys belong to the API and are not checked here.
     /// </summary>
     public static string? Validate(SeriesEntity series)
     {
@@ -154,8 +156,14 @@ internal static class SeriesValidator
         if (schedule.End is { } end && end <= schedule.First) return EndMessage;
         if (schedule.End is { Year: < FirstYear or > LastYear }) return EndRangeMessage;
         if (series.SlotCount is < 1 or > MaxSlots) return SlotCountMessage;
-        return null;
+        return NumberFilters(series.Filters);
     }
+
+    // Avoid recent, players tonight and longest duration: each off, or 1 to the limit the Events page allows.
+    private static string? NumberFilters(SeriesFilters filters) =>
+        ActivityValidator.InRangeFromOne(filters.AvoidRecent, "Avoid recent", SeriesFilters.MaxAvoidRecent)
+        ?? ActivityValidator.InRangeFromOne(filters.PlayersTonight, "Players tonight", ActivityValidator.MaxPlayerCount)
+        ?? ActivityValidator.InRangeFromOne(filters.LongestDuration, "Longest duration", ActivityValidator.MaxDurationMinutes);
 }
 
 internal static class EventMetricsValidator

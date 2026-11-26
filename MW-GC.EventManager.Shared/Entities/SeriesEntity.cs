@@ -59,12 +59,30 @@ public class SeriesEntity : EntityBase
 
 /// <summary>
 /// The Filters of a Series' slot template, the same choices as the Events page's Filters: specific Games,
-/// Themes or Holidays (an empty list means no limit) and Themed activities only.
+/// Themes or Holidays (an empty list means no limit), Themed activities only, and avoid recent, players tonight
+/// and longest duration (#95, #98, #232), each stored as the Filter's own setting and null while off. The three
+/// are left out of the JSON while off, so a Series stored before they existed reads them as off and is written
+/// back unchanged.
 /// </summary>
 public class SeriesFilters
 {
+    /// <summary>The most recent Events the avoid-recent Filter may look back over (#95).</summary>
+    public const int MaxAvoidRecent = 10;
+
     public bool ThemedOnly { get; set; }
     public List<Guid> GameIds { get; set; } = [];
     public List<Guid> ThemeIds { get; set; } = [];
     public List<Guid> HolidayIds { get; set; } = [];
+
+    /// <summary>Avoid recent: how many recent Events' Activities to skip, 1 to <see cref="MaxAvoidRecent"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? AvoidRecent { get; set; }
+
+    /// <summary>Players tonight: keeps an Activity unless its minimum or maximum players excludes this number.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? PlayersTonight { get; set; }
+
+    /// <summary>Longest duration in minutes: keeps an Activity with no duration or one within it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? LongestDuration { get; set; }
 }
