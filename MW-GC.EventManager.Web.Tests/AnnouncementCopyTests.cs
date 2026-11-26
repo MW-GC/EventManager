@@ -17,6 +17,7 @@ public sealed class AnnouncementCopyTests : IDisposable
 {
     private const string Copied = "Announcement copied.";
     private const string Refused = "The announcement could not be copied: the browser refused the clipboard.";
+    private const string ConnectionLost = "The announcement could not be copied: the connection to the browser was lost.";
     private const string GameNightText =
         "**Game night**\n" +
         "<t:1796410800:F>\n" +
@@ -96,17 +97,18 @@ public sealed class AnnouncementCopyTests : IDisposable
         page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { Copied }, Statuses(page)));
     }
 
+    // A refused clipboard and a lost connection each say what went wrong, in their own words.
     [TestMethod]
-    [DataRow(Answer.Refused)]
-    [DataRow(Answer.Gone)]
-    public async Task ARefusedCopy_ShowsTheAlert_AndNoStatus(Answer answer)
+    [DataRow(Answer.Refused, Refused)]
+    [DataRow(Answer.Gone, ConnectionLost)]
+    public async Task AFailedCopy_SaysWhyInTheAlert_AndNoStatus(Answer answer, string message)
     {
         var page = await OpenDetails("Game night");
         clipboard.Next = answer;
 
         await CopyButton(page).ClickAsync(new());
 
-        page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { Refused }, Alerts(page)));
+        page.WaitForAssertion(() => CollectionAssert.AreEqual(new[] { message }, Alerts(page)));
         Assert.IsEmpty(Statuses(page));
         Assert.IsTrue(page.HasFormDialog());
     }

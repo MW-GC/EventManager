@@ -4,7 +4,7 @@ namespace MW_GC.EventManager.Web.Shared.Activities;
 
 /// <summary>
 /// The one wording of an Activity's players and duration (#98), shared by everything that shows them (the Event
-/// details dialog now; the announcement text later). Each returns null when there is nothing to show.
+/// details dialog and the announcement text). Each returns null when there is nothing to show.
 /// </summary>
 public static class PlayersDurationText
 {
