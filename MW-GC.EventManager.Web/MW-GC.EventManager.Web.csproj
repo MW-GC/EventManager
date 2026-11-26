@@ -14,6 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="MW-GC.EventManager.Web.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\MW-GC.EventManager.Shared\MW-GC.EventManager.Shared.csproj" />
   </ItemGroup>
 

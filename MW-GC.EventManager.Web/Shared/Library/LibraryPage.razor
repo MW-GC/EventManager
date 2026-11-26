@@ -310,7 +310,8 @@
 
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelForm() { if (!_saving) CloseForm(); }
-    private void CloseForm() { Watch(null); _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
+    // Internal so a test can close the dialog while a save runs, which no page event can do (DialogSafetyTests).
+    internal void CloseForm() { Watch(null); _dialogError = null; _form.Close(); _ = Focus.RestoreAsync(); }
 
     // Overlay click or Escape.
     private Task DismissForm()
