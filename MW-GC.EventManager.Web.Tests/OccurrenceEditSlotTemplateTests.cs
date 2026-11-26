@@ -302,26 +302,7 @@ public sealed class OccurrenceEditSlotTemplateTests : OccurrenceEditFixture
     private static string DateBox(IRenderedComponent<Events> page) =>
         page.FormDialog().QuerySelector("fluent-text-field.fluent-datepicker")!.GetAttribute("value") ?? string.Empty;
 
-    private static IElement TextBox(IRenderedComponent<Events> page, string label) =>
-        page.FormDialog().QuerySelector($"fluent-text-field[aria-label='{label}']") ?? throw new AssertFailedException($"No box named {label}.");
-
-    private static string Box(IRenderedComponent<Events> page, string label) => TextBox(page, label).GetAttribute("value") ?? string.Empty;
-
     private static Task TypeBox(IRenderedComponent<Events> page, string label, string text) =>
         TextBox(page, label).InputAsync(new ChangeEventArgs { Value = text });
 
-    // Fluent renders current-checked only while a switch or checkbox is on.
-    private static bool SwitchOn(IRenderedComponent<Events> page, string label) =>
-        page.FormDialog().QuerySelectorAll("fluent-switch").Single(s => s.GetAttribute("aria-label") == label).HasAttribute("current-checked");
-
-    private static List<string> Checked(IRenderedComponent<Events> page, string group) =>
-        page.FormDialog().QuerySelector($"[role=group][aria-label='{group}']")!.QuerySelectorAll("fluent-checkbox")
-            .Where(c => c.HasAttribute("current-checked")).Select(c => c.TextContent.Trim()).ToList();
-
-    private static Task Roll(IRenderedComponent<Events> page) => page.FormDialog().Button("Randomize All").ClickAsync(new());
-
-    private static List<string> SlotActivities(IRenderedComponent<Events> page) =>
-        page.FormDialog().QuerySelectorAll("fluent-card")
-            .Where(c => c.QuerySelector("fluent-button[aria-label^='Re-roll slot']") is not null && c.QuerySelectorAll("fluent-card").Length == 0)
-            .Select(c => c.QuerySelectorAll("fluent-select")[1].GetAttribute("current-value")!).ToList();
 }

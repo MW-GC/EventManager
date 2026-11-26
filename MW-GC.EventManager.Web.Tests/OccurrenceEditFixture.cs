@@ -200,6 +200,29 @@ public abstract class OccurrenceEditFixture : IDisposable
     protected SeriesEntity SentSeries(Guid series) =>
         JsonSerializer.Deserialize<SeriesEntity>(Assert.ContainsSingle(api.Bodies(HttpMethod.Put, SeriesPath(series)))!, JsonSerializerOptions.Web)!;
 
+    // ---- The Filters panel and the slots, as the edit dialog draws them --------------------------
+
+    protected static IElement TextBox(IRenderedComponent<Events> page, string label) =>
+        page.FormDialog().QuerySelector($"fluent-text-field[aria-label='{label}']") ?? throw new AssertFailedException($"No box named {label}.");
+
+    protected static string Box(IRenderedComponent<Events> page, string label) => TextBox(page, label).GetAttribute("value") ?? string.Empty;
+
+    // Fluent renders current-checked only while a switch or checkbox is on.
+    protected static bool SwitchOn(IRenderedComponent<Events> page, string label) =>
+        page.FormDialog().QuerySelectorAll("fluent-switch").Single(s => s.GetAttribute("aria-label") == label).HasAttribute("current-checked");
+
+    protected static List<string> Checked(IRenderedComponent<Events> page, string group) =>
+        page.FormDialog().QuerySelector($"[role=group][aria-label='{group}']")!.QuerySelectorAll("fluent-checkbox")
+            .Where(c => c.HasAttribute("current-checked")).Select(c => c.TextContent.Trim()).ToList();
+
+    protected static Task Roll(IRenderedComponent<Events> page) => page.FormDialog().Button("Randomize All").ClickAsync(new());
+
+    // The Activity id each slot holds, in order.
+    protected static List<string> SlotActivities(IRenderedComponent<Events> page) =>
+        page.FormDialog().QuerySelectorAll("fluent-card")
+            .Where(c => c.QuerySelector("fluent-button[aria-label^='Re-roll slot']") is not null && c.QuerySelectorAll("fluent-card").Length == 0)
+            .Select(c => c.QuerySelectorAll("fluent-select")[1].GetAttribute("current-value")!).ToList();
+
     // Records each request's method and full path with its query, then hands it to the stub.
     protected sealed class UriRecorder(HttpMessageHandler inner) : DelegatingHandler(inner)
     {

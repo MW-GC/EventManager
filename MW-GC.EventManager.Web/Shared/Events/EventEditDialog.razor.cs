@@ -54,14 +54,23 @@ public partial class EventEditDialog
         var filters = series.Filters ?? new();
         _planner.StartingSlotCount = series.SlotCount;
         _custThemedOnly = filters.ThemedOnly;
-        _custGameIds = filters.GameIds?.ToList() ?? [];
-        _custThemeIds = filters.ThemeIds?.ToList() ?? [];
-        _custHolidayIds = filters.HolidayIds?.ToList() ?? [];
+        _custGameIds = Known(filters.GameIds, Games);
+        _custThemeIds = Known(filters.ThemeIds, Themes);
+        _custHolidayIds = Known(filters.HolidayIds, Holidays);
         _avoidRecent.Type(BoxText(filters.AvoidRecent));
         _playersDuration.Type(PlayersDurationFilters.PlayersTonight, BoxText(filters.PlayersTonight));
         _playersDuration.Type(PlayersDurationFilters.LongestDuration, BoxText(filters.LongestDuration));
         SyncFilter();
         _customize.Open(CustomizeFields);
+    }
+
+    // #246: only the Series' ids the library the page holds still lists. A Game, Theme or Holiday deleted since the
+    // Series was saved has no checkbox in the Filters panel, so a seeded id of it could never be cleared; it is dropped,
+    // and a group whose ids are all gone seeds that Filter off. The Series itself is not changed.
+    private static List<Guid> Known(IEnumerable<Guid>? ids, IEnumerable<EntityBase>? library)
+    {
+        var listed = library?.Select(entry => entry.Id).ToHashSet() ?? [];
+        return ids?.Where(listed.Contains).ToList() ?? [];
     }
 
     // A stored number as its box shows it; null (off) is an empty box.
