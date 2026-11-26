@@ -89,7 +89,7 @@ internal static class DeleteGuard
     public static async Task AssertHeldAsync(BrowserSession session, DeleteTarget target, string itemName, Clicks clicks, string what)
     {
         var requests = await session.Traffic.HoldAsync(target.AnyItem, HttpMethod.Delete);
-        await session.OpenAsync($"/{target.Route}", target.Heading);
+        await session.OpenListShowingAsync(target.Route, target.Heading, itemName);
         var questions = await QuestionCount.StartAsync(session.Page, target.Question);
         var question = session.Dialog(target.Question);
         var rowDelete = session.Button($"Delete {itemName}");

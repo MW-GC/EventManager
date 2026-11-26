@@ -33,7 +33,7 @@ public sealed class RepeatClickAndWinnerFlows
         var activity = await session.Api.AddActivityAsync(game, $"E2E Duplicate {tag}");
         var requests = await session.Traffic.HoldAsync(AnyActivityDuplicate, HttpMethod.Post);
 
-        await session.OpenAsync("/activities", "Activities");
+        await session.OpenListShowingAsync("activities", "Activities", activity.Name);
         var duplicate = session.Button($"Duplicate {activity.Name}");
         await Expect(duplicate).ToBeVisibleAsync(new() { Timeout = UiTimeoutMs });
 
@@ -107,7 +107,7 @@ public sealed class RepeatClickAndWinnerFlows
         Assert.IsNull(created.WinnerActivityId, "A new two-Selection Event must start without a Winner.");
 
         var page = session.Page;
-        await session.OpenEventsPageAsync();
+        await session.OpenListShowingAsync("events", "Events", created.Name);
         var details = session.Button($"Details {created.Name}");
         await Expect(details).ToBeVisibleAsync(new() { Timeout = UiTimeoutMs });
         await details.ClickAsync();

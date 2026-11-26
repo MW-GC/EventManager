@@ -65,7 +65,7 @@ public sealed class DiscardAndDeleteFlows
         var eventPath = $"/api/events/{created.Id}";
 
         var page = session.Page;
-        await session.OpenEventsPageAsync();
+        await session.OpenListShowingAsync("events", "Events", created.Name);
         var rowDelete = session.Button($"Delete {created.Name}");
         await Expect(rowDelete).ToBeVisibleAsync(new() { Timeout = AppLoadTimeoutMs });
 
