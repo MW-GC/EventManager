@@ -39,6 +39,25 @@ public static class SeriesEdit
     /// <summary>A series scope refused before any write: the Series was read without the version If-Match must name.</summary>
     public const string NoVersionMessage = "The series was read without its version, so saving it could overwrite another admin's change. Close this dialog and edit the event again.";
 
+    /// <summary>The one line the edit dialog shows for an Occurrence no Series change would rewrite (#237 S2).</summary>
+    public const string SkippedReason = "Series changes skip played, modified and past events.";
+
+    /// <summary>
+    /// Whether a Series change leaves this Occurrence as it is, by the API's own rule (an Occurrence a Series edit may
+    /// rewrite is in the future, not Modified and not played): it is Modified, has a Winner, or does not start after
+    /// <paramref name="now"/>. The API also counts a Comment written from it and its Event metrics as played; the Event
+    /// the Web holds carries neither, so those two are left to the API.
+    /// </summary>
+    public static bool SeriesSkips(EventEntity occurrence, DateTimeOffset now) =>
+        occurrence.Modified || occurrence.WinnerActivityId is not null || occurrence.Date <= now;
+
+    /// <summary>
+    /// Whether the Occurrence is the first of <paramref name="series"/>: its occurrence key is not after the Series'
+    /// start. The API refuses This and following from it (scope all changes the same events), as it does here (#237 S3).
+    /// </summary>
+    public static bool IsFirst(EventEntity occurrence, SeriesEntity series) =>
+        occurrence.OccurrenceKey is { } key && key <= series.Schedule.First;
+
     /// <summary>
     /// What changed. The day and the time of day are read at <paramref name="edits"/>' own UTC offset (the browser's,
     /// as the dialog shows them), so an unchanged date and time are never a change. Slots compare by their Game and
@@ -58,25 +77,26 @@ public static class SeriesEdit
 
     /// <summary>
     /// The question about the Occurrence <paramref name="name"/> on <paramref name="date"/> (as the list shows it): all
-    /// three scopes when the change can reach the Series, otherwise This event only with the one-line reason. Nothing
-    /// is chosen when it opens, and it is not destructive.
+    /// three scopes when the change can reach the Series, otherwise This event only with the one-line reason. A null
+    /// <paramref name="following"/> leaves This and following events out (the first Occurrence of its Series, #237 S3).
+    /// Nothing is chosen when it opens, and it is not destructive.
     /// </summary>
-    public static ScopeRequest Question(OccurrenceChange change, string name, DateTimeOffset date, Func<Task> thisEvent, Func<Task> following, Func<Task> all)
+    public static ScopeRequest Question(OccurrenceChange change, string name, DateTimeOffset date, Func<Task> thisEvent, Func<Task>? following, Func<Task> all)
     {
         var only = new ScopeOption("This event only",
             "Only this event changes. Later changes to the series will not touch it.",
             "Update this event", thisEvent);
         if (!change.SeriesWide) return new ScopeRequest(Title, EventOnlyReason, GroupLabel, [only], destructive: false);
-        return new ScopeRequest(Title, $"{name} on {date.ToLocalTime():g} is one event of a series. Choose which events take this change.", GroupLabel,
-        [
-            only,
-            new("This and following events",
+        List<ScopeOption> options = [only];
+        if (following is not null)
+            options.Add(new("This and following events",
                 "This event and every later one that has not been played or edited by hand take the change. Earlier events stay as they are.",
-                "Update this and following", following),
-            new("All future events",
-                "Every future event of the series that has not been played or edited by hand takes the change.",
-                "Update all future events", all),
-        ], destructive: false);
+                "Update this and following", following));
+        options.Add(new("All future events",
+            "Every future event of the series that has not been played or edited by hand takes the change.",
+            "Update all future events", all));
+        return new ScopeRequest(Title, $"{name} on {date.ToLocalTime():g} is one event of a series. Choose which events take this change.", GroupLabel,
+            options, destructive: false);
     }
 
     /// <summary>

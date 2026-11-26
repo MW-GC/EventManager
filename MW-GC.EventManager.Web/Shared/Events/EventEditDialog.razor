@@ -15,6 +15,11 @@
             <FluentLabel Typo="Typography.Body" Style="color: var(--neutral-foreground-hint); margin-bottom: 16px;">
                 @(_editingEvent is not null ? "Update the event details and game/activity selections" : "Customize the event name and game/activity selections before creating")
             </FluentLabel>
+            @* #237 S2: an Occurrence no Series change rewrites saves as this event only, with no scope question. *@
+            @if (SeriesSkipsThis)
+            {
+                <p class="series-skips-reason" style="margin: 0 0 16px;">@SeriesEdit.SkippedReason</p>
+            }
 
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="16" Style="overflow-y: auto; max-height: calc(85vh - 200px); padding: 0 12px;">
                 @* Event name and date *@

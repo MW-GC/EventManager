@@ -1,12 +1,15 @@
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using MW_GC.EventManager.Shared.Entities;
 using MW_GC.EventManager.Web.Services;
 
 namespace MW_GC.EventManager.Web.Shared.Events;
 
 // The scope question of an edited Occurrence (#100, #204, stories 12 to 16, 21 and 22): asked over this dialog before
-// Update Event saves a change to an Event of a Series. A standalone Event, and an Occurrence with nothing changed, save
-// as before. Cancel, Escape and overlay click drop the question and leave this dialog open with focus back in it
-// (ScopeDialog tells focus.js); a confirmed scope runs through RunAsync, the save's busy guard.
+// Update Event saves a change to an Event of a Series. A standalone Event saves as before; an Occurrence with nothing
+// changed sends nothing (EventEditDialog.Save.cs). Cancel, Escape and overlay click drop the question and leave this
+// dialog open with focus back in it (ScopeDialog tells focus.js); a confirmed scope runs through RunAsync, the save's
+// busy guard.
 public partial class EventEditDialog
 {
     // The open scope question, if any.
@@ -81,27 +84,52 @@ public partial class EventEditDialog
         new(_custName, BuildEventDate(), _custUniqueGames, _planner.Slots.Select(s => (s.GameId, s.ActivityId)).ToList());
 
     // A changed Occurrence not rolled yet (no Selections, ADR 0002) saves with none: the API takes an Occurrence with
-    // none, and a series scope sends no slots. Every other save keeps the 1 to 5 rule, an unchanged Occurrence too.
+    // none, and a series scope sends no slots. Every other save keeps the 1 to 5 rule (an unchanged Occurrence sends
+    // nothing and closes before it, #237 S1).
     private bool Unrolled() =>
         _editingEvent is { SeriesId: not null } occurrence && _planner.Slots.Count == 0 && SeriesEdit.Compare(occurrence, Edits()).Any;
 
     // True when the save waits for the scope question. The Series id, the Event id and the Series read are the edited
-    // row's own.
-    private bool AskScope(EventEntity entity)
+    // row's own. An Occurrence a Series change skips (#237 S2) asks nothing: only This event only would reach it. A
+    // question with the series scopes in it waits for the Series read, the only thing that tells the first Occurrence
+    // (#237 S3); a failed read offers both, and a series scope then says the read failed. A save pressed again while it
+    // waits does nothing, and a dialog closed or opened again meanwhile is left alone.
+    private async Task<bool> AskScopeAsync(EventEntity entity)
     {
-        if (_scope is not null) return true;
-        if (_editingEvent is not { SeriesId: not null } occurrence) return false;
+        if (_scope is not null || _awaitingSeries) return true;
+        if (_editingEvent is not { SeriesId: not null } occurrence || SeriesSkipsThis) return false;
         var edits = Edits();
         var change = SeriesEdit.Compare(occurrence, edits);
         if (!change.Any) return false;
         // ShowEditEvent always started the read; without one a series scope fails closed, as a failed read does.
         var read = _seriesRead ?? Task.FromResult<SeriesRead>(new SeriesRead.Failed(ApiResult.NotFoundMessage));
+        var first = false;
+        if (change.SeriesWide)
+        {
+            var token = _customize.Current;
+            _awaitingSeries = true;
+            try { first = await read is SeriesRead.Stored(var series, _) && SeriesEdit.IsFirst(occurrence, series); }
+            finally { _awaitingSeries = false; }
+            // Closed, opened again, or a Discard question opened by Escape while the read ran: no question now.
+            if (!_customize.IsCurrent(token) || _confirm is not null) return true;
+        }
         _scope = SeriesEdit.Question(change, occurrence.Name, occurrence.Date,
             () => SendAsync(() => EventSvc.UpdateAsync(entity)),
-            () => RunAsync(() => UpdateSeriesAsync(occurrence, read, edits, SeriesScope.Following)),
+            first ? null : () => RunAsync(() => UpdateSeriesAsync(occurrence, read, edits, SeriesScope.Following)),
             () => RunAsync(() => UpdateSeriesAsync(occurrence, read, edits, SeriesScope.All)));
         return true;
     }
+
+    // Set while a save waits for the Series read before its question.
+    private bool _awaitingSeries;
+
+    // #237 S2: the edited Event is an Occurrence a Series change leaves as it is (SeriesEdit.SeriesSkips), so the dialog
+    // says so and its save asks no scope.
+    private bool SeriesSkipsThis => _editingEvent is { SeriesId: not null } e && SeriesEdit.SeriesSkips(e, Clock.GetUtcNow());
+
+    // The app registers no TimeProvider, so the system clock unless one is registered (a test pins one).
+    [Inject] private IServiceProvider Services { get; set; } = default!;
+    private TimeProvider Clock => Services.GetService<TimeProvider>() ?? TimeProvider.System;
 
     // Escape and overlay click on this dialog while the question is open answer it with Cancel.
     private bool DropScope()

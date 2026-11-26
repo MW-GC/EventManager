@@ -39,6 +39,13 @@ public partial class EventEditDialog
     private async Task SaveCustomizedEvent()
     {
         if (_generating || string.IsNullOrWhiteSpace(_custName)) return;
+        // #237 S1: an Occurrence with nothing changed since the dialog opened (the baseline the Discard question uses,
+        // the Filters included) sends nothing, since the API would mark it Modified; the dialog closes as Cancel does.
+        if (_editingEvent is { SeriesId: not null } && !_customize.IsDirty)
+        {
+            CancelCustomize();
+            return;
+        }
         _customizeError = null;
         var slots = _planner.Slots;
         if (slots.Count is < 1 or > EventEntity.MaximumSelections && !Unrolled())
@@ -77,7 +84,7 @@ public partial class EventEditDialog
         }
         entity.NormalizeWinner();
         // An Occurrence with a change asks which events take it first (#204).
-        if (AskScope(entity)) return;
+        if (await AskScopeAsync(entity)) return;
         await SendAsync(() => _editingEvent is not null ? EventSvc.UpdateAsync(entity) : EventSvc.SaveAsync(entity, _createKey));
     }
 
