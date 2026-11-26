@@ -101,6 +101,29 @@ internal sealed class BrowserSession
 
     public Task OpenEventsPageAsync() => OpenAsync("/events", "Events");
 
+    /// <summary>
+    /// Opens a list page and types one name into its search, so the list shows the rows with that name whatever
+    /// else the stack holds (#238). Every list is a virtualized grid that renders only the rows in view: a flow's
+    /// row below a screenful of newer Occurrences, or of names that sort first, is not in the page at all.
+    /// </summary>
+    /// <param name="route">The page's path without the slash: <c>events</c>, <c>activities</c>, <c>games</c>, ...</param>
+    /// <param name="heading">The page's level-one heading; its search is named after it (<c>Search events</c>).</param>
+    /// <param name="name">The unique name of the item the flow added.</param>
+    /// <remarks>
+    /// The search applies after a short debounce, so this waits until no rendered row lacks the name: the flow then
+    /// clicks in the list it will keep, not in one the search is about to redraw.
+    /// </remarks>
+    public async Task OpenListShowingAsync(string route, string heading, string name)
+    {
+        await OpenAsync($"/{route}", heading);
+        var search = Page.GetByRole(AriaRole.Searchbox, new() { Name = $"Search {heading.ToLowerInvariant()}", Exact = true });
+        await search.FillAsync(name);
+        var otherRows = Page.GetByRole(AriaRole.Row)
+            .Filter(new() { Has = Page.GetByRole(AriaRole.Gridcell) })
+            .Filter(new() { HasNotText = name });
+        await Expect(otherRows).ToHaveCountAsync(0, new() { Timeout = UiTimeoutMs });
+    }
+
     /// <summary>A button by its exact accessible name.</summary>
     public ILocator Button(string name) => Page.GetByRole(AriaRole.Button, new() { Name = name, Exact = true });
 
