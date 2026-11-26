@@ -19,4 +19,9 @@ public sealed class LibraryClient<T>(HttpClient http, string route) where T : En
     public Task<string?> UpdateAsync(T item) => ApiResult.SendAsync(() => http.PutAsJsonAsync($"api/{route}/{item.Id}", item));
 
     public Task<string?> DeleteAsync(Guid id) => ApiResult.SendAsync(() => http.DeleteAsync($"api/{route}/{id}"));
+
+    // A bodyless POST to one item's action route, api/{route}/{id}/{action}. Internal: only Activities have such a
+    // route (duplicate), offered on their client alone by ActivityLibraryClientExtensions.
+    internal Task<string?> PostActionAsync(Guid id, string action) =>
+        ApiResult.SendAsync(() => http.PostAsync($"api/{route}/{id}/{action}", null));
 }

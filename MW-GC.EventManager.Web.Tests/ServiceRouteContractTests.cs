@@ -35,9 +35,10 @@ public sealed class ServiceRouteContractTests
     [
         // Every Games read goes through LibraryClient<GameEntity> below (#196.1).
 
-        // Activities read, create, update and delete through the shared client (#126); the service keeps the one
-        // route only Activities have.
-        new(typeof(ActivityService), nameof(ActivityService.DuplicateAsync), "POST", "api/activities/{id}/duplicate", h => new ActivityService(h).DuplicateAsync(Id)),
+        // Activities read, create, update and delete through the shared client (#126); the one route only Activities
+        // have is an extension on their client (#200.1), called on the client the app registers.
+        new(typeof(ActivityLibraryClientExtensions), nameof(ActivityLibraryClientExtensions.DuplicateAsync), "POST", "api/activities/{id}/duplicate",
+            h => LibraryServices.CallAsync<ActivityEntity, string?>(h, c => c.DuplicateAsync(Id))),
 
         new(typeof(EventService), nameof(EventService.GetAllAsync), "GET", "api/events", h => new EventService(h).GetAllAsync()),
         new(typeof(EventService), nameof(EventService.GetAsync), "GET", "api/events/{id}", h => new EventService(h).GetAsync(Id)),
@@ -85,7 +86,7 @@ public sealed class ServiceRouteContractTests
 
     private static readonly Type[] Services =
     [
-        typeof(ActivityService), typeof(EventService), typeof(SeriesService), typeof(EventMetricsClient), typeof(CommentClient),
+        typeof(ActivityLibraryClientExtensions), typeof(EventService), typeof(SeriesService), typeof(EventMetricsClient), typeof(CommentClient),
         typeof(LibraryClient<GameEntity>), typeof(LibraryClient<ThemeEntity>), typeof(LibraryClient<HolidayEntity>),
         typeof(LibraryClient<ActivityEntity>)
     ];
