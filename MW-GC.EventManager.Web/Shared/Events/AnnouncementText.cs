@@ -74,10 +74,11 @@ public static class AnnouncementText
     {
         var flat = (name ?? string.Empty).Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
         var start = flat.Length - flat.TrimStart().Length;
-        var digits = start;
-        while (digits < flat.Length && char.IsAsciiDigit(flat[digits])) digits++;
+        // The index just past the leading run of digits (where the dot of "1." would sit).
+        var afterDigits = start;
+        while (afterDigits < flat.Length && char.IsAsciiDigit(flat[afterDigits])) afterDigits++;
         var marker = start < flat.Length && LineStart.Contains(flat[start]) ? start
-            : digits > start && digits < flat.Length && flat[digits] == '.' ? digits
+            : afterDigits > start && afterDigits < flat.Length && flat[afterDigits] == '.' ? afterDigits
             : -1;
         var text = new StringBuilder(flat.Length);
         for (var i = 0; i < flat.Length; i++)

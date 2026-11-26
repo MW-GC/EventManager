@@ -116,7 +116,7 @@ public sealed class AnnouncementTextEscapingTests
         Assert.HasCount(3, text.Split('\n'));
     }
 
-    // The seeded run-step name: both the bold and the mention are made safe at once.
+    // An Event name that both bolds a word and mentions everyone: the bold and the mention are made safe at once.
     [TestMethod]
     public void AStarAndEveryone_InOneName()
     {

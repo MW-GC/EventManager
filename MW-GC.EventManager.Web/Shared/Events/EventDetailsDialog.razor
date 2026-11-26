@@ -300,9 +300,13 @@
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", AnnouncementText.For(detail));
             if (_details.IsCurrent(token)) _announcementStatus = "Announcement copied.";
         }
-        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        catch (JSException)
         {
             if (_details.IsCurrent(token)) _announcementError = "The announcement could not be copied: the browser refused the clipboard.";
+        }
+        catch (JSDisconnectedException)
+        {
+            if (_details.IsCurrent(token)) _announcementError = "The announcement could not be copied: the connection to the browser was lost.";
         }
         finally
         {
