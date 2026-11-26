@@ -105,9 +105,10 @@
     private List<Guid> _custThemeIds = [];
     private List<Guid> _custHolidayIds = [];
     private bool _custUniqueGames = true;
-    // The players tonight and longest duration boxes (#98): off with every opening, never saved with the Event.
+    // The players tonight and longest duration boxes (#98): off with every opening (an unrolled Occurrence's then take its
+    // Series' values, EventEditDialog.razor.cs), never saved with the Event.
     private PlayersDurationFilters _playersDuration = new();
-    // The avoid-recent switch and box (#95): off with every opening, never saved with the Event.
+    // The avoid-recent switch and box (#95): off with every opening (as above), never saved with the Event.
     private AvoidRecentFilter _avoidRecent = new();
     // The slots and every rule that fills them; the dialog keeps only what its inputs bind.
     private readonly SlotPlanner _planner = new(Random.Shared);
@@ -166,6 +167,7 @@
         SyncFilter();
         _planner.SetSlots([]);
         _planner.AddSlotError = null;
+        _planner.StartingSlotCount = SlotPlanner.DefaultSlotCount;
         _planner.RandomizeAll();
         _showCustomize = true;
         _customize.Open(CustomizeFields);
@@ -196,6 +198,8 @@
         _planner.AddSlotError = null;
         _showCustomize = true;
         _customize.Open(CustomizeFields);
+        // An Occurrence not rolled yet starts from its Series' slot template once the read is in (#204, #237).
+        StartFromSeriesOf(e);
         _ = Focus.RememberAsync($"edit-{e.Id}");
     }
 
