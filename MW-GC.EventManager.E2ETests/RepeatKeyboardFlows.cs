@@ -40,7 +40,7 @@ public sealed class RepeatKeyboardFlows
         await TabOutOfAsync(page, time, repeat);
 
         // Space turns it on and shows the rule select, which Tab reaches straight after it.
-        await page.Keyboard.PressAsync("Space");
+        await PressAsync(page, "Space");
         await Expect(repeat).ToHaveAttributeAsync("aria-checked", "true", new() { Timeout = UiTimeoutMs });
         var rule = Control(page, AriaRole.Combobox, "Repeats");
         await Expect(rule).ToBeVisibleAsync(new() { Timeout = UiTimeoutMs });
@@ -51,15 +51,15 @@ public sealed class RepeatKeyboardFlows
         // the script is ready, so the flow waits for the script, and for the page to have taken it, before the
         // first key goes to a select.
         await (await selectScript).FinishedAsync();
-        await page.EvaluateAsync("() => new Promise(done => setTimeout(done, 0))");
+        await FlushTimersAsync(page);
         await TabAsync(page, rule);
         await TabAsync(page, Control(page, AriaRole.Textbox, "Ends on (optional)"));
 
         // Monthly on the nth weekday by arrow keys: its two selects come between the rule and the end date.
         await rule.FocusAsync();
-        await page.Keyboard.PressAsync("ArrowDown");
+        await PressAsync(page, "ArrowDown");
         await Expect(rule).ToHaveJSPropertyAsync("value", "BiWeekly", new() { Timeout = UiTimeoutMs });
-        await page.Keyboard.PressAsync("ArrowDown");
+        await PressAsync(page, "ArrowDown");
         await Expect(rule).ToHaveJSPropertyAsync("value", "MonthlyNthWeekday", new() { Timeout = UiTimeoutMs });
         var week = Control(page, AriaRole.Combobox, "Week of the month");
         await Expect(week).ToBeVisibleAsync(new() { Timeout = UiTimeoutMs });
@@ -70,10 +70,10 @@ public sealed class RepeatKeyboardFlows
 
         // Yearly on a holiday by Enter, End and Enter: the holiday preset replaces them.
         await rule.FocusAsync();
-        await page.Keyboard.PressAsync("Enter");
+        await PressAsync(page, "Enter");
         await Expect(rule).ToHaveAttributeAsync("aria-expanded", "true", new() { Timeout = UiTimeoutMs });
-        await page.Keyboard.PressAsync("End");
-        await page.Keyboard.PressAsync("Enter");
+        await PressAsync(page, "End");
+        await PressAsync(page, "Enter");
         var preset = Control(page, AriaRole.Combobox, "Holiday preset");
         await Expect(preset).ToBeVisibleAsync(new() { Timeout = UiTimeoutMs });
         await Expect(week).ToHaveCountAsync(0, new() { Timeout = UiTimeoutMs });
@@ -83,7 +83,7 @@ public sealed class RepeatKeyboardFlows
 
         // Space on the switch turns it off again and the rule select goes.
         await repeat.FocusAsync();
-        await page.Keyboard.PressAsync("Space");
+        await PressAsync(page, "Space");
         await Expect(repeat).ToHaveAttributeAsync("aria-checked", "false", new() { Timeout = UiTimeoutMs });
         await Expect(rule).ToHaveCountAsync(0, new() { Timeout = UiTimeoutMs });
     });
@@ -91,10 +91,26 @@ public sealed class RepeatKeyboardFlows
     private static ILocator Control(IPage page, AriaRole role, string name) =>
         page.GetByRole(role, new() { Name = name, Exact = true });
 
+    // A FluentSelect's key handler waits 1 ms and then calls its script; if the select has been removed by then (the
+    // switch turned off, the rule changed) that call throws ObjectDisposedException and the page's error boundary
+    // replaces the page, so the switch the flow expects off is gone (#277). The browser runs queued input before
+    // timers, so the next key can overtake that wait. Every key goes through here, and the timer round trip after it
+    // lets the handler's wait finish, and its call go out, before the next key can remove the select.
+    private static async Task PressAsync(IPage page, string key)
+    {
+        await page.Keyboard.PressAsync(key);
+        await FlushTimersAsync(page);
+    }
+
+    // A 2 ms timer set now fires after every 1 ms timer already waiting, the selects' key-handler waits among them,
+    // and the page runs each of those waits' continuation (the script call) as the timer fires.
+    private static Task FlushTimersAsync(IPage page) =>
+        page.EvaluateAsync("() => new Promise(done => setTimeout(done, 2))");
+
     // One Tab must land on the next control.
     private static async Task TabAsync(IPage page, ILocator next)
     {
-        await page.Keyboard.PressAsync("Tab");
+        await PressAsync(page, "Tab");
         await Expect(next).ToBeFocusedAsync(new() { Timeout = UiTimeoutMs });
     }
 
@@ -103,7 +119,7 @@ public sealed class RepeatKeyboardFlows
     private static async Task TabOutOfAsync(IPage page, ILocator box, ILocator next)
     {
         Assert.IsTrue(await HoldsFocusAsync(box), "The flow could not put focus in the box it tabs out of.");
-        for (var i = 0; i < 8 && await HoldsFocusAsync(box); i++) await page.Keyboard.PressAsync("Tab");
+        for (var i = 0; i < 8 && await HoldsFocusAsync(box); i++) await PressAsync(page, "Tab");
         await Expect(next).ToBeFocusedAsync(new() { Timeout = UiTimeoutMs });
     }
 
