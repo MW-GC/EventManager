@@ -114,7 +114,7 @@ public partial class EventEditDialog
             if (!_customize.IsCurrent(token) || _confirm is not null) return true;
         }
         _scope = SeriesEdit.Question(change, occurrence.Name, occurrence.Date,
-            () => SendAsync(() => EventSvc.UpdateAsync(entity)),
+            () => SendAsync(() => EventSvc.UpdateAsync(entity, occurrence.ETag)),
             first ? null : () => RunAsync(() => UpdateSeriesAsync(occurrence, read, edits, SeriesScope.Following)),
             () => RunAsync(() => UpdateSeriesAsync(occurrence, read, edits, SeriesScope.All)));
         return true;

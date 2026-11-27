@@ -131,11 +131,11 @@
         if (e.SeriesId is { } seriesId)
         {
             _scope = ScopeRequest.CancelOccurrence(e.Name, e.Date,
-                () => _rows.RunAsync(e.Id, () => Delete(e.Id)),
+                () => _rows.RunAsync(e.Id, () => Delete(e)),
                 () => _rows.RunAsync(e.Id, () => CancelSeries(seriesId)));
             return;
         }
-        _confirm = ConfirmRequest.Delete("Delete event", $"Delete {e.Name}? This cannot be undone.", () => _rows.RunAsync(e.Id, () => Delete(e.Id)));
+        _confirm = ConfirmRequest.Delete("Delete event", $"Delete {e.Name}? This cannot be undone.", () => _rows.RunAsync(e.Id, () => Delete(e)));
     }
 
     private async Task ScopeConfirmed(ScopeRequest scope, ScopeOption option)
@@ -172,9 +172,11 @@
         if (!confirm.OverDialog) _ = Focus.RestoreAsync();
     }
 
-    private async Task Delete(Guid id)
+    // Under the row's eTag (#204 story 22): an Event another admin saved since the list was read is the API's 409.
+    // The Series cancel has no Series tag on the row, so it sends none.
+    private async Task Delete(EventEntity e)
     {
-        var error = await ApiResult.SendAsync(() => EventSvc.DeleteAsync(id));
+        var error = await ApiResult.SendAsync(() => EventSvc.DeleteAsync(e.Id, e.ETag));
         _actionError = error is null ? null : $"The event was not deleted. {error}";
         if (error is not null) return;
         await RefreshEvents();

@@ -365,7 +365,8 @@
             var detail = _detailEvent;
             var previous = detail.WinnerActivityId;
             detail.WinnerActivityId = activityId;
-            var error = await ApiResult.SendAsync(() => EventSvc.UpdateAsync(detail));
+            // Under the eTag of the Event this dialog shows (#204 story 22): a stale one is the API's 409.
+            var error = await ApiResult.SendAsync(() => EventSvc.UpdateAsync(detail, detail.ETag));
             if (error is not null)
             {
                 // Not saved: put the previous winner back so the dialog and the list stay truthful.

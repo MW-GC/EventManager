@@ -51,12 +51,6 @@ public sealed class AccessibleNamesTests : IDisposable
 
     public void Dispose() => harness.Dispose();
 
-    private static Selection Pick(GameEntity game, ActivityEntity act) => new()
-    {
-        Game = new Game { Id = game.Id, Name = game.Name },
-        Activity = new Activity { Id = act.Id, GameId = act.GameId, Name = act.Name }
-    };
-
     // ---- Icon-only buttons -------------------------------------------------------------------
 
     [TestMethod]

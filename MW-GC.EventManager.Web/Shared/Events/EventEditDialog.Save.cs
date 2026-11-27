@@ -85,7 +85,8 @@ public partial class EventEditDialog
         entity.NormalizeWinner();
         // An Occurrence with a change asks which events take it first (#204).
         if (await AskScopeAsync(entity)) return;
-        await SendAsync(() => _editingEvent is not null ? EventSvc.UpdateAsync(entity) : EventSvc.SaveAsync(entity, _createKey));
+        // An edit goes under the eTag of the Event the dialog opened (story 22): a stale one is the API's 409.
+        await SendAsync(() => _editingEvent is not null ? EventSvc.UpdateAsync(entity, _editingEvent.ETag) : EventSvc.SaveAsync(entity, _createKey));
     }
 
     // The Series a create with Repeat on sends (#204): the start exactly as the Event's, its offset kept (the Series'
