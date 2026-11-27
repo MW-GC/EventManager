@@ -58,4 +58,26 @@ public sealed class FirstOccurrenceTests
         ["2027-01-01T19:00:00-06:00"],
         Generate(RecurrenceRule.AnnualHoliday(HolidayPreset.NewYearsDay),
             first: "2026-12-10T19:00:00-06:00", now: "2026-12-01T12:00:00-06:00"));
+
+    // The picked date is New Year's Day itself, so the anchor is the holiday rule's own date and is made.
+    [TestMethod]
+    public void An_annual_holiday_matching_the_anchor_makes_the_picked_instant_itself() => Assert.AreEqual(
+        "2027-01-01T19:00:00-06:00",
+        Generate(RecurrenceRule.AnnualHoliday(HolidayPreset.NewYearsDay),
+            first: "2027-01-01T19:00:00-06:00", now: "2026-12-01T12:00:00-06:00")[0]);
+
+    // Now is 1 April at 00:30 at -05:00, which is still 31 March at 23:30 at the Series' -06:00, so 31 March's
+    // Occurrence is still ahead and is made; every date stays at the Series' winter offset.
+    [TestMethod]
+    public void A_monthly_same_date_keeps_the_series_winter_offset_after_spring_DST() => AreEqual(
+        ["2027-03-31T23:45:00-06:00", "2027-04-30T23:45:00-06:00"],
+        Generate(new RecurrenceRule(RecurrenceKind.MonthlySameDate),
+            first: "2027-01-31T23:45:00-06:00", now: "2027-04-01T00:30:00-05:00"));
+
+    // Now is written at the winter -06:00 after the autumn change; the dates stay at the Series' summer -05:00.
+    [TestMethod]
+    public void A_monthly_same_date_keeps_the_series_summer_offset_after_autumn_DST() => AreEqual(
+        ["2026-11-22T23:45:00-05:00", "2026-12-22T23:45:00-05:00"],
+        Generate(new RecurrenceRule(RecurrenceKind.MonthlySameDate),
+            first: "2026-09-22T23:45:00-05:00", now: "2026-11-02T00:30:00-06:00"));
 }
