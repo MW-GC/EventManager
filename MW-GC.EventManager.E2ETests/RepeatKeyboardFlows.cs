@@ -20,10 +20,15 @@ namespace MW_GC.EventManager.E2ETests;
 [TestClass]
 public sealed class RepeatKeyboardFlows
 {
+    // The script every FluentSelect imports once it has rendered; its key handler needs it.
+    private const string SelectScript = "ListComponentBase.razor.js";
+
     [TestMethod]
     public Task Tab_ReachesTheRepeatSwitch_ThenEachRuleSelectAndTheEndDate_AndTheKeyboardWorksThem() => RunAsync(async session =>
     {
         var page = session.Page;
+        // Started before the page loads, so the one request the selects' script makes cannot be missed.
+        var selectScript = page.WaitForResponseAsync(r => r.Url.Contains(SelectScript, StringComparison.Ordinal));
         await session.OpenEventsPageAsync();
         await session.Button("Create Event").ClickAsync();
         await Expect(session.Dialog("Customize Event")).ToBeVisibleAsync(new() { Timeout = UiTimeoutMs });
@@ -38,6 +43,15 @@ public sealed class RepeatKeyboardFlows
         await page.Keyboard.PressAsync("Space");
         await Expect(repeat).ToHaveAttributeAsync("aria-checked", "true", new() { Timeout = UiTimeoutMs });
         var rule = Control(page, AriaRole.Combobox, "Repeats");
+        await Expect(rule).ToBeVisibleAsync(new() { Timeout = UiTimeoutMs });
+
+        // Any key pressed while a FluentSelect holds focus (Tab included) runs its key handler, which throws if the
+        // select's script has not loaded yet (its script reference is still null); the page's error boundary then
+        // replaces the whole page and the select is gone (#277). The select is visible and focusable well before
+        // the script is ready, so the flow waits for the script, and for the page to have taken it, before the
+        // first key goes to a select.
+        await (await selectScript).FinishedAsync();
+        await page.EvaluateAsync("() => new Promise(done => setTimeout(done, 0))");
         await TabAsync(page, rule);
         await TabAsync(page, Control(page, AriaRole.Textbox, "Ends on (optional)"));
 
