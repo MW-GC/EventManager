@@ -229,7 +229,7 @@
 
     // The Cancel button closes at once without asking, but never while the save runs.
     private void CancelCustomize() { if (!_generating) CloseCustomize(); }
-    private void CloseCustomize() { _showCustomize = false; _customize.Close(); _ = Focus.RestoreAsync(); }
+    internal void CloseCustomize() { _showCustomize = false; _customize.Close(); _ = Focus.RestoreAsync(); }
     // Overlay click or Escape. A clean dialog closes once the slot selects are done with the same Escape (#105).
     private Task DismissCustomize()
     {

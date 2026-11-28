@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Reflection;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
@@ -227,7 +226,10 @@ public sealed class DialogSafetyTests : DialogSafetyFixture
         // The click may still be queued behind other renderer work, so wait for the save's render.
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
 
-        await CloseThrough(page, page.FindComponent<EventEditDialog>().Instance, "CloseCustomize");
+        // No page event can close the dialog during a save, so its own close runs as an event handler would: through
+        // an EventCallback on the dialog, which renders it after.
+        var edit = page.FindComponent<EventEditDialog>().Instance;
+        await page.InvokeAsync(() => EventCallback.Factory.Create(edit, edit.CloseCustomize).InvokeAsync());
         Assert.IsFalse(page.HasFormDialog());
         await RowButton(page, "Party", "Edit").ClickAsync(new());
         await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Party typed" });
@@ -344,12 +346,4 @@ public sealed class DialogSafetyTests : DialogSafetyFixture
 
     private static List<IElement> WinnerButtons(IRenderedComponent<IComponent> page) =>
         page.FormDialog().QuerySelectorAll("fluent-button").Where(b => b.TextContent.Trim() == "Select Winner").ToList();
-
-    // Runs a private close method of a component inside the page (the Event edit dialog), then renders, as an event
-    // handler would. No page event can reach it during a save.
-    private static Task CloseThrough(IRenderedComponent<IComponent> page, IComponent component, string method) => page.InvokeAsync(() =>
-    {
-        component.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, []);
-        component.GetType().GetMethod("StateHasChanged", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, []);
-    });
 }
