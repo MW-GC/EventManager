@@ -321,7 +321,7 @@
     // The Close button closes at once without asking, but never while Select Winner, a metrics save or a
     // Comment request runs.
     private void CancelDetails() { if (!Busy) CloseDetails(); }
-    private void CloseDetails() { _detailEvent = null; _commentsPanel = null; _details.Close(); _ = Focus.RestoreAsync(); }
+    internal void CloseDetails() { _detailEvent = null; _commentsPanel = null; _details.Close(); _ = Focus.RestoreAsync(); }
     // Overlay click or Escape: unsaved Comment text or unsaved Event metrics ask first.
     private void DismissDetails() =>
         _confirm = ConfirmRequest.ForDismiss(_confirm, Busy, _commentsPanel?.IsDirty == true || _metrics?.IsDirty == true, CloseDetails);

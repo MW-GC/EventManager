@@ -1,5 +1,4 @@
 using System.Net;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using AngleSharp.Dom;
@@ -214,7 +213,8 @@ public sealed class EventsPageWiringTests : IDisposable
 
     // EventEditDialog ActionError: a save that fails after its dialog was closed shows in the page's dismissable
     // error bar. While a save runs no page event closes the dialog (Cancel and Escape wait), so the test closes it
-    // through the dialog's own close method, as DialogSafetyTests does.
+    // through the dialog's own close method, as an EventCallback on the dialog (which renders it after), as
+    // DialogSafetyTests does.
     [TestMethod]
     public async Task AnEditSaveFailingAfterItsDialogClosed_ShowsInThePagesErrorBar()
     {
@@ -224,7 +224,8 @@ public sealed class EventsPageWiringTests : IDisposable
         await EventName(page).ChangeAsync(new ChangeEventArgs { Value = "Game night renamed" });
         var save = page.FormDialog().Button("Update Event").ClickAsync(new());
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Cancel").IsBusy()));
-        await CloseThrough(page, page.FindComponent<EventEditDialog>().Instance, "CloseCustomize");
+        var edit = page.FindComponent<EventEditDialog>().Instance;
+        await page.InvokeAsync(() => EventCallback.Factory.Create(edit, edit.CloseCustomize).InvokeAsync());
 
         gate.SetResult();
         await save;
@@ -242,7 +243,8 @@ public sealed class EventsPageWiringTests : IDisposable
         await RowButton(page, "Game night", "Details").ClickAsync(new());
         var select = Card(page, "Stock").Button("Select Winner").ClickAsync(new());
         page.WaitForAssertion(() => Assert.IsTrue(page.FormDialog().Button("Close").IsBusy()));
-        await CloseThrough(page, page.FindComponent<EventDetailsDialog>().Instance, "CloseDetails");
+        var details = page.FindComponent<EventDetailsDialog>().Instance;
+        await page.InvokeAsync(() => EventCallback.Factory.Create(details, details.CloseDetails).InvokeAsync());
 
         gate.SetResult();
         await select;
@@ -281,13 +283,6 @@ public sealed class EventsPageWiringTests : IDisposable
         bar.Button("Dismiss").Click();
         page.WaitForAssertion(() => Assert.IsEmpty(page.PageAlerts()));
     }
-
-    // Runs a dialog's own close method, then renders, as an event handler would.
-    private static Task CloseThrough(IRenderedComponent<Events> page, IComponent dialog, string method) => page.InvokeAsync(() =>
-    {
-        dialog.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(dialog, []);
-        dialog.GetType().GetMethod("StateHasChanged", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(dialog, []);
-    });
 
     // Serialized when answered, so a later change to the stored list never alters an answer already sent.
     private static HttpResponseMessage Answer<T>(HttpStatusCode status, T body) =>
