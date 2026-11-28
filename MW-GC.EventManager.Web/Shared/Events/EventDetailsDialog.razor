@@ -274,6 +274,10 @@
             {
                 if (_details.IsCurrent(token)) _feedbackLinkStatus = "Copy the feedback link from the box below.";
             }
+            catch (JSDisconnectedException)
+            {
+                if (_details.IsCurrent(token)) _feedbackLinkError = "The feedback link could not be copied: the connection to the browser was lost.";
+            }
         }
         finally
         {
