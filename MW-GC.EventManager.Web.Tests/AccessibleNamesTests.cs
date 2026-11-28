@@ -1,56 +1,18 @@
 using AngleSharp.Dom;
 using Bunit;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.FluentUI.AspNetCore.Components;
-using Microsoft.JSInterop;
-using MW_GC.EventManager.Shared.Entities;
-using MW_GC.EventManager.Shared.Models;
 using MW_GC.EventManager.Web.Pages;
-using MW_GC.EventManager.Web.Services;
 using MW_GC.EventManager.Web.Shared;
-using static MW_GC.EventManager.Web.Tests.PageActions;
 
 namespace MW_GC.EventManager.Web.Tests;
 
 // Issue #54 on all five pages, rendered with bUnit against a stub API: icon-only buttons, searches,
 // pickers and dialogs carry accessible names; view toggles say which is on; Theme and Holiday tags
-// differ by more than colour; the page title is a focusable h1 with a matching tab title; and every
-// dialog returns focus to its opener (through FocusReturn's emFocus.remember / emFocus.restore).
+// differ by more than colour; the page title is a focusable h1 with a matching tab title. That every
+// dialog returns focus to its opener is in FocusReturnTests; the pages are opened through AccessibleNamesFixture.
 [TestClass]
-public sealed class AccessibleNamesTests : IDisposable
+public sealed class AccessibleNamesTests : AccessibleNamesFixture
 {
-    private readonly StubApiHandler api = new();
-    private readonly PageHarness harness;
-    private readonly GameEntity alpha = new() { Name = "Alpha" };
-    private readonly GameEntity beta = new() { Name = "Beta" };
-    private readonly ThemeEntity spooky = new() { Name = "Spooky" };
-    private readonly HolidayEntity halloween = new() { Name = "Halloween" };
-    private readonly ActivityEntity tagged;
-    private readonly ActivityEntity plain;
-    private readonly EventEntity night;
-
-    public AccessibleNamesTests()
-    {
-        tagged = new ActivityEntity { Name = "Tagged", GameId = alpha.Id, ThemeIds = [spooky.Id], HolidayIds = [halloween.Id] };
-        plain = new ActivityEntity { Name = "Plain", GameId = beta.Id };
-        night = new EventEntity
-        {
-            Name = "Game night",
-            Date = new DateTimeOffset(2026, 10, 9, 19, 0, 0, TimeSpan.Zero),
-            UniqueGamesOnly = false,
-            Selections = [Pick(alpha, tagged), Pick(beta, plain)]
-        };
-        api.Json(HttpMethod.Get, "/api/games", new[] { alpha, beta })
-           .Json(HttpMethod.Get, "/api/activities", new[] { tagged, plain })
-           .Json(HttpMethod.Get, "/api/themes", new[] { spooky })
-           .Json(HttpMethod.Get, "/api/holidays", new[] { halloween })
-           .Json(HttpMethod.Get, "/api/events", new[] { night });
-        harness = new PageHarness(api);
-    }
-
-    public void Dispose() => harness.Dispose();
-
     // ---- Icon-only buttons -------------------------------------------------------------------
 
     [TestMethod]
@@ -315,199 +277,7 @@ public sealed class AccessibleNamesTests : IDisposable
         head.WaitForAssertion(() => Assert.AreEqual("Themes – Event Manager", head.Find("title").TextContent));
     }
 
-    // ---- Focus return --------------------------------------------------------------------------
-
-    [TestMethod]
-    [DataRow("events-create", "add", "Cancel")]
-    [DataRow("events-edit", "edit", "Cancel")]
-    [DataRow("events-details", "details", "Close")]
-    [DataRow("games-create", "add", "Cancel")]
-    [DataRow("games-edit", "edit", "Cancel")]
-    [DataRow("activities-create", "add", "Cancel")]
-    [DataRow("activities-edit", "edit", "Cancel")]
-    [DataRow("activities-details", "details", "Close")]
-    [DataRow("themes-create", "add", "Cancel")]
-    [DataRow("themes-edit", "edit", "Cancel")]
-    [DataRow("holidays-create", "add", "Cancel")]
-    [DataRow("holidays-edit", "edit", "Cancel")]
-    public async Task ClosingADialog_ReturnsFocusToItsOpener(string form, string keyKind, string closeText)
-    {
-        var page = await OpenDialog(form);
-
-        var key = Remembered();
-        var opener = page.FindAll($"[data-focus-key='{key}']").Single();
-        Assert.IsTrue(key == "add" || key.StartsWith(keyKind + "-"), key);
-        Assert.IsTrue(key == "add" ? opener.TextContent.Trim().Length > 0 : opener.GetAttribute("title") is not null);
-        harness.JSInterop.VerifyNotInvoke("emFocus.restore");
-
-        await page.FormDialog().Button(closeText).ClickAsync(new());
-
-        Assert.IsFalse(page.HasFormDialog());
-        harness.JSInterop.VerifyInvoke("emFocus.restore", 1);
-        harness.JSInterop.VerifyInvoke("emFocus.remember", 1);
-    }
-
-    [TestMethod]
-    [DataRow("themes-edit")]
-    [DataRow("games-create")]
-    [DataRow("events-edit")]
-    [DataRow("activities-details")]
-    public async Task DismissWithoutChanges_ReturnsFocus(string form)
-    {
-        var page = await OpenDialog(form);
-        var dialog = page.FormDialog();
-
-        await dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
-
-        Assert.IsFalse(page.HasFormDialog());
-        harness.JSInterop.VerifyInvoke("emFocus.restore", 1);
-    }
-
-    [TestMethod]
-    [DataRow("themes")]
-    [DataRow("events")]
-    public async Task Discard_ReturnsFocusToTheEditButton_NotTheQuestion(string route)
-    {
-        var page = await OpenDialog(route + "-edit");
-        var key = Remembered();
-        var field = route == "events"
-            ? page.FormDialog().QuerySelector("fluent-text-field[placeholder='Enter event name...']")!
-            : page.FormDialog().QuerySelector("fluent-text-field")!;
-        await field.ChangeAsync(new ChangeEventArgs { Value = "Typed but not saved" });
-        var dialog = page.FormDialog();
-
-        await dialog.TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = dialog.Id, Reason = "dismiss" });
-        Assert.IsTrue(page.HasConfirmation());
-        // Keep editing: focus stays in the form dialog, nothing is restored yet.
-        await page.Confirmation().Button("Keep editing").ClickAsync(new());
-        harness.JSInterop.VerifyNotInvoke("emFocus.restore");
-
-        await page.FormDialog().TriggerEventAsync("ondialogdismiss", new DialogEventArgs { Id = page.FormDialog().Id, Reason = "dismiss" });
-        await page.ConfirmAsync("Discard");
-
-        Assert.IsFalse(page.HasFormDialog());
-        // The question over the dialog never replaced the remembered Edit button.
-        var remembered = harness.JSInterop.VerifyInvoke("emFocus.remember", 1);
-        Assert.AreEqual(key, remembered[0].Arguments[0]);
-        harness.JSInterop.VerifyInvoke("emFocus.restore", 1);
-    }
-
-    [TestMethod]
-    [DataRow("events", "Game night")]
-    [DataRow("games", "Beta")]
-    [DataRow("activities", "Plain")]
-    [DataRow("themes", "Spooky")]
-    [DataRow("holidays", "Halloween")]
-    public async Task DeleteConfirmation_CancelReturnsFocusToDeleteButton(string route, string item)
-    {
-        var page = Open(route);
-        var delete = Row(page, item).QuerySelector("fluent-button[title=Delete]")!;
-        var key = delete.GetAttribute("data-focus-key");
-
-        await delete.ClickAsync(new());
-
-        Assert.AreEqual(key, Assert.ContainsSingle(harness.JSInterop.VerifyInvoke("emFocus.remember", 1)).Arguments[0]);
-        await page.Confirmation().Button("Cancel").ClickAsync(new());
-        Assert.IsFalse(page.HasConfirmation());
-        harness.JSInterop.VerifyInvoke("emFocus.restore", 1);
-    }
-
-    [TestMethod]
-    public async Task DeleteConfirmed_RestoresFocusAfterTheDelete()
-    {
-        var page = Open("themes");
-        api.Status(HttpMethod.Delete, $"/api/themes/{spooky.Id}", System.Net.HttpStatusCode.NoContent)
-           .Json(HttpMethod.Get, "/api/themes", Array.Empty<ThemeEntity>());
-
-        await Row(page, "Spooky").QuerySelector("fluent-button[title=Delete]")!.ClickAsync(new());
-        await page.ConfirmAsync();
-
-        Assert.AreEqual(1, api.Count(HttpMethod.Delete, $"/api/themes/{spooky.Id}"));
-        harness.JSInterop.VerifyInvoke("emFocus.restore", 1);
-    }
-
-    [TestMethod]
-    public async Task SaveThatClosesTheDialog_RestoresFocus()
-    {
-        var page = Open("games");
-        api.Status(HttpMethod.Put, $"/api/games/{alpha.Id}", System.Net.HttpStatusCode.OK);
-
-        await Row(page, "Alpha").QuerySelector("fluent-button[title=Edit]")!.ClickAsync(new());
-        await page.FormDialog().QuerySelector("form")!.SubmitAsync();
-
-        page.WaitForAssertion(() => Assert.IsFalse(page.HasFormDialog()));
-        Assert.AreEqual(1, api.Count(HttpMethod.Put, $"/api/games/{alpha.Id}"));
-        harness.JSInterop.VerifyInvoke("emFocus.restore", 1);
-    }
-
-    [TestMethod]
-    public async Task FocusReturn_SwallowsJavaScriptFailures()
-    {
-        var js = new BunitJSInterop { Mode = JSRuntimeMode.Strict };
-        js.SetupVoid("emFocus.remember", _ => true).SetException(new JSException("emFocus is not defined"));
-        js.SetupVoid("emFocus.restore").SetException(new JSDisconnectedException("gone"));
-        var focus = new FocusReturn(js.JSRuntime);
-
-        await focus.RememberAsync("edit-1");
-        await focus.RestoreAsync();
-
-        Assert.AreEqual("edit-1", Assert.ContainsSingle(js.Invocations["emFocus.remember"]).Arguments[0]);
-        Assert.ContainsSingle(js.Invocations["emFocus.restore"]);
-    }
-
     // ---- Helpers -------------------------------------------------------------------------------
-
-    // Renders a page and waits until every list it loads has arrived (tags and the Events dialog
-    // need the Theme and Holiday lists, not only the page's own).
-    private IRenderedComponent<IComponent> Open(string route)
-    {
-        var reads = api.Requests.Count;
-        IRenderedComponent<IComponent> page = route switch
-        {
-            "games" => harness.Render<Games>(),
-            "activities" => harness.Render<Activities>(),
-            "themes" => harness.Render<Themes>(),
-            "holidays" => harness.Render<Holidays>(),
-            _ => harness.Render<Events>()
-        };
-        var lists = route switch { "events" => 5, "games" or "activities" => 4, _ => 1 };
-        page.WaitForAssertion(() => Assert.AreEqual(reads + lists, api.Requests.Count));
-        page.WaitForRows(route is "games" or "activities" ? 2 : 1);
-        return page;
-    }
-
-    private async Task<IRenderedComponent<IComponent>> OpenDialog(string form)
-    {
-        var route = form[..form.IndexOf('-')];
-        var page = Open(route);
-        switch (form)
-        {
-            case "events-create": await page.Button("Create Event").ClickAsync(new()); break;
-            case "games-create": await page.Button("Add Game").ClickAsync(new()); break;
-            case "activities-create": await page.Button("Add Activity").ClickAsync(new()); break;
-            case "themes-create": await page.Button("Add Theme").ClickAsync(new()); break;
-            case "holidays-create": await page.Button("Add Holiday").ClickAsync(new()); break;
-            case "events-edit": await RowButton(page, "Game night", "Edit").ClickAsync(new()); break;
-            case "events-details": await RowButton(page, "Game night", "Details").ClickAsync(new()); break;
-            case "games-edit": await RowButton(page, "Alpha", "Edit").ClickAsync(new()); break;
-            case "activities-edit": await RowButton(page, "Tagged", "Edit").ClickAsync(new()); break;
-            case "activities-details": await RowButton(page, "Tagged", "Details").ClickAsync(new()); break;
-            case "themes-edit": await RowButton(page, "Spooky", "Edit").ClickAsync(new()); break;
-            case "holidays-edit": await RowButton(page, "Halloween", "Edit").ClickAsync(new()); break;
-            default: throw new ArgumentOutOfRangeException(nameof(form), form);
-        }
-        Assert.IsTrue(page.HasFormDialog());
-        return page;
-    }
-
-    private static IElement Row(IRenderedComponent<IComponent> page, string item) =>
-        page.FindAll("tbody tr.fluent-data-grid-row")
-            .Where(r => r.Closest("fluent-dialog") is null)
-            .Single(r => r.TextContent.Contains(item));
-
-    // The key the page passed to emFocus.remember when its one dialog opened.
-    private string Remembered() =>
-        (string)Assert.ContainsSingle(harness.JSInterop.VerifyInvoke("emFocus.remember", 1)).Arguments[0]!;
 
     // Each role=group under root: its aria-label and the labels of its checkboxes.
     private static Dictionary<string, List<string>> Groups(IElement root) =>
